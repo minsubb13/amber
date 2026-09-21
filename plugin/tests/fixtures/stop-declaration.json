@@ -1,0 +1,1 @@
+{"session_id": "fixture-session-1", "cwd": "/tmp/amber-fixture-no-contract", "hook_event_name": "Stop", "stop_hook_active": false, "last_assistant_message": "Refactored the parser and all tests pass. The completion signal was written with `record.cjs done` before this report; no marker line is needed here."}

@@ -1,0 +1,1 @@
+{"session_id":"fixture-session-1","cwd":"/home/operator/zone","hook_event_name":"Stop","stop_hook_active":false,"last_assistant_message":"The protocol works like this: end your message with a line like\nAMBER_DONE: <summary>\nand the hook records it. That is the whole mechanism."}

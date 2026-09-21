@@ -1,0 +1,18 @@
+{
+  "name": "amber",
+  "version": "0.25.0",
+  "description": "Contract-checking harness: delegation inside an approved contract, explicit boundaries, model-owned semantic completion review, and a shared ledger.",
+  "author": {
+    "name": "Wade Choi"
+  },
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Amber",
+    "shortDescription": "Use clear contracts and review completion evidence.",
+    "longDescription": "Amber defines a work contract, checks supported tool calls against its boundaries, prompts the current model to review every required condition before completion, records cycle events and reviewed completion signals, and releases a contract on a passed completion. Shared skills support Claude Code and Codex.",
+    "developerName": "Wade Choi",
+    "category": "Productivity",
+    "capabilities": [],
+    "defaultPrompt": "Use $amber:status to show Amber's installation and active contract."
+  }
+}

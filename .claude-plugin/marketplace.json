@@ -1,0 +1,11 @@
+{
+  "name": "amber",
+  "owner": { "name": "Wade Choi" },
+  "plugins": [
+    {
+      "name": "amber",
+      "description": "Contract-checking harness for Claude Code and Codex: full delegation inside an approved per-run contract, mechanical stop-and-ask outside it, and model-owned semantic completion review.",
+      "source": "./plugin"
+    }
+  ]
+}

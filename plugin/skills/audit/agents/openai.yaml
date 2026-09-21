@@ -1,0 +1,6 @@
+interface:
+  display_name: "Amber Audit"
+  short_description: "Audit Amber's own mechanisms from the ledger and transcripts"
+
+policy:
+  allow_implicit_invocation: false

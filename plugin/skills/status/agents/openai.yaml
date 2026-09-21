@@ -1,0 +1,6 @@
+interface:
+  display_name: "Amber Status"
+  short_description: "Report Amber installation, sensors, and contract status"
+
+policy:
+  allow_implicit_invocation: false
