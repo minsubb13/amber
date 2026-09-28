@@ -208,8 +208,10 @@ the shape of a scripted review.
   refuses writes. Put the contract path, the verdict template path, and the
   commit to review in the request.
 - **From Codex, Claude Code reviews:**
-  `claude -p --permission-mode dontAsk --tools "Read,Grep,Glob" "<review request>"`.
-  The tool list carries no editor and no shell, so the session can only read.
+  `claude -p "<review request>" --permission-mode dontAsk --tools "Read,Grep,Glob"`.
+  The request comes right after `-p`; `--tools` takes several names and
+  would swallow a request placed after it. The tool list carries no editor
+  and no shell, so the session can only read.
 
 The reviewer writes nothing into the zone: capture its output and save it as
 the verdict file yourself, or ask for the verdict in the template's shape.

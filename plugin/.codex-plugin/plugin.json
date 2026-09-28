@@ -1,6 +1,6 @@
 {
   "name": "amber",
-  "version": "0.26.0",
+  "version": "0.26.1",
   "description": "Contract-checking harness: delegation inside an approved contract, explicit boundaries, model-owned semantic completion review, and a shared ledger.",
   "author": {
     "name": "Wade Choi"
