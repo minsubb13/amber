@@ -102,6 +102,23 @@ handed to the operator.
    in the main checkout. Units that may run in parallel (planning's loop-body
    material) get non-overlapping scopes; the plan says so in prose beside
    the rows. A `## Progress log` section follows for the model's dated notes.
+
+   Review unit: when planning settled an independent review, the plan
+   carries one review unit right before the integration unit, with
+   `after=` naming every deliverable unit. Calling the reviewer is that
+   unit's work, not its oracle - oracles are re-run, a model review is not
+   repeatable. The reviewer named in the contract reads the pinned commit,
+   the contract, the artifacts, and the evidence itself, read-only, and
+   its verdict is saved as `docs/YYYY-MM-DD-<slug>-review.md` in the shape
+   of this skill's `templates/review-verdict.md`. The unit's oracle checks
+   that file: it exists, carries a `Verdict:` line, every `F<n>` has a
+   disposition, and no MUST-FIX is open. Record each disposition with the
+   amber:mark skill (`finding - F<n> <finding> - <disposition>`); a fix
+   re-runs the affected oracles and is re-reviewed; a MUST-FIX that stays
+   disputed on a required condition means not complete - bring it to the
+   operator. While the reviewer runs on another host, hold the unit with
+   `external: review by <host>`. The review unit's `unit verified
+   --evidence` states the number of review passes and the elapsed time.
 3. **Check.** Required slots present. Every `[machine: ...]` row parses:
    write-scope globs are zone-root-relative, bash-deny regexes compile,
    one machine tag per line. Test every bash-deny regex against one command

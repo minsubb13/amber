@@ -108,6 +108,18 @@ taking it over (resume) - that command registers this session as a driver.
    runs serially. The plan's last unit is the integration check in the
    main checkout after every worktree is merged.
 
+   Independent review unit: ask once per contract whether the plan carries
+   an independent review unit right before the integration unit (set's
+   "Review unit" convention). Recommend it when a completion condition
+   rests on operator judgment or on documents rather than on a mechanical
+   oracle, or when the change is hard to reverse or touches an interface
+   or security; recommend leaving it out when every condition has a
+   mechanical oracle and the change is small. The contract names the
+   reviewer - the other host of an Orca pair, a headless read-only call,
+   or a fresh subagent; Amber states only the independence rules (host
+   integration, "Independent reviewer"). Record the answer in the
+   contract's settled decisions.
+
    On the research route, the elicitation additionally covers, in order:
    the research question itself; candidate claims with the promote / hold /
    reject criteria the operator can pre-commit to; the one kill-question

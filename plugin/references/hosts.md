@@ -191,3 +191,27 @@ to the operator on either host, and no pointer is created without such an
 utterance in the operator's own message. The pointer schema and the approval
 boundary are identical on both hosts. Release needs no operator command
 either: a passed completion removes the pointer.
+
+## Independent reviewer (both hosts)
+
+A review unit (set, "Review unit") calls a reviewer that reads the pinned
+commit, the contract, the artifacts, and the evidence itself, read-only, in
+a fresh context. The contract names the reviewer; these are the call shapes
+on each host. In an Orca pair the other host's live session is the usual
+reviewer: dispatch the request there and hold the unit with
+`external: review by <host>`. The headless calls below are the fallback and
+the shape of a scripted review.
+
+- **From Claude Code, Codex reviews:**
+  `codex exec --sandbox read-only "<review request>"`
+  (or `codex review --commit <sha>` for a plain diff review). The sandbox
+  refuses writes. Put the contract path, the verdict template path, and the
+  commit to review in the request.
+- **From Codex, Claude Code reviews:**
+  `claude -p --permission-mode dontAsk --tools "Read,Grep,Glob" "<review request>"`.
+  The tool list carries no editor and no shell, so the session can only read.
+
+The reviewer writes nothing into the zone: capture its output and save it as
+the verdict file yourself, or ask for the verdict in the template's shape.
+Neither call may run Amber's recorder or start another review. Do not hand
+the reviewer the author's summary as the thing to review; hand it the commit.

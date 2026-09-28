@@ -11,8 +11,9 @@ All conditions must hold. Partial progress is not completion.
 
 1. <the deliverable and its required content>
 2. <...>
+3. <independent review, when planning settled one: `docs/YYYY-MM-DD-<slug>-review.md` by <reviewer named here>, no MUST-FIX open, every finding disposed - applied and re-reviewed, rejected with a reason, or brought to the operator>
 
-Verification (oracles): <what confirms each condition - tests, grep, format checks, operator judgment>
+Verification (oracles): <what confirms each condition - tests, grep, format checks, operator judgment>; <the review verdict file for condition 3>
 
 Not answered: <what this run does not cover>
 
@@ -41,6 +42,7 @@ Not answered: <what this run does not cover>
 - Incomplete, blocked, waiting, and status-only turns run no completion signal. The signal declares the contracted work unit itself complete, never that an assessment, report, or attempt finished [self-report]
 - The re-check result goes into `record.cjs done --review "<evidence summary>" --goal "<goal-test result>" --summary "<summary>"` (the last tool call; no marker line in the message). S2 checks only the signal, the pointer, the current contract link, and leftover worktrees; semantic completion is the model's judgment. On a pass the hook removes the pointer and progress.json [hook: S2]
 - Numbers and claims carry provenance (verified / quoted / unverified)
+- Independent review (when the plan carries a review unit): the reviewer reads the pinned commit, this contract, the artifacts, and the evidence itself, read-only; the author's summary is not authority. A finding names the condition it violates and its evidence. The reviewer's PASS replaces no operator gate, and a MUST-FIX disputed on a required condition means not complete [self-report]
 - Plan units transition only through `record.cjs unit` (`.amber/progress.json`); a stop while units are open is announced first with `amber:mark hold`. Parallel units run as subagents in worktrees; the main agent re-verifies each with the same oracle and merges last. A leftover worktree means not complete [hook: E1, S2]
 
 ## Question handling
