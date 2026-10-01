@@ -15,7 +15,6 @@ mapped, and the sensors are live.
 
 - Every question stands on a scanned fact and cites its evidence - no
   free-floating questionnaires.
-- No human verification step; the harness helps quietly.
 - The generated or mapped documents become settled only by operator
   approval - the model generates, the human fixes.
 
@@ -75,40 +74,26 @@ mapped, and the sensors are live.
    non-derivability filter everywhere: no sentence a reader could derive
    from code. Re-run semantics = re-map and report staleness.
 
-   Exit: every fixed-document role is filled or mapped to an existing asset.
+   Exit: every fixed-document role is generated, mapped to an existing
+   asset, or handled as the operator chose for a tracked file.
 4. **Sensors.** Two acts.
    - **Entry-document section.** Add the completion-signal protocol section
-     to the zone's current-host entry document. It requires the current
-     model to perform a fresh semantic review of the original request,
-     every required active-contract condition, current artifacts, and
-     validation evidence; missing, failed, stale, or unsuitable evidence
-     means no completion. When the work is genuinely complete, the model
-     runs, as its last tool call in the zone root,
+     to the zone's current-host entry document. It states, for that zone,
+     every rule of the run protocol's "Completion" - its no-signal rule
+     stated explicitly - and its approval boundary ("Approval"), writing the
+     signal out as the model's last tool call in the zone root:
      `node "<amber_plugin_root>/scripts/record.cjs" done --review "<concise evidence-based review result>" --summary "<one-line summary>"`,
-     adding `--goal "<goal-test result>"` under an active contract, then
-     ends the turn with the completion report (what was done and how, in
-     full). No marker line goes in the message. State explicitly that
-     incomplete, blocked, waiting, and status-only turns run no signal: it
-     declares the governed work unit itself complete and never means merely
-     that an assessment, report, or attempt finished. Explain that the Stop
-     hook consumes the signal and checks only the pointer, the contract it
-     names, and that no worktree remains - not semantic truth - and that a
-     passed completion under a contract releases the contract by itself
-     (pointer and progress.json removed), and that a contract is approved
-     by the operator's explicit approval utterance in conversation, after
-     which the model creates the pointer itself - the operator runs no shell
-     command for approval or release; relevant changes after review require
-     affected validation and review again. Pure Q&A, discussion, and status
-     responses run no signal and remain unaffected. Also state that cycle
-     events are recorded by invoking the amber:mark skill with args
-     "skip - ..." or "finding - ..." and following its host-specific
-     recording step (a zone whose entry document lacks this sentence loses
-     its findings). The run protocol's "Completion" holds the same rules
-     this section states.
+     adding `--goal "<goal-test result>"` under an active contract. State
+     also that pure Q&A, discussion, and status responses run no signal and
+     remain unaffected, and that cycle events are recorded by invoking the
+     amber:mark skill with args "skip - ..." or "finding - ..." and following
+     its host-specific recording step (a zone whose entry document lacks this
+     sentence loses its findings).
    - **Self-check.** Verify the sensors yourself - confirm the S0 opening
      reached your context, then check the operator-global state and ledger
-     for this session's records. The ledger and state live
-     operator-global, so nothing else is installed per zone.
+     for this session's records. No human verification step; the harness
+     helps quietly. The ledger and state live operator-global, so nothing
+     else is installed per zone.
 
    Exit: the entry document carries the section, and this session's S0
    opening and ledger records are confirmed.
@@ -120,6 +105,7 @@ mapped, and the sensors are live.
 
 ## Completion
 
-init is done when the operator has the oracle map, the tension list, and
-every document diff in front of them; nothing it generated or mapped is
-settled until the operator approves it.
+init is done when the goal above holds - oracle map, tension list, fixed
+documents present or mapped, sensors live - and step 5 has presented every
+diff; nothing it generated or mapped is settled until the operator approves
+it.

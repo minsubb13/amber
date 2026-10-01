@@ -18,8 +18,6 @@ disposition.
 
 - The verdicts are the operator's. Every number comes from the read-only
   helper (a missing ledger is zero rows).
-- Unavailable evidence stays unavailable: an absent transcript or an
-  unknown count never becomes zero events or a successful comparison.
 - Never quote transcript bodies: an event is its kind, time, and line number
   only.
 
@@ -82,7 +80,7 @@ disposition.
    five of the newest `sessions` lines with `completions` of at least 1 and
    `transcript=yes`, from either host. Run `session <id>` for each sample.
    Report absent transcripts and unknown outcome/Stop counts as unavailable
-   evidence.
+   evidence; never turn them into zero events or a successful comparison.
 
    Exit: every sample has its `session` output or is reported as
    unavailable.

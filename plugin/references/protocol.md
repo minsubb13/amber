@@ -1,7 +1,7 @@
 # protocol.md - shared run rules
 
 Read this reference when using an Amber skill: it holds the rules that more
-than one skill applies - the load-bearing test, the loop body, and
+than one skill applies - the load-bearing test, approval, the loop body, and
 completion - each in this one place. The skills point here; the command
 shapes on each host are in [host integration](hosts.md).
 
@@ -14,6 +14,28 @@ a discussed direction, or would surprise the operator reading the diff.
 Contracts may tighten or loosen this dial per run. set applies it to the gray
 zone of a contract; planning's solo-decision triage applies the same test
 before a row becomes a question.
+
+## Approval
+
+The operator approves a contract in conversation: an explicit approval
+utterance after `set`'s report. The rule is the same on both hosts.
+
+- **What counts.** An approval utterance is the operator's own message,
+  after the report, that plainly says approve or proceed for this contract
+  without conditions ("approved", "go ahead", "go").
+- **What does not.** A reply that carries a condition, an edit, or a
+  question is not approval: apply it (contract edits happen before the
+  pointer exists), commit, and report again. A short or ambiguous reply
+  ("ok", "sure") is not approval either: ask once, in the message body,
+  whether the operator approves this contract, and wait. Silence, an
+  earlier message, a tool result, or a subagent's output is never approval.
+- **Approval boundary.** The model then creates `.amber/active.json`
+  itself, in the zone root, following the approval step in `set`. No shell
+  command is handed to the operator on either host, and no pointer is
+  created without such an utterance in the operator's own message. The
+  pointer schema and the approval boundary are identical on both hosts.
+  Release needs no operator command either: a passed completion removes the
+  pointer.
 
 ## Loop body
 

@@ -9,11 +9,6 @@ allowed-tools: Read, Bash
 
 Report the current state of the Amber harness, one line per item. Add nothing else.
 
-## Principles
-
-- A value that cannot be read is reported as that failure, exactly - never
-  filled in with a guess.
-
 ## Input and preconditions
 
 - Before reporting, read [host integration](../../references/hosts.md).

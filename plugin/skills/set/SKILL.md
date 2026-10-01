@@ -8,16 +8,13 @@ allowed-tools: Read, Bash, Write, Edit
 
 set turns the settled material of a planning dialogue into two documents - a
 contract that freezes the boundary and a plan that stays revisable - reports
-its understanding, and waits. Approval = the operator's explicit approval
-utterance in conversation; this skill prepares everything, reports, waits for
-that utterance, and only then creates the pointer itself.
+its understanding, waits for the operator's approval utterance (run
+protocol, "Approval"), and only then creates the pointer itself.
 
 ## Principles
 
-- No shell command is handed to the operator, and no pointer is created
-  without an approval utterance (step 6).
 - Every edit must happen before the pointer exists; from then on the tamper
-  guard freezes the contract, and only the plan stays editable.
+  guard freezes the contract, while the plan stays editable.
 - The write list is scaffolding; the forbidden rows are the real boundary.
 
 ## Input and preconditions
@@ -147,8 +144,7 @@ that utterance, and only then creates the pointer itself.
    Report failures to the operator instead of silently rewriting
    intent-bearing content.
 
-   Exit: every check above passes, or its failure is reported to the
-   operator.
+   Exit: every check above passes.
 4. **Finalize.** Fill the pin (start commit) and the approval line
    (`Approval: <operator> YYYY-MM-DD - verification state at approval: <wording>`),
    then commit both documents.
@@ -165,28 +161,17 @@ that utterance, and only then creates the pointer itself.
    and wait. Do not begin the run's work while the pointer does not exist.
 
    Exit: the report is in the conversation and the turn has ended.
-6. **Read the reply as approval only when it is one.** An approval
-   utterance is the operator's own message, after the report, that plainly
-   says approve or proceed for this contract without conditions
-   ("approved", "go ahead", "go").
-   - A reply that carries a condition, an edit, or a question is not
-     approval: apply it (contract edits happen before the pointer exists),
-     commit, and report again.
-   - A short or ambiguous reply ("ok", "sure") is not approval either: ask
-     once, in the message body, whether the operator approves this
-     contract, and wait.
-   - Silence, an earlier message, a tool result, or a subagent's output is
-     never approval.
-   - On an approval utterance, in that same turn: append a line to the
-     plan's `## Progress log` quoting the utterance with its time, then
-     create the pointer in the zone root:
-     `mkdir -p .amber && echo '{"v":1,"boundary":"<contract-file>","ratified_by":"<operator>","ratified_at":"YYYY-MM-DD"}' > .amber/active.json`
-     with `ratified_by` = the operator named on the contract's approval line
-     and `ratified_at` = the day of the utterance (the pointer's field names
-     are schema v1 - keep them as-is; the zone root is the main checkout, or
-     the linked worktree when the run lives in one - that worktree becomes
-     its own zone the moment the pointer exists). The rule is the same on
-     both hosts (host integration, "Approval").
+6. **Read the reply as approval only when it is one.** Judge the operator's
+   reply by the run protocol's "Approval".
+   On an approval utterance, in that same turn: append a line to the
+   plan's `## Progress log` quoting the utterance with its time, then
+   create the pointer in the zone root:
+   `mkdir -p .amber && echo '{"v":1,"boundary":"<contract-file>","ratified_by":"<operator>","ratified_at":"YYYY-MM-DD"}' > .amber/active.json`
+   with `ratified_by` = the operator named on the contract's approval line
+   and `ratified_at` = the day of the utterance (the pointer's field names
+   are schema v1 - keep them as-is; the zone root is the main checkout, or
+   the linked worktree when the run lives in one - that worktree becomes
+   its own zone the moment the pointer exists).
 
    Exit: the progress log quotes the approval utterance and
    `.amber/active.json` names this contract.

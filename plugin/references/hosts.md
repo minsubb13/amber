@@ -182,13 +182,8 @@ keep shared intent, status, work logs, and contracts as single sources.
 
 ## Approval (both hosts)
 
-The operator approves a contract in conversation: an explicit approval utterance
-after `set`'s report. The model then creates `.amber/active.json` itself, in
-the zone root, following the approval step in `set`. No shell command is handed
-to the operator on either host, and no pointer is created without such an
-utterance in the operator's own message. The pointer schema and the approval
-boundary are identical on both hosts. Release needs no operator command
-either: a passed completion removes the pointer.
+Approval works the same on both hosts; the rule is the run protocol's
+"Approval", and `set`'s step 6 performs it.
 
 ## Independent reviewer (both hosts)
 
