@@ -1,7 +1,8 @@
-# Amber host integration
+# hosts.md - Amber host integration
 
 Read this reference when using an Amber skill. The cycle and contract semantics
-are shared; use the branch for the host running this session.
+are shared ([run protocol](protocol.md)); use the branch for the host running
+this session.
 
 ## Skill names and package root
 
@@ -93,11 +94,8 @@ claim was recorded. On Claude Code, `hold` may also be recorded through the
 amber:mark skill (`hold - U1 - <reason>`; external form
 `hold - U1 - external: <job>`); on Codex, `mark hold` is the recorder's
 `node "$amber_plugin_root/scripts/record.cjs" mark hold 'U1 - <reason>'`
-(external form `mark hold 'U1 - external: <job>'`). A hold whose reason
-starts with `external:` marks the unit as waiting on an external job and is
-not consumed by a stop - every stop passes while it stands, until the unit's
-next `start|verified|failed` transition releases it or a new hold replaces
-it - whereas a plain hold lets exactly one stop through.
+(external form `mark hold 'U1 - external: <job>'`). What a plain and an
+external hold let through is in the run protocol, "Loop body".
 
 Post-hoc scope check (both hosts): `unit verified` and `done` compare
 the files git reports as changed in the tree the command runs in - commits
@@ -130,8 +128,8 @@ hook `agent_id`, never a model-invented id. Codex file hooks can retain the
 parent cwd, so E1 maps absolute targets in git-registered linked worktrees
 before applying the contract and unit scopes. Do not work around a denied
 patch with a shell write. The main agent re-runs each oracle in its worktree,
-records verified there, merges the work, removes the worktrees, then runs the
-integration unit in the main checkout.
+records verified there, and merges as the run protocol's "Loop body"
+describes.
 
 ### Audit transcripts
 
@@ -184,13 +182,8 @@ keep shared intent, status, work logs, and contracts as single sources.
 
 ## Approval (both hosts)
 
-The operator approves a contract in conversation: an explicit approval utterance
-after `set`'s report. The model then creates `.amber/active.json` itself, in
-the zone root, following the approval step in `set`. No shell command is handed
-to the operator on either host, and no pointer is created without such an
-utterance in the operator's own message. The pointer schema and the approval
-boundary are identical on both hosts. Release needs no operator command
-either: a passed completion removes the pointer.
+Approval works the same on both hosts; the rule is the run protocol's
+"Approval", and `set`'s step 6 performs it.
 
 ## Independent reviewer (both hosts)
 

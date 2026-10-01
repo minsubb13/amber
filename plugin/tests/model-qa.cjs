@@ -34,13 +34,14 @@ function installedClaudePlugin() {
   // A row may point at a project path that no longer exists (a removed
   // subagent worktree leaves one behind): skip it, never crash.
   const samePath = (p) => { try { return fs.realpathSync(p) === zone; } catch { return false; } };
-  const rows = JSON.parse(result.stdout).filter((item) => item.id === 'amber@amber' && item.enabled);
+  // The development zone installs the checkout as amber@amber-dev instead.
+  const rows = JSON.parse(result.stdout).filter((item) => ['amber@amber', 'amber@amber-dev'].includes(item.id) && item.enabled);
   const row = rows.find((item) => item.projectPath && samePath(item.projectPath))
-    || rows.find((item) => item.scope === 'user');
+    || rows.find((item) => item.id === 'amber@amber' && item.scope === 'user');
   assert.ok(row, 'enabled amber@amber installation for this zone not found: ' + JSON.stringify(rows));
   // The installed copy must be the version this checkout declares, so the
   // scenario exercises the code under test rather than a stale cache.
-  assert.equal(row.version, DECLARED_VERSION, 'installed amber@amber is ' + row.version + ' but the source manifest says ' + DECLARED_VERSION + ' - run claude plugin update amber@amber --scope project');
+  assert.equal(row.version, DECLARED_VERSION, 'installed ' + row.id + ' is ' + row.version + ' but the source manifest says ' + DECLARED_VERSION + ' - run claude plugin update ' + row.id + ' --scope ' + row.scope);
   return row.installPath;
 }
 
@@ -91,6 +92,8 @@ function runHost(fixture,prompt,options = {}) {
     '-c','model_reasoning_effort="' + (options.effort || 'medium') + '"',
     ...(options.resume ? [options.resume] : []),prompt,
   ] : ['-p','--output-format','json','--dangerously-skip-permissions','--effort',options.effort || 'medium',
+    // The operator's own output style must not reach the fixture session.
+    '--settings','{"outputStyle":"default"}',
     '--max-budget-usd',String(options.budget || 6),'--plugin-dir',activePlugin,
     ...(options.resume ? ['--resume',options.resume] : []),prompt];
   console.error('QA '+host+' '+fixture.name+' artifacts: '+BASE);
@@ -492,7 +495,7 @@ function assessPlanning(run) {
   assert.equal(status.trim(), '', 'zone files changed during planning: ' + status);
   assert.equal(fs.existsSync(path.join(run.root, '.amber', 'active.json')), false, 'planning never creates the pointer');
   // (e) the ledger shows this session invoking the planning skill.
-  const invocations = rows.filter((r) => r.trigger === 'skill-invocation' && /\bready\b/.test(r.summary || ''));
+  const invocations = rows.filter((r) => r.trigger === 'skill-invocation' && /\bplanning\b/.test(r.summary || ''));
   assert.ok(invocations.length >= 1, 'planning skill invocation expected in the ledger: ' + JSON.stringify(rows));
   if (run.sessionId) assert.ok(invocations.some((r) => r.session_id === run.sessionId), 'invocation belongs to this session');
   // (a) the tension list parses.
