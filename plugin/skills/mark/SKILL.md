@@ -5,26 +5,34 @@ description: Record one Amber cycle event in the ledger, from anywhere in a turn
 
 # mark - cycle event record
 
-Read [host integration](../../references/hosts.md) and use the current host's
-recording path. Arguments are `skip - <subject> - <reason>`,
-`finding - <finding> - <disposition>`, or `hold - U<n> - <reason>` (the unit
-you are on and why you must stop: waiting on the operator, budget reached,
-an out-of-contract decision). A hold lets the next stop through once; the
-Stop hook resumes sending you back afterwards while units stay open. The
-external form `hold - U<n> - external: <job>` (a reason starting with
-`external:`) marks the unit as waiting on an external job - a background
-test run, a workflow, a long computation - and is not consumed by a stop:
-every stop passes while it stands, with no cap, until the unit's next
-`start|verified|failed` transition releases it or a new hold replaces it.
-The S0/S1 briefing and /amber:status show it as
-`external hold on U<n> since <ts>: <text>`.
+mark records one cycle event in the ledger, from anywhere in a turn, and
+returns you to the work you were doing.
 
-- **Claude Code:** the S3 hook records the Skill tool invocation automatically.
-  Do not run the recorder CLI as well.
-- **Codex:** actually execute the recorder's `mark skip`, `mark finding`, or
-  `mark hold` command once with the supplied event text, and check that it
-  succeeds.
-  Do not run `invoke mark`. Loading this skill has not written the record.
+## Input and preconditions
 
-Do not repeat the event as a bare text marker. After recording, continue the
-work you were doing.
+- Read [host integration](../../references/hosts.md) and use the current
+  host's recording path.
+- Arguments are `skip - <subject> - <reason>`,
+  `finding - <finding> - <disposition>`, or `hold - U<n> - <reason>` (the
+  unit you are on and why you must stop: waiting on the operator, budget
+  reached, an out-of-contract decision), including its external form
+  `hold - U<n> - external: <job>`. What a hold lets through, and how
+  briefings show an external hold, is in the run protocol's
+  ["Loop body"](../../references/protocol.md).
+
+## Procedure
+
+1. **Record on the current host.**
+   - **Claude Code:** the S3 hook records the Skill tool invocation
+     automatically. Do not run the recorder CLI as well.
+   - **Codex:** actually execute the recorder's `mark skip`, `mark finding`,
+     or `mark hold` command once with the supplied event text, and check
+     that it succeeds. Do not run `invoke mark`. Loading this skill has not
+     written the record.
+
+   Exit: the event is recorded - by the hook on Claude Code, by a
+   successful recorder command on Codex.
+2. **Continue.** Do not repeat the event as a bare text marker. Continue the
+   work you were doing.
+
+   Exit: the work resumes with no bare text marker.

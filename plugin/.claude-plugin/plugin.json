@@ -1,6 +1,6 @@
 {
   "name": "amber",
-  "version": "0.26.1",
+  "version": "0.26.2",
   "description": "Contract-checking harness: full delegation inside an approved per-run contract, mechanical stop-and-ask outside it, and model-owned semantic completion review.",
   "author": {
     "name": "Wade Choi"
