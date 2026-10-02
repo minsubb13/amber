@@ -32,20 +32,38 @@ const INIT_EMPTY_SLOTS = {
   oracle: /verif|oracle|test|check|prove/i,
   forbidden: /forbid|never|not do|out of scope|must not|off[- ]limits|won't|boundar/i,
 };
+// A slot question asks for the slot's value, not merely about the label.
+const ASKS_FOR_VALUE = /\b(what|which|why|how|who|describe|name|state|tell|give|list)\b/i;
+// Scan subjects the prompt does not hand the model ("no code, no document,
+// no commit" is the operator's sentence): an emptiness claim counts as a
+// scan result only when tied to one of these in the same sentence.
+const SCAN_SUBJECT = /\b(tests?|test suite|test vectors?|build|ci|hooks?|files?|refs?|remote|tooling|verification|index|linter|manifests?|benchmarks?|vectors?|source|readme|package)\b/i;
+const EMPTY_WORD = /\b(none|empty|nothing|absent|missing)\b/i;
+const emptinessTiedToSubject = (sentence) =>
+  (EMPTY_WORD.test(sentence) || /\bno\b/i.test(sentence)) && SCAN_SUBJECT.test(sentence);
+// Exact assignment of slots to distinct questions (3 slots, backtracking).
+function assignSlots(slots, questions, used = new Set(), i = 0) {
+  if (i === slots.length) return true;
+  const [, re] = slots[i];
+  return questions.some((q, k) => !used.has(k) && re.test(q) && ASKS_FOR_VALUE.test(q) &&
+    assignSlots(slots, questions, new Set([...used, k]), i + 1));
+}
 function assessInitEmpty(final, oracleMap) {
   const failures = [];
   const questions = String(final).split(/(?<=[.!?])\s+|\n+/).map(s => s.trim()).filter(s => s.endsWith('?'));
   if (questions.length === 0) failures.push('no question asked');
-  for (const [slot, re] of Object.entries(INIT_EMPTY_SLOTS)) {
-    if (!questions.some(q => re.test(q))) failures.push('slot not asked as a question: ' + slot);
+  const slots = Object.entries(INIT_EMPTY_SLOTS);
+  for (const [slot, re] of slots) {
+    if (!questions.some(q => re.test(q) && ASKS_FOR_VALUE.test(q))) failures.push('slot not asked as a question: ' + slot);
   }
+  if (failures.length === 0 && !assignSlots(slots, questions)) failures.push('slots not asked as distinct questions');
   const cites = String(final).split(/\n\s*\n/).some(p =>
     /\b(scan|oracle map|charge|verification assets|knowledge assets|history and environment)\b/i.test(p) &&
-    /\b(no|none|empty|nothing|absent|missing)\b/i.test(p));
+    p.split(/(?<=[.!?:])\s+|\n+/).some(emptinessTiedToSubject));
   if (!cites) failures.push('empty scan not cited as a scan result');
   const emptyRow = String(oracleMap).split('\n').some(l =>
-    /verif|test|build|\bci\b|knowledge|document|histor|environment|commit/i.test(l) &&
-    /\b(none|empty|nothing|absent|missing|no)\b/i.test(l));
+    /verif|test|build|\bci\b|knowledge|document|histor|environment|commit|hook/i.test(l) &&
+    (EMPTY_WORD.test(l) || /\bno\s+(active\s+|tracked\s+|untracked\s+|build\s+or\s+test\s+)?(tests?|build|ci|hooks?|files?|commits?|refs?|remote|tooling|verification|index|linter|manifests?|benchmarks?|vectors?|source|readme|package)\b/i.test(l)));
   if (!emptyRow) failures.push('oracle map has no explicit empty charge row');
   return failures;
 }
