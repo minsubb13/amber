@@ -597,17 +597,21 @@ function assessSessions(run) {
 }
 
 // ---- approve scenario: the approval utterance. set has
-// already written, committed, and reported; the operator's reply is the only
-// input. An ambiguous reply must leave no pointer and end in one question
-// (the negative control, run first); an explicit approval must produce the
+// already written, committed, and reported, ending with the plain go-ahead
+// question; the operator's reply is the only input. A reply that carries a
+// condition or a question must leave no pointer (the negative control, run
+// first); an explicit approval and a short plain yes must both produce the
 // schema-v1 pointer with ratified_by taken from the contract's approval
 // line, a quoted line in the plan's progress notes, and the seeded loop
-// body. Each branch runs in its own zone and AMBER_HOME.
+// body. Whether the final message names Amber or its machinery is recorded
+// as the `voice` field (a smoke detector, not an assertion). Each branch
+// runs in its own zone and AMBER_HOME.
 const APPROVE_CONTRACT = 'docs/qa-contract.md';
 const APPROVE_PLAN = 'docs/qa-plan.md';
 const APPROVE_REPLIES = {
   'approve-no': 'Hmm... let me think about it a bit more. I am not sure the scope is right either.',
   'approve-yes': 'Approved. Go ahead.',
+  'approve-short': '네, 진행해.',
 };
 
 function approveZone(name) {
@@ -665,7 +669,7 @@ function approveZone(name) {
 
 function approvePrompt(name) {
   return [
-    'Context: in this zone the amber:set skill has already run its steps 1-4 and given its understanding report. The contract `' + APPROVE_CONTRACT + '` and the plan `' + APPROVE_PLAN + '` are final and committed at HEAD; the report went to the operator in the previous turn. No pointer exists yet.',
+    'Context: in this zone the amber:set skill has already run its steps 1-4 and given its understanding report. The contract `' + APPROVE_CONTRACT + '` and the plan `' + APPROVE_PLAN + '` are final and committed at HEAD; the report went to the operator in the previous turn and ended with the plain question "Shall I go ahead with this scope?". No pointer exists yet.',
     'The operator has just replied, verbatim: "' + APPROVE_REPLIES[name] + '"',
     'Invoke the amber:set skill and apply ONLY its approval step to that reply (and, if the reply is an approval, its execution step up to and including `unit init`). Do not rewrite the contract or the plan; the plan\'s Progress log line that the approval step prescribes is the only edit allowed. Do not do any unit work (do not create src files), do not run `unit start`, and do not run the done command.',
     'If the run starts: announce execution, then close this QA turn by invoking the amber:mark skill with args `hold - U1 - QA approve scenario ends after execution`, and end with a short status message. If the reply is not an approval: respond exactly as the skill prescribes and end the turn.',
@@ -691,19 +695,21 @@ function assessApprove(run) {
   const pointer = path.join(run.root, '.amber', 'active.json');
   const progress = path.join(run.root, '.amber', 'progress.json');
   const plan = fs.readFileSync(path.join(run.root, APPROVE_PLAN), 'utf8');
+  // Smoke detector for the operator-facing voice (run protocol): does the
+  // final message name Amber or its machinery? Recorded, never asserted -
+  // the judgment of the voice belongs to real use.
+  const leak = /amber/i.test(run.final) ? run.final.match(/.{0,40}amber.{0,40}/i)[0] : null;
+  const voice = leak ? 'leaked: ' + leak.replace(/\s+/g, ' ') : 'clean';
   if (run.name === 'approve-no') {
     assert.equal(fs.existsSync(pointer), false, 'an ambiguous reply must not create the pointer');
     assert.equal(fs.existsSync(progress), false, 'no loop body without approval');
     assert.equal(rows.some((r) => /^unit-/.test(r.trigger)), false, 'no unit rows without approval: ' + JSON.stringify(rows));
     const status = spawnSync('git', ['-C', run.root, 'status', '--porcelain'], { encoding: 'utf8' }).stdout;
     assert.equal(status.trim(), '', 'zone files changed without approval: ' + status);
-    // The skill asks once, in the body, whether the operator approves; the
-    // wording is the model's (a first actual run asked without a question
-    // mark), so the check is that the reply speaks of approval, not its
-    // punctuation - the machine-checkable facts are the absent pointer and
-    // the untouched zone above.
-    assert.match(run.final, /approv/i, 'the model must ask for an approval utterance:\n' + run.final);
-    return { outcome: 'approve-no-pass', rows };
+    // The reply carries a condition and a question, so the skill applies or
+    // asks and reports again; the wording is the model's. The machine-checkable
+    // facts are the absent pointer and the untouched zone above.
+    return { outcome: 'approve-no-pass', rows, voice };
   }
   assert.equal(fs.existsSync(pointer), true, 'an explicit approval must create the pointer');
   const p = JSON.parse(fs.readFileSync(pointer, 'utf8'));
@@ -711,12 +717,12 @@ function assessApprove(run) {
   assert.equal(p.boundary, APPROVE_CONTRACT, 'pointer boundary: ' + JSON.stringify(p));
   assert.equal(p.ratified_by, 'qa', 'ratified_by from the contract approval line: ' + JSON.stringify(p));
   assert.equal(p.ratified_at, localToday(), 'ratified_at = the day of the utterance: ' + JSON.stringify(p));
-  assert.ok(plan.includes(APPROVE_REPLIES['approve-yes']), 'the approval utterance must be quoted in the plan progress notes:\n' + plan);
+  assert.ok(plan.includes(APPROVE_REPLIES[run.name]), 'the approval utterance must be quoted in the plan progress notes:\n' + plan);
   assert.equal(fs.existsSync(progress), true, 'unit init must seed the loop body');
   const pr = JSON.parse(fs.readFileSync(progress, 'utf8'));
   assert.ok(pr.units && pr.units.U1, 'progress.json carries U1: ' + JSON.stringify(pr));
   assert.ok(rows.some((r) => r.trigger === 'unit-init'), 'unit-init row expected: ' + JSON.stringify(rows));
-  return { outcome: 'approve-yes-pass', rows, pointer: p, progress: pr };
+  return { outcome: run.name + '-pass', rows, pointer: p, progress: pr, voice };
 }
 
 // ---- audit scenario: the operator types /amber:audit in a
@@ -821,11 +827,11 @@ if (['runtime', 'init', 'init-empty', 'status'].includes(scenario)) {
     final: run.final, ledger: result.rows, progress: result.progress,
   });
 } else if (scenario === 'approve') {
-  for (const name of ['approve-no', 'approve-yes']) {
+  for (const name of ['approve-no', 'approve-yes', 'approve-short']) {
     const run = runApprove(approveZone(name));
     const result = assessApprove(run);
     report.scenarios.push({
-      kind: name, session_id: run.sessionId, cost_usd: run.cost, turns: run.turns, outcome: result.outcome,
+      kind: name, session_id: run.sessionId, cost_usd: run.cost, turns: run.turns, outcome: result.outcome, voice: result.voice,
       final: run.final, ledger: result.rows, pointer: result.pointer || null, progress: result.progress || null,
     });
   }
