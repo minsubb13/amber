@@ -21,6 +21,35 @@ function toolEvidence(files) {
   }).join('\n');
 }
 
+// Semantic gate of the init-empty scenario, kept pure so an oracle script can
+// run negative cases against it. Each of intent.md's three slots must be
+// asked as a question (a sentence that ends in '?'), the emptiness must be
+// cited as a scan result (a paragraph that names the scan, the oracle map, or
+// a charge, not just the prompt's own words), and the oracle map must carry an
+// explicit empty row for a charge. Returns the list of failed checks.
+const INIT_EMPTY_SLOTS = {
+  purpose: /purpose|goal|intent|why (does|should|will)|what (is|will|should) (this|the) project/i,
+  oracle: /verif|oracle|test|check|prove/i,
+  forbidden: /forbid|never|not do|out of scope|must not|off[- ]limits|won't|boundar/i,
+};
+function assessInitEmpty(final, oracleMap) {
+  const failures = [];
+  const questions = String(final).split(/(?<=[.!?])\s+|\n+/).map(s => s.trim()).filter(s => s.endsWith('?'));
+  if (questions.length === 0) failures.push('no question asked');
+  for (const [slot, re] of Object.entries(INIT_EMPTY_SLOTS)) {
+    if (!questions.some(q => re.test(q))) failures.push('slot not asked as a question: ' + slot);
+  }
+  const cites = String(final).split(/\n\s*\n/).some(p =>
+    /\b(scan|oracle map|charge|verification assets|knowledge assets|history and environment)\b/i.test(p) &&
+    /\b(no|none|empty|nothing|absent|missing)\b/i.test(p));
+  if (!cites) failures.push('empty scan not cited as a scan result');
+  const emptyRow = String(oracleMap).split('\n').some(l =>
+    /verif|test|build|\bci\b|knowledge|document|histor|environment|commit/i.test(l) &&
+    /\b(none|empty|nothing|absent|missing|no)\b/i.test(l));
+  if (!emptyRow) failures.push('oracle map has no explicit empty charge row');
+  return failures;
+}
+
 function assertStatusEvidence(host, run, rows, files, activePlugin) {
   const invocations = rows.filter(r => r.trigger === 'skill-invocation' && /amber:status/.test(r.summary));
   if (host === 'codex') {
@@ -62,9 +91,11 @@ module.exports = function runtimeQA(ctx) {
     return r.stdout;
   };
   git('init', '-q');
-  git('config', 'user.name', 'qa');
-  git('config', 'user.email', 'qa@local');
-  if (scenario !== 'init-empty') write('.gitignore', '.amber/\n');
+  if (scenario !== 'init-empty') {
+    git('config', 'user.name', 'qa');
+    git('config', 'user.email', 'qa@local');
+    write('.gitignore', '.amber/\n');
+  }
   const rec = 'node ' + path.join(activePlugin, 'scripts', 'record.cjs');
   const fixture = { root, home, name: scenario, kind: scenario };
   const skill = name => (host === 'codex' ? '$amber:' : '/amber:') + name;
@@ -106,16 +137,9 @@ module.exports = function runtimeQA(ctx) {
     assert.match(raw, host === 'codex' ? /spawn_agent/ : /"name":"Agent"/, 'scan delegation absent');
     const oracleMap = path.join(root, 'oracle-map.md');
     assert(fs.existsSync(oracleMap), 'oracle map missing');
-    assert.match(fs.readFileSync(oracleMap, 'utf8'), /\b(none|empty|no\b|nothing)/i, 'oracle map does not record the empty rows');
     assert(!fs.existsSync(path.join(root, 'intent.md')), 'intent.md written without any operator answer');
-    assert.match(run.final, /\?/, 'final message asks nothing');
-    const slots = {
-      purpose: /purpose|goal|intent|why|what (is|will|should) (this|the) project/i,
-      oracle: /verif|oracle|test|check/i,
-      forbidden: /forbid|never|not do|out of scope|must not|off[- ]limits|won't|boundar/i,
-    };
-    for (const [slot, re] of Object.entries(slots)) assert.match(run.final, re, 'final message does not ask about the ' + slot + ' slot');
-    assert.match(run.final, /no (tests?|code|build|docs?|documents?|verification|source|files?|commits?)|empty|nothing|none/i, 'final message does not cite the empty scan');
+    const failures = assessInitEmpty(run.final, fs.readFileSync(oracleMap, 'utf8'));
+    assert.deepEqual(failures, [], 'init-empty semantic gate failed: ' + failures.join('; '));
     return { outcome: 'init-empty-ask-gate-pass', session_id: run.sessionId, cost_usd: run.cost, turns: run.turns, root, ledger: rows, final: run.final };
   }
 
@@ -228,3 +252,4 @@ module.exports = function runtimeQA(ctx) {
   return { outcome: 'runtime-resume-holds-scope-status-pass', session_id: firstId, root, ledger: rows, final: run.final };
 };
 module.exports.toolEvidence = toolEvidence;
+module.exports.assessInitEmpty = assessInitEmpty;
