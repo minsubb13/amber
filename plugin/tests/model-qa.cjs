@@ -11,8 +11,8 @@ const { spawnSync } = require('node:child_process');
 
 const host = process.argv[2];
 const scenario = process.argv[3] || 'b01';
-if (!['claude', 'codex'].includes(host) || !['b01', 'loop', 'planning', 'sessions', 'approve', 'audit', 'runtime', 'init', 'status'].includes(scenario)) {
-  console.error('usage: node plugin/tests/model-qa.cjs <claude|codex> [b01|loop|planning|sessions|approve|audit|runtime|init|status]');
+if (!['claude', 'codex'].includes(host) || !['b01', 'loop', 'planning', 'sessions', 'approve', 'audit', 'runtime', 'init', 'init-empty', 'status'].includes(scenario)) {
+  console.error('usage: node plugin/tests/model-qa.cjs <claude|codex> [b01|loop|planning|sessions|approve|audit|runtime|init|init-empty|status]');
   process.exit(2);
 }
 
@@ -809,7 +809,7 @@ function assessAudit(run) {
 }
 
 const report = { host, scenario, base: BASE, scenarios: [] };
-if (['runtime', 'init', 'status'].includes(scenario)) {
+if (['runtime', 'init', 'init-empty', 'status'].includes(scenario)) {
   report.scenarios.push(require('./model-qa-runtime.cjs')({
     host, scenario, BASE, activePlugin, runHost, ledger, sensorFailures, transcriptFiles,
   }));

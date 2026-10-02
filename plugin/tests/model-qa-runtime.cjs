@@ -53,7 +53,8 @@ module.exports = function runtimeQA(ctx) {
   const { host, scenario, BASE, activePlugin, runHost, ledger, sensorFailures, transcriptFiles } = ctx;
   const root = path.join(BASE, scenario);
   const home = path.join(BASE, scenario + '-amber-home');
-  fs.mkdirSync(path.join(root, 'src'), { recursive: true });
+  // The greenfield fixture is nothing but `git init`: no src/, no .gitignore.
+  fs.mkdirSync(scenario === 'init-empty' ? root : path.join(root, 'src'), { recursive: true });
   const write = (p, text) => fs.writeFileSync(path.join(root, p), text);
   const git = (...args) => {
     const r = spawnSync('git', args, { cwd: root, encoding: 'utf8' });
@@ -63,7 +64,7 @@ module.exports = function runtimeQA(ctx) {
   git('init', '-q');
   git('config', 'user.name', 'qa');
   git('config', 'user.email', 'qa@local');
-  write('.gitignore', '.amber/\n');
+  if (scenario !== 'init-empty') write('.gitignore', '.amber/\n');
   const rec = 'node ' + path.join(activePlugin, 'scripts', 'record.cjs');
   const fixture = { root, home, name: scenario, kind: scenario };
   const skill = name => (host === 'codex' ? '$amber:' : '/amber:') + name;
@@ -82,6 +83,40 @@ module.exports = function runtimeQA(ctx) {
     assert(JSON.parse(fs.readFileSync(state, 'utf8')).started_at, 'S0 timestamp absent');
     assert(!rows.some(r => r.trigger === 'done-declaration'), 'status must not declare completion');
     return { outcome: 'status-persisted-trust-pass', session_id: run.sessionId, root, ledger: rows, final: run.final };
+  }
+
+  if (scenario === 'init-empty') {
+    // Greenfield: an empty repository and no operator facts. The skill has to
+    // ask - anchored on the empty scan rows and bounded to intent.md's three
+    // slots (purpose, first oracle, forbidden set) - and must not invent
+    // intent.md from nothing.
+    const run = runHost(fixture, [
+      skill('init'),
+      'Explicit operator request: initialize Amber in this empty repository using the init skill. There is no code, no document, and no commit here yet.',
+      'I will answer your questions in my next message: ask what you need to settle and then stop. Do not guess the project\'s purpose for me.',
+      'Put the oracle map at project-root oracle-map.md and the tension list at project-root tension-list.md when you write them.',
+      'The installed plugin is already enabled for this invocation and its AMBER_HOME is isolated. Use its normal sensors and required read-only scan agents. Do not open a planning contract for bootstrap, and do not signal completion.',
+    ].join('\n'), { budget: 12, timeout: 1200000 });
+    const rows = ledger(home);
+    assert.equal(sensorFailures(home), '');
+    assert(rows.some(r => r.trigger === 'skill-invocation' && /amber:init/.test(r.summary)), 'init invocation missing');
+    assert(!rows.some(r => r.trigger === 'done-declaration'), 'empty-repo init must not declare completion');
+    assert(!fs.existsSync(path.join(root, '.amber', 'active.json')), 'init must not open a planning contract');
+    const raw = transcriptFiles(run, true).map(p => fs.readFileSync(p, 'utf8')).join('\n');
+    assert.match(raw, host === 'codex' ? /spawn_agent/ : /"name":"Agent"/, 'scan delegation absent');
+    const oracleMap = path.join(root, 'oracle-map.md');
+    assert(fs.existsSync(oracleMap), 'oracle map missing');
+    assert.match(fs.readFileSync(oracleMap, 'utf8'), /\b(none|empty|no\b|nothing)/i, 'oracle map does not record the empty rows');
+    assert(!fs.existsSync(path.join(root, 'intent.md')), 'intent.md written without any operator answer');
+    assert.match(run.final, /\?/, 'final message asks nothing');
+    const slots = {
+      purpose: /purpose|goal|intent|why|what (is|will|should) (this|the) project/i,
+      oracle: /verif|oracle|test|check/i,
+      forbidden: /forbid|never|not do|out of scope|must not|off[- ]limits|won't|boundar/i,
+    };
+    for (const [slot, re] of Object.entries(slots)) assert.match(run.final, re, 'final message does not ask about the ' + slot + ' slot');
+    assert.match(run.final, /no (tests?|code|build|docs?|documents?|verification|source|files?|commits?)|empty|nothing|none/i, 'final message does not cite the empty scan');
+    return { outcome: 'init-empty-ask-gate-pass', session_id: run.sessionId, cost_usd: run.cost, turns: run.turns, root, ledger: rows, final: run.final };
   }
 
   if (scenario === 'init') {
