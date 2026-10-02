@@ -15,7 +15,7 @@
 //                           rides in the signal; the final message is never
 //                           read); under a contract, accept it only when the
 //                           pointer is sound, the signal names that contract,
-//                           and no linked worktree remains (max 3 rejections),
+//                           and no unit worktree remains (max 3 rejections),
 //                           then release the contract; with open plan units
 //                           and no signal, send the stop back (loop body) -
 //                           a plain hold passes once, an external hold passes

@@ -86,9 +86,9 @@ commands").
   signal"), with `--goal "<goal-test result>"` under an active contract.
   What the command refuses, and what the Stop hook then does, is described
   there; the hook verifies the pointer, the contract it names, and that no
-  worktree remains - not the signal's semantic truth - records the
-  completion, and releases the contract by itself (pointer and progress.json
-  removed).
+  unit worktree (a linked worktree inside the zone directory) remains - not
+  the signal's semantic truth - records the completion, and releases the
+  contract by itself (pointer and progress.json removed).
 - **Only real completions.** No marker line goes in the message, and
   incomplete, blocked, waiting, and status-only turns run no signal: it
   declares the governed work unit itself complete, never merely a finished
