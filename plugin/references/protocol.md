@@ -70,8 +70,9 @@ commands").
 - **Merge.** The main agent re-runs the unit's oracle in the worktree before
   marking it `verified`, merges every verified worktree into the main
   checkout at the end, removes the worktrees, and runs the integration unit
-  there; the Stop hook rejects a completion signal while any linked worktree
-  remains.
+  there; the Stop hook rejects a completion signal while any unit worktree
+  (a linked worktree inside the zone directory) remains. A linked worktree
+  outside the zone directory is a zone of its own and is not waited for.
 
 ## Completion
 

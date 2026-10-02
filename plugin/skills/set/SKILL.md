@@ -170,8 +170,9 @@ protocol, "Approval"), and only then creates the pointer itself.
    with `ratified_by` = the operator named on the contract's approval line
    and `ratified_at` = the day of the utterance (the pointer's field names
    are schema v1 - keep them as-is; the zone root is the main checkout, or
-   the linked worktree when the run lives in one - that worktree becomes
-   its own zone the moment the pointer exists).
+   the linked worktree when the run lives in one - a linked worktree
+   outside the zone directory is a zone of its own already, and the
+   pointer now names its contract).
 
    Exit: the progress log quotes the approval utterance and
    `.amber/active.json` names this contract.

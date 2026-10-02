@@ -21,12 +21,18 @@ on that utterance. There is no separate start ritual.
 - A zone holds one run at a time. If the briefing says a run is active here
   and this session is not one of its driving sessions, say so before
   anything else and offer the two options: open the new work in its own
-  linked worktree (`git worktree add ../<slug> -b <slug>`, then run the
-  cycle there - a worktree with its own `.amber/active.json` is a zone of
-  its own), or wait for the active run to close. Never prepare a second
-  contract for the same tree while one is active; the operator's pointer
-  would replace the running one. Do not run unit commands in a run you are
-  not driving unless you are taking it over (resume) - that command
+  linked worktree, or wait for the active run to close. A linked worktree
+  outside the zone directory (`git worktree add ../<slug> -b <slug>`) is a
+  zone of its own from the moment it exists: it starts without a contract
+  (the pointer under `.amber/` is gitignored and does not travel with the
+  checkout; committed contract documents do travel, but govern nothing
+  without a pointer), the main checkout's contract neither restricts nor
+  briefs it, and the cycle run there - planning, set, approval - gives it a
+  contract of its own. Only the unit worktrees of a run, under the zone's
+  `.claude/worktrees/`, inherit the main checkout's contract. Never prepare
+  a second contract for the same tree while one is active; the operator's
+  pointer would replace the running one. Do not run unit commands in a run
+  you are not driving unless you are taking it over (resume) - that command
   registers this session as a driver.
 - Every question you ask must cite evidence (file:line, command output, git
   history) - a question without evidence does not qualify.
