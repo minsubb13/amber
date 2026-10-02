@@ -15,7 +15,7 @@
 //                           rides in the signal; the final message is never
 //                           read); under a contract, accept it only when the
 //                           pointer is sound, the signal names that contract,
-//                           and no linked worktree remains (max 3 rejections),
+//                           and no unit worktree remains (max 3 rejections),
 //                           then release the contract; with open plan units
 //                           and no signal, send the stop back (loop body) -
 //                           a plain hold passes once, an external hold passes
@@ -134,17 +134,35 @@ function gitQuery(cwd, args) {
   }
 }
 
-// Zone root. A linked worktree that carries its own .amber/active.json is
-// its own zone - a parallel run on its own branch. Otherwise
-// the zone is the main repository's top level: from a subagent worktree
-// (Claude's .claude/worktrees/<name>/, no .amber/ of its own) the common git
-// dir still points at the main repository, so the run's pointer and
-// progress file - both gitignored, hence absent from the worktree - are found.
+// Whether `dir` lies strictly inside the zone directory `root`. Unit
+// worktrees of a run live under <zone>/.claude/worktrees/ and belong to that
+// run; a linked worktree elsewhere - a sibling path the operator created for
+// parallel work - is a zone of its own. zoneRoot and extraWorktrees share
+// this one test, so no worktree is bound to a contract whose completion
+// check ignores it.
+function insideZone(root, dir) {
+  const base = path.resolve(root);
+  const d = path.resolve(dir);
+  return d !== base && d.startsWith(base + path.sep);
+}
+
+// Zone root. A tree that carries its own .amber/active.json is its own zone -
+// a parallel run on its own branch. Otherwise the main checkout (the parent
+// of the common git dir) is the zone for itself and for the unit worktrees
+// inside it: from <zone>/.claude/worktrees/<name>/ the run's pointer and
+// progress file - both gitignored, hence absent from the worktree - are
+// found there. A linked worktree outside the zone directory is its own zone
+// even without a pointer: it starts without a contract and gets one of its
+// own through planning, set, and approval run there.
 function zoneRoot(cwd) {
   const top = gitQuery(cwd, ['rev-parse', '--show-toplevel']);
   if (top && fs.existsSync(path.join(top, '.amber', 'active.json'))) return top;
   const common = gitQuery(cwd, ['rev-parse', '--path-format=absolute', '--git-common-dir']);
-  if (common && path.basename(common) === '.git') return path.dirname(common);
+  if (common && path.basename(common) === '.git') {
+    const main = path.dirname(common);
+    if (!top || path.resolve(top) === path.resolve(main) || insideZone(main, top)) return main;
+    return top;
+  }
   if (top) return top;
   return path.resolve(cwd || '.');
 }
@@ -175,15 +193,15 @@ function zoneRelative(contract, cwd, abs) {
 
 // Linked worktrees that belong to this zone's run: those created inside the
 // zone (subagent worktrees live under <zone>/.claude/worktrees/). A sibling
-// worktree elsewhere is another zone's run and never blocks this one.
+// worktree elsewhere is a zone of its own (the same insideZone test zoneRoot
+// applies) and never blocks this one.
 function extraWorktrees(root) {
   const out = gitQuery(root, ['worktree', 'list', '--porcelain']);
   if (!out) return [];
-  const base = path.resolve(root);
   return out.split('\n')
     .filter((l) => l.startsWith('worktree '))
     .map((l) => l.slice('worktree '.length).trim())
-    .filter((w) => path.resolve(w) !== base && path.resolve(w).startsWith(base + path.sep));
+    .filter((w) => insideZone(root, w));
 }
 
 // Completion signal: the model runs `record.cjs done` as its
@@ -466,6 +484,25 @@ function registerSession(input, contract) {
   }
 }
 
+// A linked worktree outside the zone directory is a zone of its own: tell
+// the session where its main checkout is and whether a run is active there,
+// so it neither expects that contract to apply here nor mistakes itself for
+// a unit worktree of that run.
+function linkedWorktreeContextFor(cwd) {
+  const top = worktreeTop(cwd);
+  const common = gitQuery(cwd, ['rev-parse', '--path-format=absolute', '--git-common-dir']);
+  if (!top || !common || path.basename(common) !== '.git') return null;
+  const main = path.dirname(common);
+  if (path.resolve(top) === path.resolve(main) || insideZone(main, top)) return null;
+  const mainContract = loadContract(main);
+  const state = !mainContract ? 'no active contract'
+    : mainContract.broken ? 'a broken contract pointer'
+      : 'an active contract - ' + mainContract.boundaryFile;
+  return 'amber: this directory is a linked worktree of ' + main + ' and a zone of its own; ' +
+    'the main checkout has ' + state + ', which does not apply here. A contract approved in ' +
+    'this worktree governs only this worktree.';
+}
+
 function ownershipContextFor(contract, input) {
   if (!contract || contract.broken) return null;
   const p = progress.loadProgress(contract.root);
@@ -477,7 +514,8 @@ function ownershipContextFor(contract, input) {
     'Its stops are not sent back and its completion signal is not read; the contract\'s write-scope and ' +
     'bash-deny rows still apply here. Running a unit command (`node ' + RECORD_CLI + ' unit …`) registers ' +
     'this session as a driver - do that only to take the run over, e.g. when resuming it. Parallel work ' +
-    'belongs in its own linked worktree with its own .amber/active.json (a zone of its own).';
+    'belongs in its own linked worktree outside the zone directory (a zone of its own, which starts ' +
+    'without a contract and gets its own .amber/active.json through the cycle run there).';
 }
 
 function observeClaim(input, contract, agentId, unitId) {
@@ -553,7 +591,7 @@ function continuationDirective(contract, p, id) {
 
 function worktreeDirective(contract, worktrees, attempts) {
   return 'amber gate (attempt ' + attempts + '/' + MAX_GATE_ATTEMPTS + '): completion under ' +
-    contract.boundaryFile + ' requires that no linked worktree remains, but ' + worktrees.length +
+    contract.boundaryFile + ' requires that no unit worktree (linked worktree inside the zone directory) remains, but ' + worktrees.length +
     ' still exist(s): ' + worktrees.join(', ') + '. Merge each verified unit into the main checkout, ' +
     'run the integration verification there, remove the worktrees (`git worktree remove <path>`), ' +
     'run the done command again, then restate the completion report.';
@@ -896,6 +934,8 @@ function runS0(input) {
       'deliverable - invoke the amber:planning skill first: whether the work ' +
       'needs a contract is judged inside planning and recorded there, never ' +
       'silently. Only pure Q&A, discussion, or status checks need no cycle.');
+    const worktreeCtx = linkedWorktreeContextFor(input.cwd);
+    if (worktreeCtx) parts.push(worktreeCtx);
     parts.push(completionGuidance(null) + '\nPure Q&A, discussion, and status responses need no signal and are unaffected.');
   }
   if (failures > 0) {

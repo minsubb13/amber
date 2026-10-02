@@ -911,7 +911,7 @@ const sessionState = (home, sessionId) => {
     (bareNone.stderr || '') + JSON.stringify(lastRow(none)));
 }
 
-// ---- worktree zone: a linked worktree with its own pointer is its own zone ----
+// ---- worktree zone: a linked worktree outside the zone is its own zone, with or without a pointer ----
 {
   const zone = makeZone('wtz', BOUNDARY,
     { v: 1, boundary: 'test-boundary.md', ratified_by: 'operator', ratified_at: '2026-09-15' });
@@ -926,8 +926,30 @@ const sessionState = (home, sessionId) => {
   const home = freshHome('wtz');
   const e1At = (cwd, file) => runHook('E1', { session_id: 'wt', cwd, hook_event_name: 'PreToolUse',
     tool_name: 'Write', tool_input: { file_path: file } }, home).out;
-  check('a linked worktree without a pointer maps to the main zone',
-    e1At(side, path.join(side, 'plugin', 'x.cjs')) === null && isDeny(e1At(side, path.join(side, 'secrets.txt'))));
+  // Outside the zone directory, a linked worktree is a zone of its own even
+  // before it has a pointer: the main contract neither restricts nor briefs
+  // it, and a no-contract completion there lands in the worktree's own
+  // .amber/ under the worktree's project name.
+  check('a linked worktree outside the zone without a pointer is its own zone (no contract applies)',
+    e1At(side, path.join(side, 'plugin', 'x.cjs')) === null && e1At(side, path.join(side, 'secrets.txt')) === null);
+  const s0Side = runHook('S0', { session_id: 'wt0', cwd: side, model: 'm' }, home).out;
+  const ctxSide = s0Side && s0Side.hookSpecificOutput && s0Side.hookSpecificOutput.additionalContext;
+  check('S0 in a sibling worktree without a pointer briefs no active contract, not the main contract',
+    !!ctxSide && /no active contract in this zone/.test(ctxSide) && !/an active contract governs this zone/.test(ctxSide), ctxSide);
+  check('S0 in a sibling worktree names the main checkout and its active contract',
+    !!ctxSide && /linked worktree of \S*\/wtz and a zone of its own/.test(ctxSide) &&
+    /main checkout has an active contract - test-boundary\.md/.test(ctxSide), ctxSide);
+  const sideNoContract = done(side, home, ['--review', 'r', '--summary', 'sibling no-contract done']);
+  check('done in a sibling worktree without a pointer signals in that worktree',
+    sideNoContract.status === 0 && fs.existsSync(path.join(side, '.amber', 'done.json')) &&
+    !fs.existsSync(path.join(zone, '.amber', 'done.json')), sideNoContract.stderr);
+  const sidePlain = runHook('S2', { session_id: 'wt0', cwd: side, hook_event_name: 'Stop',
+    stop_hook_active: false, last_assistant_message: 'report' }, home).out;
+  const sideRow = ledger(home).find((r) => r.summary === 'sibling no-contract done');
+  check('the sibling worktree completion is recorded under its own project name without a contract',
+    sidePlain === null && !!sideRow && sideRow.project === 'wtz-side' && !('contract' in sideRow) &&
+    !fs.existsSync(path.join(side, '.amber', 'done.json')) &&
+    fs.existsSync(path.join(zone, '.amber', 'active.json')), JSON.stringify(sideRow));
   fs.writeFileSync(path.join(side, 'side-boundary.md'),
     '# side\n- docs only [machine: write-scope docs/**]\n## Standing rules\n- side rule\n');
   fs.mkdirSync(path.join(side, '.amber'), { recursive: true });

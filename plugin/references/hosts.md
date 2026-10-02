@@ -68,10 +68,14 @@ does not substitute for the record.
 
 ## Loop-body unit commands (both hosts)
 
-Unit transitions are shell commands on either host, run in the zone (a
-subagent worktree of the zone is fine - the recorder finds the main checkout;
-a linked worktree that carries its own `.amber/active.json` is a zone of its
-own, for a parallel run). The first unit command a session runs itself (not
+Unit transitions are shell commands on either host, run in the zone (a unit
+worktree under the zone's `.claude/worktrees/` is fine - the recorder finds
+the main checkout; a linked worktree outside the zone directory is a zone of
+its own, with or without a pointer: it starts without a contract, and the
+cycle run there - planning, set, the operator's approval - creates its own
+`.amber/active.json`. No pointer travels with a checkout, because `.amber/`
+is gitignored; committed contract documents do travel, but govern nothing
+without a pointer). The first unit command a session runs itself (not
 a subagent) is observed by the PreToolUse enforcer and registers that session
 as a driver of the run: only driving sessions are sent back by the Stop hook
 while units are open, and only their completion signal is read. A sibling
@@ -130,6 +134,14 @@ before applying the contract and unit scopes. Do not work around a denied
 patch with a shell write. The main agent re-runs each oracle in its worktree,
 records verified there, and merges as the run protocol's "Loop body"
 describes.
+
+A worktree placed outside the zone directory is not a unit worktree: the
+hooks treat it as a zone of its own, and the run's completion check does not
+wait for it. It starts without a contract - its `.amber/` is gitignored and
+empty, while the committed contract documents it carries govern nothing
+there - and gets a contract of its own only through planning, set, and the
+operator's approval run in that worktree. Unit worktrees stay inside the
+zone so the run's contract, scopes, and merge apply to them.
 
 ### Audit transcripts
 
