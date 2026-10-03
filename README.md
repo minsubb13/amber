@@ -43,6 +43,7 @@ Review and trust Amber's hooks in Codex. Start a new session after installation.
 ## Start
 
 In your git repository, run `/amber:init` (Claude Code) or `$amber:init` (Codex) once.
+An empty repository works too: init then asks for the project's purpose, its first oracle, and what it will never do.
 Check setup with `/amber:status` or `$amber:status`.
 
 Ask for work normally. Amber opens planning, decides whether a contract is useful,

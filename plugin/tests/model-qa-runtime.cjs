@@ -21,6 +21,53 @@ function toolEvidence(files) {
   }).join('\n');
 }
 
+// Semantic gate of the init-empty scenario, kept pure so an oracle script can
+// run negative cases against it. Each of intent.md's three slots must be
+// asked as a question (a sentence that ends in '?'), the emptiness must be
+// cited as a scan result (a paragraph that names the scan, the oracle map, or
+// a charge, not just the prompt's own words), and the oracle map must carry an
+// explicit empty row for a charge. Returns the list of failed checks.
+const INIT_EMPTY_SLOTS = {
+  purpose: /purpose|goal|intent|why (does|should|will)|what (is|will|should) (this|the) project/i,
+  oracle: /verif|oracle|test|check|prove/i,
+  forbidden: /forbid|never|not do|out of scope|must not|off[- ]limits|won't|boundar/i,
+};
+// A slot question asks for the slot's value, not merely about the label.
+const ASKS_FOR_VALUE = /\b(what|which|why|how|who|describe|name|state|tell|give|list)\b/i;
+// Scan subjects the prompt does not hand the model ("no code, no document,
+// no commit" is the operator's sentence): an emptiness claim counts as a
+// scan result only when tied to one of these in the same sentence.
+const SCAN_SUBJECT = /\b(tests?|test suite|test vectors?|build|ci|hooks?|files?|refs?|remote|tooling|verification|index|linter|manifests?|benchmarks?|vectors?|source|readme|package)\b/i;
+const EMPTY_WORD = /\b(none|empty|nothing|absent|missing)\b/i;
+const emptinessTiedToSubject = (sentence) =>
+  (EMPTY_WORD.test(sentence) || /\bno\b/i.test(sentence)) && SCAN_SUBJECT.test(sentence);
+// Exact assignment of slots to distinct questions (3 slots, backtracking).
+function assignSlots(slots, questions, used = new Set(), i = 0) {
+  if (i === slots.length) return true;
+  const [, re] = slots[i];
+  return questions.some((q, k) => !used.has(k) && re.test(q) && ASKS_FOR_VALUE.test(q) &&
+    assignSlots(slots, questions, new Set([...used, k]), i + 1));
+}
+function assessInitEmpty(final, oracleMap) {
+  const failures = [];
+  const questions = String(final).split(/(?<=[.!?])\s+|\n+/).map(s => s.trim()).filter(s => s.endsWith('?'));
+  if (questions.length === 0) failures.push('no question asked');
+  const slots = Object.entries(INIT_EMPTY_SLOTS);
+  for (const [slot, re] of slots) {
+    if (!questions.some(q => re.test(q) && ASKS_FOR_VALUE.test(q))) failures.push('slot not asked as a question: ' + slot);
+  }
+  if (failures.length === 0 && !assignSlots(slots, questions)) failures.push('slots not asked as distinct questions');
+  const cites = String(final).split(/\n\s*\n/).some(p =>
+    /\b(scan|oracle map|charge|verification assets|knowledge assets|history and environment)\b/i.test(p) &&
+    p.split(/(?<=[.!?:])\s+|\n+/).some(emptinessTiedToSubject));
+  if (!cites) failures.push('empty scan not cited as a scan result');
+  const emptyRow = String(oracleMap).split('\n').some(l =>
+    /verif|test|build|\bci\b|knowledge|document|histor|environment|commit|hook/i.test(l) &&
+    (EMPTY_WORD.test(l) || /\bno\s+(active\s+|tracked\s+|untracked\s+|build\s+or\s+test\s+)?(tests?|build|ci|hooks?|files?|commits?|refs?|remote|tooling|verification|index|linter|manifests?|benchmarks?|vectors?|source|readme|package)\b/i.test(l)));
+  if (!emptyRow) failures.push('oracle map has no explicit empty charge row');
+  return failures;
+}
+
 function assertStatusEvidence(host, run, rows, files, activePlugin) {
   const invocations = rows.filter(r => r.trigger === 'skill-invocation' && /amber:status/.test(r.summary));
   if (host === 'codex') {
@@ -53,7 +100,8 @@ module.exports = function runtimeQA(ctx) {
   const { host, scenario, BASE, activePlugin, runHost, ledger, sensorFailures, transcriptFiles } = ctx;
   const root = path.join(BASE, scenario);
   const home = path.join(BASE, scenario + '-amber-home');
-  fs.mkdirSync(path.join(root, 'src'), { recursive: true });
+  // The greenfield fixture is nothing but `git init`: no src/, no .gitignore.
+  fs.mkdirSync(scenario === 'init-empty' ? root : path.join(root, 'src'), { recursive: true });
   const write = (p, text) => fs.writeFileSync(path.join(root, p), text);
   const git = (...args) => {
     const r = spawnSync('git', args, { cwd: root, encoding: 'utf8' });
@@ -61,9 +109,11 @@ module.exports = function runtimeQA(ctx) {
     return r.stdout;
   };
   git('init', '-q');
-  git('config', 'user.name', 'qa');
-  git('config', 'user.email', 'qa@local');
-  write('.gitignore', '.amber/\n');
+  if (scenario !== 'init-empty') {
+    git('config', 'user.name', 'qa');
+    git('config', 'user.email', 'qa@local');
+    write('.gitignore', '.amber/\n');
+  }
   const rec = 'node ' + path.join(activePlugin, 'scripts', 'record.cjs');
   const fixture = { root, home, name: scenario, kind: scenario };
   const skill = name => (host === 'codex' ? '$amber:' : '/amber:') + name;
@@ -82,6 +132,33 @@ module.exports = function runtimeQA(ctx) {
     assert(JSON.parse(fs.readFileSync(state, 'utf8')).started_at, 'S0 timestamp absent');
     assert(!rows.some(r => r.trigger === 'done-declaration'), 'status must not declare completion');
     return { outcome: 'status-persisted-trust-pass', session_id: run.sessionId, root, ledger: rows, final: run.final };
+  }
+
+  if (scenario === 'init-empty') {
+    // Greenfield: an empty repository and no operator facts. The skill has to
+    // ask - anchored on the empty scan rows and bounded to intent.md's three
+    // slots (purpose, first oracle, forbidden set) - and must not invent
+    // intent.md from nothing.
+    const run = runHost(fixture, [
+      skill('init'),
+      'Explicit operator request: initialize Amber in this empty repository using the init skill. There is no code, no document, and no commit here yet.',
+      'I will answer your questions in my next message: ask what you need to settle and then stop. Do not guess the project\'s purpose for me.',
+      'Put the oracle map at project-root oracle-map.md and the tension list at project-root tension-list.md when you write them.',
+      'The installed plugin is already enabled for this invocation and its AMBER_HOME is isolated. Use its normal sensors and required read-only scan agents. Do not open a planning contract for bootstrap, and do not signal completion.',
+    ].join('\n'), { budget: 12, timeout: 1200000 });
+    const rows = ledger(home);
+    assert.equal(sensorFailures(home), '');
+    assert(rows.some(r => r.trigger === 'skill-invocation' && /amber:init/.test(r.summary)), 'init invocation missing');
+    assert(!rows.some(r => r.trigger === 'done-declaration'), 'empty-repo init must not declare completion');
+    assert(!fs.existsSync(path.join(root, '.amber', 'active.json')), 'init must not open a planning contract');
+    const raw = transcriptFiles(run, true).map(p => fs.readFileSync(p, 'utf8')).join('\n');
+    assert.match(raw, host === 'codex' ? /spawn_agent/ : /"name":"Agent"/, 'scan delegation absent');
+    const oracleMap = path.join(root, 'oracle-map.md');
+    assert(fs.existsSync(oracleMap), 'oracle map missing');
+    assert(!fs.existsSync(path.join(root, 'intent.md')), 'intent.md written without any operator answer');
+    const failures = assessInitEmpty(run.final, fs.readFileSync(oracleMap, 'utf8'));
+    assert.deepEqual(failures, [], 'init-empty semantic gate failed: ' + failures.join('; '));
+    return { outcome: 'init-empty-ask-gate-pass', session_id: run.sessionId, cost_usd: run.cost, turns: run.turns, root, ledger: rows, final: run.final };
   }
 
   if (scenario === 'init') {
@@ -193,3 +270,4 @@ module.exports = function runtimeQA(ctx) {
   return { outcome: 'runtime-resume-holds-scope-status-pass', session_id: firstId, root, ledger: rows, final: run.final };
 };
 module.exports.toolEvidence = toolEvidence;
+module.exports.assessInitEmpty = assessInitEmpty;

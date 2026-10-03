@@ -14,7 +14,9 @@ mapped, and the sensors are live.
 ## Principles
 
 - Every question stands on a scanned fact and cites its evidence - no
-  free-floating questionnaires.
+  free-floating questionnaires. An empty row is itself a scanned fact: a
+  charge that found nothing anchors the question for the role it leaves
+  unfilled, and cites the empty row as its evidence.
 - The generated or mapped documents become settled only by operator
   approval - the model generates, the human fixes.
 
@@ -53,7 +55,8 @@ mapped, and the sensors are live.
    disposition belongs to the operator.
 
    Exit: one oracle-map document merges everything the three charges
-   returned.
+   returned. A charge that found nothing is recorded as an explicit empty
+   row, never omitted - the empty row is the scan's result for that charge.
 2. **Interview (non-code track) -> tension list.** Reuse the planning
    taxonomy: conflict, gap, unanswered, solo-decision. Run the four ELICIT
    gates: attempt self-answer first (a self-answered row is kept with its
@@ -61,12 +64,26 @@ mapped, and the sensors are live.
    open-question tracking (a vague answer stays open until re-asked or
    explicitly deferred).
 
+   Questions raised by empty rows are bounded by the three slots of
+   intent.md - purpose (why the project exists), first oracle (what will
+   verify its work), and forbidden set (what it will never do). Everything
+   else an empty zone leaves open is either init's own default (the entry
+   router, status.md, the work-logs convention - generated in step 3,
+   tunable later) or a decision of the first planning cycle; neither is an
+   init question. Questions raised by rows that found something (a harness
+   asset above the zone, a statement that conflicts with code) keep their
+   own evidence and are not bounded by the slots.
+
    Exit: tension exhaustion - unresolved load-bearing decisions number zero
    (a countable end state, not a score), recorded in one tension-list
-   document.
+   document. For the empty-row questions that end is counted as: every
+   slot filled or explicitly deferred by the operator.
 3. **Documents - generate or map.** Greenfield: generate the four fixed
    documents (entry-point router `CLAUDE.md` on Claude Code or `AGENTS.md`
-   on Codex, intent.md, status.md, and the work-logs convention).
+   on Codex, intent.md, status.md, and the work-logs convention); intent.md
+   carries the three slots - purpose, first oracle, forbidden set - filled
+   from the operator's answers alone, no sentence the operator did not
+   supply.
    Brownfield: map first - assign existing assets to those roles and fill
    only the empty roles; never duplicate a source of truth. When a role
    requires changing an existing tracked file, ask the operator first: back
