@@ -16,8 +16,10 @@ on that utterance. There is no separate start ritual.
 ## Principles
 
 - Opening is the default for any work request - announce the opening in one
-  line. The operator may decline it; record a declined opening by invoking
-  the amber:mark skill with args `skip - declined opening - <reason>`.
+  line, as what you will do ("a few things to check before I start"), not
+  as a mechanism. The operator may decline it; record a declined opening
+  by invoking the amber:mark skill with args
+  `skip - declined opening - <reason>`.
 - A zone holds one run at a time. If the briefing says a run is active here
   and this session is not one of its driving sessions, say so before
   anything else and offer the two options: open the new work in its own

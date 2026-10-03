@@ -156,13 +156,18 @@ protocol, "Approval"), and only then creates the pointer itself.
    so a person with no context on this run would understand it - if the
    operator, who has the context, finds it hard to follow, the report
    failed. The operator must be able to judge approval from this report
-   alone, without opening the contract file. Do not show a shell command
-   for the operator to run and do not open a question popup: end the turn
-   and wait. Do not begin the run's work while the pointer does not exist.
+   alone, without opening the contract file. Speak in the run protocol's
+   operator-facing voice and end the report with one plain go-ahead
+   question ("Shall I go ahead with this scope?"). Do not show a shell
+   command for the operator to run and do not open a question popup: end
+   the turn and wait. Do not begin the run's work while the pointer does not
+   exist.
 
    Exit: the report is in the conversation and the turn has ended.
 6. **Read the reply as approval only when it is one.** Judge the operator's
-   reply by the run protocol's "Approval".
+   reply by the run protocol's "Approval": an unconditional yes to the
+   report's question, however short, is approval; a reply that carries a
+   condition, an edit, or a question is not.
    On an approval utterance, in that same turn: append a line to the
    plan's `## Progress log` quoting the utterance with its time, then
    create the pointer in the zone root:
@@ -177,8 +182,10 @@ protocol, "Approval"), and only then creates the pointer itself.
    Exit: the progress log quotes the approval utterance and
    `.amber/active.json` names this contract.
 7. **Announce execution.** The moment the pointer exists the run begins - no
-   separate start ritual. State plainly: write-scope and bash-deny rows are
-   now machine-enforced - E1 refuses file-tool writes outside the scope
+   separate start ritual. Tell the operator in one plain line what you start
+   with, in the operator-facing voice - nothing about the machinery. For
+   your own orientation: the write-scope and bash-deny rows are now
+   machine-enforced - E1 refuses file-tool writes outside the scope
    before they happen, and at `unit verified` and `done` the record command
    compares the files git reports as changed with the write-scope and
    refuses an undeclared out-of-scope file (declare a legitimate one with

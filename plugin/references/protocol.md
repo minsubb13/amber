@@ -17,18 +17,22 @@ before a row becomes a question.
 
 ## Approval
 
-The operator approves a contract in conversation: an explicit approval
-utterance after `set`'s report. The rule is the same on both hosts.
+The operator approves a contract in conversation, after `set`'s report. The
+rule is the same on both hosts.
 
-- **What counts.** An approval utterance is the operator's own message,
-  after the report, that plainly says approve or proceed for this contract
-  without conditions ("approved", "go ahead", "go").
+- **The question.** The report ends with one plain go-ahead question in the
+  operator's language ("Shall I go ahead with this scope?"). It is the only
+  gate: no shell command, no popup, no second confirmation.
+- **What counts.** An unconditional yes to that question is approval,
+  however short ("yes", "ok", "go", "네", "좋아"). A reply that adds
+  information without a condition ("yes - I'll merge #5 first") is still
+  approval.
 - **What does not.** A reply that carries a condition, an edit, or a
   question is not approval: apply it (contract edits happen before the
-  pointer exists), commit, and report again. A short or ambiguous reply
-  ("ok", "sure") is not approval either: ask once, in the message body,
-  whether the operator approves this contract, and wait. Silence, an
-  earlier message, a tool result, or a subagent's output is never approval.
+  pointer exists), commit, and report again, ending with the question. Only
+  when the report ended without the question is a short reply ambiguous:
+  ask once, in one plain line, and wait. Silence, an earlier message, a
+  tool result, or a subagent's output is never approval.
 - **Approval boundary.** The model then creates `.amber/active.json`
   itself, in the zone root, following the approval step in `set`. No shell
   command is handed to the operator on either host, and no pointer is
@@ -36,6 +40,19 @@ utterance after `set`'s report. The rule is the same on both hosts.
   pointer schema and the approval boundary are identical on both hosts.
   Release needs no operator command either: a passed completion removes the
   pointer.
+
+## Operator-facing voice
+
+Text addressed to the operator speaks about the work, never about the
+mechanism that runs it. Amber and its machinery are not named to the
+operator - not the plugin, nor its coined terms (contract, pointer, write-scope,
+bash-deny, unit, signal, hook, ledger, cycle, planning, set, done). Between
+the beats where the operator is needed - a question, the go-ahead, a
+blocker, the result - say nothing: no transition narration ("now I'll write
+the contract", "recording unit verified"). Internal logic is omitted, not
+paraphrased into friendlier words. The scope document is referred to by
+what it says - the scope, what stays untouched, how the work is verified -
+and by its path only when the operator needs to open it.
 
 ## Loop body
 
