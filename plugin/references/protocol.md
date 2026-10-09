@@ -84,8 +84,11 @@ commands").
   contract excerpt, its unit row, and its oracle only; its first action is
   `node "<amber_plugin_root>/scripts/record.cjs" unit claim U<n>`, after
   which the enforcer holds its writes to that unit's scope.
-- **Merge.** The main agent re-runs the unit's oracle in the worktree before
-  marking it `verified`, merges every verified worktree into the main
+- **Merge.** The main agent re-runs the unit's oracle itself before marking
+  it `verified`, whichever worker did the unit's work (a subagent in its
+  worktree, another session, a person), and writes what the oracle showed
+  into `unit verified --evidence`; the record command refuses an
+  empty `--evidence`. It merges every verified worktree into the main
   checkout at the end, removes the worktrees, and runs the integration unit
   there; the Stop hook rejects a completion signal while any unit worktree
   (a linked worktree inside the zone directory) remains. A linked worktree
