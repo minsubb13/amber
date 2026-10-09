@@ -698,6 +698,28 @@ const sessionState = (home, sessionId) => {
   check('unit failed keeps the unit open and records it',
     fail.status === 0 && progress().units.U3.status === 'failed' && rows('unit-failed').length === 1);
 
+  // verified / failed refuse a missing or blank --evidence and flags they do not read
+  const u3History = progress().units.U3.history.length;
+  const refuses = (res, re) => res.status !== 0 && re.test(res.stderr || '') &&
+    progress().units.U3.status === 'failed' && progress().units.U3.history.length === u3History &&
+    rows('unit-verified').length === 1 && rows('unit-failed').length === 1;
+  const noFlag = record(['unit', 'verified', 'U3']);
+  check('unit verified refuses a missing --evidence and records nothing',
+    refuses(noFlag, /--evidence is missing or blank/) && /accepts --evidence and --out-of-scope/.test(noFlag.stderr),
+    noFlag.stderr);
+  const blank = record(['unit', 'verified', 'U3', '--evidence', '']);
+  check('unit verified refuses a blank --evidence', refuses(blank, /--evidence is missing or blank/), blank.stderr);
+  const note = record(['unit', 'verified', 'U3', '--note', 'oracle green']);
+  check('unit verified refuses a flag it does not read and names it',
+    refuses(note, /unknown flag --note/) && /--evidence is missing or blank/.test(note.stderr), note.stderr);
+  const failNoFlag = record(['unit', 'failed', 'U3']);
+  check('unit failed refuses a missing --evidence and records nothing',
+    refuses(failNoFlag, /--evidence is missing or blank/) && /accepts --evidence;/.test(failNoFlag.stderr),
+    failNoFlag.stderr);
+  const failReason = record(['unit', 'failed', 'U3', '--evidence', 'runner red', '--reason', 'x']);
+  check('unit failed refuses a flag it does not read even with evidence present',
+    refuses(failReason, /unknown flag --reason/) && !/missing or blank/.test(failReason.stderr), failReason.stderr);
+
   // the done command refuses while units are open
   const home2 = freshHome('loop-decl');
   runHook('S0', { session_id: 's2-test', cwd: zone, model: 'loop-model' }, home2);

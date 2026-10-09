@@ -10,8 +10,8 @@ const USAGE = [
   '  node record.cjs unit init <plan-path> [--force]',
   '  node record.cjs unit claim <U#>',
   '  node record.cjs unit start <U#>',
-  '  node record.cjs unit verified <U#> --evidence <text...> [--out-of-scope <path>=<reason> ...]',
-  '  node record.cjs unit failed <U#> --evidence <text...>',
+  '  node record.cjs unit verified <U#> --evidence <text...> (required) [--out-of-scope <path>=<reason> ...]',
+  '  node record.cjs unit failed <U#> --evidence <text...> (required)',
   '  node record.cjs unit hold <U#> --reason <text...>',
   '  node record.cjs done --review <text...> [--goal <text...>] --summary <text...>',
   '                  [--out-of-scope <path>=<reason> ...]',
@@ -23,6 +23,9 @@ const USAGE = [
   'otherwise the session the E1 hook registered for this run (its id and model',
   'reach the ledger row). Uses the current directory and AMBER_HOME (default',
   '~/.amber).',
+  '',
+  'unit verified and unit failed refuse a missing or blank --evidence and any flag',
+  'they do not read (its text would otherwise be dropped without a trace).',
   '',
   'unit hold passes the next stop once. A --reason starting with "external:" is a',
   'waiting-on-an-external-job hold: every stop passes until that unit next starts,',
@@ -102,6 +105,20 @@ function unitCommand(name, rest) {
     return;
   }
   const text = optionText(rest.slice(1), name === 'hold' ? '--reason' : '--evidence');
+  // verified and failed carry the evidence the ledger audits: a missing or
+  // blank --evidence, or a flag the command does not read (its text would be
+  // dropped silently), refuses the transition before anything is written.
+  if (name === 'verified' || name === 'failed') {
+    const accepted = name === 'verified' ? ['--evidence', '--out-of-scope'] : ['--evidence'];
+    const unknown = rest.slice(1).filter((a) => a.startsWith('--') && !accepted.includes(a));
+    const problems = [];
+    if (unknown.length > 0) problems.push('unknown flag ' + unknown.join(', ') + ' (not read, its text would be lost)');
+    if (!text) problems.push('--evidence is missing or blank');
+    if (problems.length > 0) {
+      throw new Error('unit ' + name + ' ' + id + ' refused: ' + problems.join('; ') +
+        '. The command accepts ' + accepted.join(' and ') + '; nothing was recorded.');
+    }
+  }
   // verified advances the run, so the changed files are compared with the
   // write-scope first; an undeclared out-of-scope file refuses the transition.
   let scopeFields = {};
