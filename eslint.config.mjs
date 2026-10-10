@@ -25,6 +25,10 @@ export default defineConfig(
         { 'ts-expect-error': true, 'ts-ignore': true, 'ts-nocheck': true, 'ts-check': false },
       ],
       '@typescript-eslint/no-explicit-any': 'error',
+      // CommonJS sources (.cts) import with `import x = require(...)`, the
+      // only form verbatimModuleSyntax accepts there; bare require() stays
+      // forbidden.
+      '@typescript-eslint/no-require-imports': ['error', { allowAsImport: true }],
     },
   },
 );
