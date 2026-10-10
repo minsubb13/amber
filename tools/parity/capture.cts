@@ -102,6 +102,10 @@ function chunkText(chunk: unknown): string {
   return '';
 }
 
+// Depth of stream.write calls in progress: a stream backed by a file writes
+// through fs.writeSync, which must not be recorded a second time.
+let streamDepth = 0;
+
 function tapWrites(stream: NodeJS.WriteStream, sink: string[]): void {
   const original = stream.write.bind(stream);
   Object.defineProperty(stream, 'write', {
@@ -109,9 +113,52 @@ function tapWrites(stream: NodeJS.WriteStream, sink: string[]): void {
     writable: true,
     value: (...args: unknown[]): unknown => {
       sink.push(chunkText(args[0]));
-      return Reflect.apply(original, stream, args);
+      streamDepth += 1;
+      try {
+        return Reflect.apply(original, stream, args);
+      } finally {
+        streamDepth -= 1;
+      }
     },
   });
+}
+
+const STD_PATHS = new Map<unknown, 1 | 2>([
+  [1, 1],
+  [2, 2],
+  ['/dev/stdout', 1],
+  ['/dev/stderr', 2],
+  ['/dev/fd/1', 1],
+  ['/dev/fd/2', 2],
+]);
+
+/**
+ * Records writes that reach fd 1 or 2 through fs instead of the streams
+ * (fs.writeSync, fs.write, fs.writeFileSync, fs.appendFileSync), so a port
+ * that changes the output channel is still compared on content.
+ */
+function tapFsWrites(stdout: string[], stderr: string[]): void {
+  const methods: [string, number][] = [
+    ['writeSync', 1],
+    ['write', 1],
+    ['writeFileSync', 1],
+    ['appendFileSync', 1],
+  ];
+  for (const [name, dataIndex] of methods) {
+    const original: unknown = Reflect.get(fs, name);
+    if (typeof original !== 'function') continue;
+    Object.defineProperty(fs, name, {
+      configurable: true,
+      writable: true,
+      value: (...args: unknown[]): unknown => {
+        const target = STD_PATHS.get(args[0]);
+        if (target !== undefined && streamDepth === 0) {
+          (target === 1 ? stdout : stderr).push(chunkText(args[dataIndex]));
+        }
+        return Reflect.apply(original, fs, args);
+      },
+    });
+  }
 }
 
 function install(entry: string): void {
@@ -140,6 +187,7 @@ function install(entry: string): void {
   }
   tapWrites(process.stdout, stdout);
   tapWrites(process.stderr, stderr);
+  tapFsWrites(stdout, stderr);
 
   process.on('exit', (code: number) => {
     const ledgerNow = readOrNull(ledgerFile) ?? '';

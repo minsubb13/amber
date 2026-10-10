@@ -33,3 +33,18 @@ export const MUTATIONS: readonly Mutation[] = [
     replace: '    blocks: 1,\n',
   },
 ];
+
+/**
+ * Controls that change how output is produced but not what the outside sees;
+ * the comparison must report no difference for them. One moves a record.cjs
+ * message from process.stdout.write to fs.writeSync(1, ...), which capture
+ * has to follow.
+ */
+export const CONTROLS: readonly Mutation[] = [
+  {
+    name: 'stdout through fs.writeSync',
+    file: 'scripts/record.cjs',
+    find: "process.stdout.write('amber: unit ' + id + ' -> '",
+    replace: "require('node:fs').writeSync(1, 'amber: unit ' + id + ' -> '",
+  },
+];

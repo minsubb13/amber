@@ -2,15 +2,12 @@
 
 import { spawnSync } from 'node:child_process';
 import {
-  copyFileSync,
   cpSync,
   mkdirSync,
   mkdtempSync,
-  readdirSync,
   readFileSync,
   realpathSync,
   rmSync,
-  statSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -39,41 +36,29 @@ export function copyCandidate(repo: string, dest: string): string {
   return target;
 }
 
-/** Code paths of the plugin, relative to it: what a parity run compares. */
-const CODE_DIRS = ['hooks', 'scripts', 'lib'];
-
-function isCode(rel: string): boolean {
-  const [dir, ...rest] = rel.split('/');
-  if (dir === undefined || !CODE_DIRS.includes(dir)) return false;
-  return dir === 'lib' || (rest.length === 1 && rel.endsWith('.cjs'));
-}
-
-function listFiles(root: string, rel = ''): string[] {
-  const dir = join(root, rel);
-  return readdirSync(dir).flatMap((name) => {
-    const child = rel === '' ? name : `${rel}/${name}`;
-    return statSync(join(dir, name)).isDirectory()
-      ? listFiles(root, child)
-      : [child];
-  });
-}
+/**
+ * Paths the reference build takes from the working tree instead of `commit`:
+ * the test suites, so both builds run the same tests, and the two manifests,
+ * whose version field is the one outside-visible change every release makes
+ * on purpose (it reaches each ledger row as plugin_version).
+ */
+export const SHARED_WITH_CANDIDATE = [
+  'tests',
+  '.claude-plugin/plugin.json',
+  '.codex-plugin/plugin.json',
+];
 
 /**
- * The reference build: the working tree's plugin/ with its code (hooks/*.cjs,
- * scripts/*.cjs, lib/) replaced by that of `commit`. Tests, manifests (the
- * version), skills, references, hooks.json and run.sh are the candidate's
- * own, so both builds run the same suites and differ only in code.
+ * The reference build: plugin/ of `commit` (code, run.sh, hooks.json, skills,
+ * references) with the SHARED_WITH_CANDIDATE paths taken from the working
+ * tree.
  */
 export function extractReference(
   repo: string,
   commit: string,
   dest: string,
 ): string {
-  const target = copyCandidate(repo, dest);
-  for (const rel of listFiles(target).filter(isCode)) {
-    rmSync(join(target, rel));
-  }
-  rmSync(join(target, 'lib'), { recursive: true, force: true });
+  mkdirSync(dest, { recursive: true });
   const archive = spawnSync(
     'git',
     ['-C', repo, 'archive', '--format=tar', commit, 'plugin'],
@@ -84,18 +69,16 @@ export function extractReference(
       `git archive ${commit} failed: ${archive.stderr.toString()}`,
     );
   }
-  const full = join(dest, 'archive');
-  mkdirSync(full, { recursive: true });
-  const tar = spawnSync('tar', ['-x', '-C', full], { input: archive.stdout });
+  const tar = spawnSync('tar', ['-x', '-C', dest], { input: archive.stdout });
   if (tar.status !== 0) {
     throw new Error(`tar failed: ${tar.stderr.toString()}`);
   }
-  const source = join(full, 'plugin');
-  for (const rel of listFiles(source).filter(isCode)) {
+  const target = join(dest, 'plugin');
+  for (const rel of SHARED_WITH_CANDIDATE) {
+    rmSync(join(target, rel), { recursive: true, force: true });
     mkdirSync(dirname(join(target, rel)), { recursive: true });
-    copyFileSync(join(source, rel), join(target, rel));
+    cpSync(join(repo, 'plugin', rel), join(target, rel), { recursive: true });
   }
-  rmSync(full, { recursive: true, force: true });
   return target;
 }
 

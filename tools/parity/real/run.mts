@@ -415,9 +415,29 @@ export async function runAuditCases(
   for (const prefix of sampleSessions(ledgerText, 30)) {
     commands.push(['session', prefix], ['check-session', prefix]);
   }
+  const env = { ...baseEnv(snapshot), AMBER_HOME: snapshot };
+  // check-summary reads a report: one built from the reference's own summary
+  // block (it reproduces) and a copy with one line changed (it does not).
+  const summary = await runProcess(
+    process.execPath,
+    [
+      join(builds.reference, 'scripts/audit.cjs'),
+      'summary',
+      '--period-end',
+      periodEnd,
+    ],
+    { cwd: snapshot, env, timeoutMs: 600_000 },
+  );
+  const fence = '```';
+  const report = join(snapshot, 'report.md');
+  writeFileSync(report, `# report\n\n${fence}\n${summary.stdout}${fence}\n`);
+  const lines = summary.stdout.split('\n');
+  lines[2] = `${lines[2] ?? ''} changed`;
+  const changed = join(snapshot, 'report-changed.md');
+  writeFileSync(changed, `# report\n\n${fence}\n${lines.join('\n')}${fence}\n`);
+  commands.push(['check-summary', report], ['check-summary', changed]);
   for (const command of commands) {
     const args = [...command, '--period-end', periodEnd];
-    const env = { ...baseEnv(snapshot), AMBER_HOME: snapshot };
     const once = (plugin: string): Promise<ProcessResult> =>
       runProcess(
         process.execPath,
