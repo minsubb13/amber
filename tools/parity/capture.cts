@@ -99,26 +99,55 @@ function toBuffer(value: unknown): Buffer {
   return Buffer.isBuffer(value) ? value : Buffer.alloc(0);
 }
 
-/** Child side: record what the product reads from stdin, for the record. */
+/**
+ * Child side. The marker variable is removed before the product starts, so
+ * neither the product nor any process it starts sees it. What the product
+ * reads from stdin is recorded whatever API it uses: bytes enter
+ * process.stdin through push() (data events, readable/read(), async
+ * iteration), and reads of fd 0 or /dev/stdin through fs are recorded too.
+ */
 function recordStdin(innerFile: string): void {
+  Reflect.deleteProperty(process.env, INNER_ENV);
   const stdin: string[] = [];
-  let tapped = false;
-  process.stdin.on('newListener', (event: string | symbol) => {
-    if (event !== 'data' || tapped) return;
-    tapped = true;
-    process.stdin.on('data', (chunk: unknown) => {
-      stdin.push(chunkText(chunk));
-    });
+  const stream = process.stdin;
+  const push = stream.push.bind(stream);
+  Object.defineProperty(stream, 'push', {
+    configurable: true,
+    writable: true,
+    value: (...args: unknown[]): unknown => {
+      stdin.push(chunkText(args[0]));
+      return Reflect.apply(push, stream, args);
+    },
   });
-  const original: unknown = Reflect.get(fs, 'readFileSync');
-  if (typeof original === 'function') {
+  const isStdin = (target: unknown): boolean =>
+    target === 0 || target === '/dev/stdin';
+  const readFileSync: unknown = Reflect.get(fs, 'readFileSync');
+  if (typeof readFileSync === 'function') {
     Object.defineProperty(fs, 'readFileSync', {
       configurable: true,
       writable: true,
       value: (...args: unknown[]): unknown => {
-        const result: unknown = Reflect.apply(original, fs, args);
-        if (args[0] === 0 || args[0] === '/dev/stdin') {
-          stdin.push(chunkText(result));
+        const result: unknown = Reflect.apply(readFileSync, fs, args);
+        if (isStdin(args[0])) stdin.push(chunkText(result));
+        return result;
+      },
+    });
+  }
+  const readSync: unknown = Reflect.get(fs, 'readSync');
+  if (typeof readSync === 'function') {
+    Object.defineProperty(fs, 'readSync', {
+      configurable: true,
+      writable: true,
+      value: (...args: unknown[]): unknown => {
+        const result: unknown = Reflect.apply(readSync, fs, args);
+        const buffer = args[1];
+        if (
+          isStdin(args[0]) &&
+          typeof result === 'number' &&
+          buffer instanceof Uint8Array
+        ) {
+          const offset = typeof args[2] === 'number' ? args[2] : 0;
+          stdin.push(chunkText(buffer.subarray(offset, offset + result)));
         }
         return result;
       },
@@ -160,8 +189,6 @@ function runOuter(entry: string): never {
           Buffer.from(`parity capture: ${child.error.message}\n`),
         ]);
   const signal = child.signal;
-  const exitCode =
-    child.status ?? (signal === null ? 1 : 128 + os.constants.signals[signal]);
 
   const ledgerNow = readOrNull(ledgerFile) ?? '';
   const stateNow = stamp(stateDir);
@@ -180,7 +207,8 @@ function runOuter(entry: string): never {
     stdin: readOrNull(innerFile) ?? '',
     stdout: stdout.toString('utf8'),
     stderr: stderr.toString('utf8'),
-    exitCode,
+    exitCode: child.status,
+    signal,
     ledger: Buffer.from(ledgerNow, 'utf8')
       .subarray(ledgerStart)
       .toString('utf8'),
@@ -204,7 +232,7 @@ function runOuter(entry: string): never {
   if (stdout.length > 0) fs.writeSync(1, stdout);
   if (stderr.length > 0) fs.writeSync(2, stderr);
   if (signal !== null) process.kill(process.pid, signal);
-  process.exit(exitCode);
+  process.exit(child.status ?? 1);
 }
 
 const entry = productEntry();

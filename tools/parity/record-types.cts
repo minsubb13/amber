@@ -13,7 +13,10 @@ export interface CaptureRecord {
   readonly stdin: string;
   readonly stdout: string;
   readonly stderr: string;
-  readonly exitCode: number;
+  /** Exit code, or null when the process ended by a signal. */
+  readonly exitCode: number | null;
+  /** The signal that ended the process, or null. */
+  readonly signal: string | null;
   readonly ledger: string;
   readonly state: readonly FileEffect[];
   readonly zone: readonly FileEffect[];

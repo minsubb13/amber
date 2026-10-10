@@ -4,6 +4,7 @@ import { spawn } from 'node:child_process';
 
 export interface ProcessResult {
   readonly status: number | null;
+  readonly signal: string | null;
   readonly stdout: string;
   readonly stderr: string;
 }
@@ -37,10 +38,11 @@ export function runProcess(
       clearTimeout(timer);
       reject(err);
     });
-    child.on('close', (status) => {
+    child.on('close', (status, signal) => {
       clearTimeout(timer);
       resolve({
         status,
+        signal,
         stdout: Buffer.concat(stdout).toString('utf8'),
         stderr: Buffer.concat(stderr).toString('utf8'),
       });

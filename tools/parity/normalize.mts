@@ -81,6 +81,7 @@ export function makeNormalizer(
     ]);
     const output = JSON.stringify([
       record.exitCode,
+      record.signal,
       record.stdout,
       record.stderr,
       record.ledger,

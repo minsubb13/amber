@@ -20,7 +20,8 @@ function parseEffects(value: unknown): FileEffect[] | null {
 
 export function parseRecord(value: unknown): CaptureRecord | null {
   if (!isRecord(value)) return null;
-  const { entry, args, cwd, stdin, stdout, stderr, exitCode, ledger } = value;
+  const { entry, args, cwd, stdin, stdout, stderr, exitCode, signal, ledger } =
+    value;
   const state = parseEffects(value['state']);
   const zone = parseEffects(value['zone']);
   if (
@@ -30,7 +31,8 @@ export function parseRecord(value: unknown): CaptureRecord | null {
     typeof stdin !== 'string' ||
     typeof stdout !== 'string' ||
     typeof stderr !== 'string' ||
-    typeof exitCode !== 'number' ||
+    !(exitCode === null || typeof exitCode === 'number') ||
+    !isStringOrNull(signal) ||
     typeof ledger !== 'string' ||
     state === null ||
     zone === null
@@ -45,6 +47,7 @@ export function parseRecord(value: unknown): CaptureRecord | null {
     stdout,
     stderr,
     exitCode,
+    signal,
     ledger,
     state,
     zone,
