@@ -153,6 +153,73 @@ function recordStdin(innerFile: string): void {
       },
     });
   }
+  // Asynchronous reads of fd 0 or /dev/stdin: the callback forms of
+  // fs.readFile and fs.read, and fs.promises.readFile.
+  const readFile: unknown = Reflect.get(fs, 'readFile');
+  if (typeof readFile === 'function') {
+    Object.defineProperty(fs, 'readFile', {
+      configurable: true,
+      writable: true,
+      value: (...args: unknown[]): unknown => {
+        const callback = args[args.length - 1];
+        if (isStdin(args[0]) && typeof callback === 'function') {
+          args[args.length - 1] = (...results: unknown[]): unknown => {
+            if (results[0] === null) stdin.push(chunkText(results[1]));
+            const value: unknown = Reflect.apply(callback, undefined, results);
+            return value;
+          };
+        }
+        return Reflect.apply(readFile, fs, args);
+      },
+    });
+  }
+  const read: unknown = Reflect.get(fs, 'read');
+  if (typeof read === 'function') {
+    Object.defineProperty(fs, 'read', {
+      configurable: true,
+      writable: true,
+      value: (...args: unknown[]): unknown => {
+        const callback = args[args.length - 1];
+        if (isStdin(args[0]) && typeof callback === 'function') {
+          const offset = typeof args[2] === 'number' ? args[2] : 0;
+          args[args.length - 1] = (...results: unknown[]): unknown => {
+            const [err, count, buffer] = results;
+            if (
+              err === null &&
+              typeof count === 'number' &&
+              buffer instanceof Uint8Array
+            ) {
+              stdin.push(chunkText(buffer.subarray(offset, offset + count)));
+            }
+            const value: unknown = Reflect.apply(callback, undefined, results);
+            return value;
+          };
+        }
+        return Reflect.apply(read, fs, args);
+      },
+    });
+  }
+  const promises: unknown = Reflect.get(fs, 'promises');
+  const promiseReadFile: unknown =
+    typeof promises === 'object' && promises !== null
+      ? Reflect.get(promises, 'readFile')
+      : undefined;
+  if (typeof promiseReadFile === 'function') {
+    Object.defineProperty(promises, 'readFile', {
+      configurable: true,
+      writable: true,
+      value: (...args: unknown[]): unknown => {
+        const result: unknown = Reflect.apply(promiseReadFile, promises, args);
+        if (isStdin(args[0]) && result instanceof Promise) {
+          return result.then((data: unknown) => {
+            stdin.push(chunkText(data));
+            return data;
+          });
+        }
+        return result;
+      },
+    });
+  }
   process.on('exit', () => {
     fs.writeFileSync(innerFile, stdin.join(''));
   });

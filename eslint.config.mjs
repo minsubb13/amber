@@ -31,4 +31,39 @@ export default defineConfig(
       '@typescript-eslint/no-require-imports': ['error', { allowAsImport: true }],
     },
   },
+  {
+    // The plugin is a set of short synchronous programs: the reference code
+    // uses no asynchronous I/O, promises, timers or signal handlers (only the
+    // hook reads stdin through stream events). Keeping the port that way
+    // keeps output order tied to the writes it reports and leaves no signal
+    // handling to compare, which the parity capture cannot observe.
+    files: ['src/**/*.ts', 'src/**/*.cts', 'src/**/*.mts'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        { paths: ['fs/promises', 'node:fs/promises'], patterns: ['*/promises'] },
+      ],
+      'no-restricted-syntax': [
+        'error',
+        { selector: ':function[async=true]', message: 'Plugin code stays synchronous.' },
+        { selector: 'AwaitExpression', message: 'Plugin code stays synchronous.' },
+        { selector: "MemberExpression[property.name='then']", message: 'Plugin code stays synchronous.' },
+        { selector: "MemberExpression[object.name='fs'][property.name='promises']", message: 'Use synchronous fs.' },
+        {
+          selector:
+            "CallExpression[callee.object.name='fs'][callee.property.name=/^(access|appendFile|chmod|close|copyFile|mkdir|open|read|readdir|readFile|rename|rm|rmdir|stat|unlink|write|writeFile)$/]",
+          message: 'Use the synchronous fs API.',
+        },
+        {
+          selector: "CallExpression[callee.name=/^(setTimeout|setInterval|setImmediate|queueMicrotask)$/]",
+          message: 'Plugin code stays synchronous.',
+        },
+        {
+          selector:
+            "CallExpression[callee.object.name='process'][callee.property.name=/^(on|once|addListener|prependListener|prependOnceListener)$/][arguments.0.value=/^SIG/]",
+          message: 'Plugin code installs no signal handlers.',
+        },
+      ],
+    },
+  },
 );
