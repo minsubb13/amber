@@ -1,53 +1,34 @@
-// Preloaded into every node process of a parity run through
-// NODE_OPTIONS=--require. In a product process - a script directly under
-// $AMBER_PARITY_PLUGIN/hooks or /scripts - it records the invocation and every
-// effect Amber shows to the outside into $AMBER_PARITY_CAPTURE_DIR: argv, cwd,
-// stdin, stdout, stderr, exit code, the ledger bytes appended, the state
-// files changed, and the zone's .amber files after the process. In any other
-// process it does nothing.
+// Capture of product processes for the test-driven parity run.
+//
+// In each plugin copy under comparison, every product entry point
+// (ENTRY_POINTS) is moved to <name>.parity-real.cjs and replaced by a small
+// wrapper (wrapperSource). Run as a program, the wrapper starts the real entry
+// as a child process with piped stdin, stdout and stderr, so everything the
+// product writes to file descriptors 1 and 2 - through streams, fs, native
+// code, or a grandchild that inherits them - passes through the pipes and is
+// recorded. It then forwards the output and exit code unchanged, and writes
+// one CaptureRecord into $AMBER_PARITY_CAPTURE_DIR: argv, cwd, stdin, stdout,
+// stderr, exit code, the ledger bytes appended, the state files changed, and
+// the zone's .amber files afterwards. Required as a module (record.cjs
+// requires the hook), the wrapper hands back the real module.
 
+import childProcess = require('node:child_process');
 import fs = require('node:fs');
 import os = require('node:os');
 import path = require('node:path');
 
-export interface FileEffect {
-  readonly path: string;
-  /** File content after the process, or null when the file is absent. */
-  readonly content: string | null;
-}
+import type { CaptureRecord } from './record-types.cjs';
 
-export interface CaptureRecord {
-  readonly entry: string;
-  readonly args: readonly string[];
-  readonly cwd: string;
-  readonly stdin: string;
-  readonly stdout: string;
-  readonly stderr: string;
-  readonly exitCode: number;
-  readonly ledger: string;
-  readonly state: readonly FileEffect[];
-  readonly zone: readonly FileEffect[];
-}
+/** Product files that hosts and tests run as programs. */
+const ENTRY_POINTS = [
+  'hooks/amber-hook.cjs',
+  'scripts/record.cjs',
+  'scripts/audit.cjs',
+];
+
+const REAL_SUFFIX = '.parity-real.cjs';
 
 const ZONE_FILES = ['active.json', 'progress.json', 'done.json'];
-
-function productEntry(): string | null {
-  const captureDir = process.env['AMBER_PARITY_CAPTURE_DIR'];
-  const pluginDir = process.env['AMBER_PARITY_PLUGIN'];
-  const script = process.argv[1];
-  if (
-    captureDir === undefined ||
-    pluginDir === undefined ||
-    script === undefined
-  ) {
-    return null;
-  }
-  const rel = path
-    .relative(pluginDir, path.resolve(script))
-    .split(path.sep)
-    .join('/');
-  return /^(hooks|scripts)\/[^/]+\.cjs$/.test(rel) ? rel : null;
-}
 
 function readOrNull(file: string): string | null {
   try {
@@ -96,140 +77,118 @@ function zoneRoot(cwd: string): string | null {
   }
 }
 
-function chunkText(chunk: unknown): string {
-  if (typeof chunk === 'string') return chunk;
-  if (chunk instanceof Uint8Array) return Buffer.from(chunk).toString('utf8');
-  return '';
-}
-
-// Depth of stream.write calls in progress: a stream backed by a file writes
-// through fs.writeSync, which must not be recorded a second time.
-let streamDepth = 0;
-
-function tapWrites(stream: NodeJS.WriteStream, sink: string[]): void {
-  const original = stream.write.bind(stream);
-  Object.defineProperty(stream, 'write', {
-    configurable: true,
-    writable: true,
-    value: (...args: unknown[]): unknown => {
-      sink.push(chunkText(args[0]));
-      streamDepth += 1;
-      try {
-        return Reflect.apply(original, stream, args);
-      } finally {
-        streamDepth -= 1;
-      }
-    },
-  });
-}
-
-const STD_PATHS = new Map<unknown, 1 | 2>([
-  [1, 1],
-  [2, 2],
-  ['/dev/stdout', 1],
-  ['/dev/stderr', 2],
-  ['/dev/fd/1', 1],
-  ['/dev/fd/2', 2],
-]);
-
-/**
- * Records writes that reach fd 1 or 2 through fs instead of the streams
- * (fs.writeSync, fs.write, fs.writeFileSync, fs.appendFileSync), so a port
- * that changes the output channel is still compared on content.
- */
-function tapFsWrites(stdout: string[], stderr: string[]): void {
-  const methods: [string, number][] = [
-    ['writeSync', 1],
-    ['write', 1],
-    ['writeFileSync', 1],
-    ['appendFileSync', 1],
-  ];
-  for (const [name, dataIndex] of methods) {
-    const original: unknown = Reflect.get(fs, name);
-    if (typeof original !== 'function') continue;
-    Object.defineProperty(fs, name, {
-      configurable: true,
-      writable: true,
-      value: (...args: unknown[]): unknown => {
-        const target = STD_PATHS.get(args[0]);
-        if (target !== undefined && streamDepth === 0) {
-          (target === 1 ? stdout : stderr).push(chunkText(args[dataIndex]));
-        }
-        return Reflect.apply(original, fs, args);
-      },
-    });
+function readStdin(): Buffer {
+  if (process.stdin.isTTY) return Buffer.alloc(0);
+  try {
+    return fs.readFileSync(0);
+  } catch {
+    return Buffer.alloc(0);
   }
 }
 
-function install(entry: string): void {
-  const captureDir = process.env['AMBER_PARITY_CAPTURE_DIR'] ?? '';
+/** Runs the real entry as a child, forwards its output, records the run. */
+function runWrapped(entry: string, real: string): void {
+  const captureDir = process.env['AMBER_PARITY_CAPTURE_DIR'] ?? os.tmpdir();
   const home = process.env['AMBER_HOME'] ?? path.join(os.homedir(), '.amber');
   const ledgerFile = path.join(home, 'runs.jsonl');
   const stateDir = path.join(home, 'state');
   const ledgerStart = sizeOf(ledgerFile);
   const stateStart = stamp(stateDir);
   const cwd = process.cwd();
-  const stdin: string[] = [];
-  const stdout: string[] = [];
-  const stderr: string[] = [];
+  const args = process.argv.slice(2);
+  const stdin = readStdin();
 
-  if (entry === 'hooks/amber-hook.cjs') {
-    // Tap stdin only where the product reads it, so a script that never
-    // reads stdin is not kept waiting for its end.
-    let tapped = false;
-    process.stdin.on('newListener', (event: string | symbol) => {
-      if (event !== 'data' || tapped) return;
-      tapped = true;
-      process.stdin.on('data', (chunk: unknown) => {
-        stdin.push(chunkText(chunk));
-      });
-    });
+  const child = childProcess.spawnSync(process.execPath, [real, ...args], {
+    input: stdin,
+    stdio: ['pipe', 'pipe', 'pipe'],
+    maxBuffer: 256 * 1024 * 1024,
+  });
+  const stdout = child.stdout;
+  const stderr = child.stderr;
+  const exitCode = child.status ?? 1;
+
+  const ledgerNow = readOrNull(ledgerFile) ?? '';
+  const stateNow = stamp(stateDir);
+  const changed = new Set<string>();
+  for (const [name, value] of stateNow) {
+    if (stateStart.get(name) !== value) changed.add(name);
   }
-  tapWrites(process.stdout, stdout);
-  tapWrites(process.stderr, stderr);
-  tapFsWrites(stdout, stderr);
-
-  process.on('exit', (code: number) => {
-    const ledgerNow = readOrNull(ledgerFile) ?? '';
-    const stateNow = stamp(stateDir);
-    const changed = new Set<string>();
-    for (const [name, value] of stateNow) {
-      if (stateStart.get(name) !== value) changed.add(name);
-    }
-    for (const name of stateStart.keys()) {
-      if (!stateNow.has(name)) changed.add(name);
-    }
-    const root = zoneRoot(cwd);
-    const record: CaptureRecord = {
-      entry,
-      args: process.argv.slice(2),
-      cwd,
-      stdin: stdin.join(''),
-      stdout: stdout.join(''),
-      stderr: stderr.join(''),
-      exitCode: code,
-      ledger: Buffer.from(ledgerNow, 'utf8')
-        .subarray(ledgerStart)
-        .toString('utf8'),
-      state: [...changed].sort().map((name) => ({
-        path: `state/${name}`,
-        content: readOrNull(path.join(stateDir, name)),
-      })),
-      zone:
-        root === null
-          ? []
-          : ZONE_FILES.map((name) => ({
-              path: `.amber/${name}`,
-              content: readOrNull(path.join(root, '.amber', name)),
-            })),
-    };
-    const file = path.join(
+  for (const name of stateStart.keys()) {
+    if (!stateNow.has(name)) changed.add(name);
+  }
+  const root = zoneRoot(cwd);
+  const record: CaptureRecord = {
+    entry,
+    args,
+    cwd,
+    stdin: stdin.toString('utf8'),
+    stdout: stdout.toString('utf8'),
+    stderr: stderr.toString('utf8'),
+    exitCode,
+    ledger: Buffer.from(ledgerNow, 'utf8')
+      .subarray(ledgerStart)
+      .toString('utf8'),
+    state: [...changed].sort().map((name) => ({
+      path: `state/${name}`,
+      content: readOrNull(path.join(stateDir, name)),
+    })),
+    zone:
+      root === null
+        ? []
+        : ZONE_FILES.map((name) => ({
+            path: `.amber/${name}`,
+            content: readOrNull(path.join(root, '.amber', name)),
+          })),
+  };
+  fs.writeFileSync(
+    path.join(
       captureDir,
       `${String(process.pid)}-${String(Date.now())}-${String(Math.random()).slice(2)}.json`,
-    );
-    fs.writeFileSync(file, JSON.stringify(record));
-  });
+    ),
+    JSON.stringify(record),
+  );
+  if (stdout.length > 0) fs.writeSync(1, stdout);
+  if (stderr.length > 0) fs.writeSync(2, stderr);
+  process.exitCode = exitCode;
 }
 
-const entry = productEntry();
-if (entry !== null) install(entry);
+/** Source of the wrapper that takes the place of `entry` in a copy. */
+function wrapperSource(entry: string): string {
+  const real = `${path.basename(entry, '.cjs')}${REAL_SUFFIX}`;
+  const runtime = path.join(__dirname, 'capture.cjs');
+  return [
+    "'use strict';",
+    '// Parity capture wrapper (tools/parity/capture.cts); not part of Amber.',
+    `const real = require('node:path').join(__dirname, ${JSON.stringify(real)});`,
+    'if (require.main === module) {',
+    `  require(${JSON.stringify(runtime)}).runWrapped(${JSON.stringify(entry)}, real);`,
+    '} else {',
+    '  module.exports = require(real);',
+    '}',
+    '',
+  ].join('\n');
+}
+
+/** Replaces every entry point of a plugin copy with its wrapper. */
+function installWrappers(pluginDir: string): void {
+  for (const entry of ENTRY_POINTS) {
+    const file = path.join(pluginDir, entry);
+    const real = path.join(
+      path.dirname(file),
+      `${path.basename(entry, '.cjs')}${REAL_SUFFIX}`,
+    );
+    fs.renameSync(file, real);
+    // A shebang entry stays executable as a program.
+    fs.writeFileSync(file, wrapperSource(entry), {
+      mode: fs.statSync(real).mode,
+    });
+  }
+}
+
+export = {
+  ENTRY_POINTS,
+  REAL_SUFFIX,
+  runWrapped,
+  wrapperSource,
+  installWrappers,
+};

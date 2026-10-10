@@ -48,3 +48,19 @@ export const CONTROLS: readonly Mutation[] = [
     replace: "require('node:fs').writeSync(1, 'amber: unit ' + id + ' -> '",
   },
 ];
+
+/**
+ * Probes that add output only file-descriptor-level capture can see: the
+ * comparison of records (not the suites failing) must report them. One makes
+ * record.cjs start a grandchild that writes to the inherited stdout.
+ */
+export const PROBES: readonly Mutation[] = [
+  {
+    name: 'stdout from an inherited grandchild',
+    file: 'scripts/record.cjs',
+    find: "process.stdout.write('amber: unit ' + id + ' -> '",
+    replace:
+      "require('node:child_process').spawnSync('sh', ['-c', 'printf parity-probe'], { stdio: 'inherit' }); " +
+      "process.stdout.write('amber: unit ' + id + ' -> '",
+  },
+];

@@ -27,7 +27,7 @@ import {
   type Builds,
   type Tally,
 } from './real/run.mjs';
-import { CONTROLS, MUTATIONS } from './selftest.mjs';
+import { CONTROLS, MUTATIONS, PROBES } from './selftest.mjs';
 import { runSide } from './side.mjs';
 import { compareSides, report, runReference } from './suites-parity.mjs';
 import {
@@ -205,6 +205,23 @@ async function selftest(workdir: string, commit: string): Promise<number> {
         `clean=${parity.differences === 0 ? 'yes' : 'no'}`,
     );
   });
+  let probesDetected = 0;
+  PROBES.forEach((probe, index) => {
+    const dest = join(workdir, `probe-${String(index)}`);
+    const pluginDir = copyCandidate(REPO, dest);
+    applyMutation(pluginDir, probe);
+    const parity = compareSides(
+      reference,
+      runSide(pluginDir, join(dest, 'run')),
+    );
+    const hit = parity.comparison.differences > 0;
+    if (hit) probesDetected += 1;
+    log(
+      `PROBE ${probe.name}: record-differences=${String(parity.comparison.differences)} ` +
+        `failed-suites=${String(parity.failedSuites.length)} ` +
+        `detected=${hit ? 'yes' : 'no'}`,
+    );
+  });
   // The E1 mutation replayed over real tool calls.
   const e1Index = MUTATIONS.findIndex(
     (m) => m.name === 'E1 bash-deny decision',
@@ -229,11 +246,13 @@ async function selftest(workdir: string, commit: string): Promise<number> {
     `SELFTEST mutations=${String(MUTATIONS.length)} ` +
       `detected=${String(detected)} ` +
       `controls-clean=${String(controlsClean)}/${String(CONTROLS.length)} ` +
+      `probes-detected=${String(probesDetected)}/${String(PROBES.length)} ` +
       `real-e1=${String(realE1)}`,
   );
   return detected === MUTATIONS.length &&
     realE1 === 1 &&
-    controlsClean === CONTROLS.length
+    controlsClean === CONTROLS.length &&
+    probesDetected === PROBES.length
     ? 0
     : 1;
 }

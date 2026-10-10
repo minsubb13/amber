@@ -3,7 +3,7 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import type { CaptureRecord, FileEffect } from './capture.cjs';
+import type { CaptureRecord, FileEffect } from './record-types.cjs';
 import { isRecord, isStringArray, isStringOrNull } from '../shared/guards.mjs';
 
 function parseEffects(value: unknown): FileEffect[] | null {

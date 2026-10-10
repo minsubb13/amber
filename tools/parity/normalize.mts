@@ -8,7 +8,7 @@
 // Every rule is listed here with the reason it is needed. A new rule is added
 // only when two runs of the same build differ, and the run log records it.
 
-import type { CaptureRecord } from './capture.cjs';
+import type { CaptureRecord } from './record-types.cjs';
 
 interface Rule {
   readonly label: string;

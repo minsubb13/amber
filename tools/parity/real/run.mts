@@ -29,7 +29,7 @@ import {
 } from './corpus.mjs';
 import { isRecord } from '../../shared/guards.mjs';
 import { pool, runProcess, type ProcessResult } from '../../shared/proc.mjs';
-import type { CaptureRecord } from '../capture.cjs';
+import type { CaptureRecord } from '../record-types.cjs';
 import { makeNormalizer } from '../normalize.mjs';
 
 export interface Builds {
