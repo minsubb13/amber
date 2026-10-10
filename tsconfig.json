@@ -1,6 +1,7 @@
 {
   "compilerOptions": {
     "target": "es2022",
+    "lib": ["es2022"],
     "module": "nodenext",
     "moduleResolution": "nodenext",
     "rootDir": "src",
@@ -8,8 +9,12 @@
     "types": ["node"],
     "strict": true,
     "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
     "noImplicitReturns": true,
     "noFallthroughCasesInSwitch": true,
+    "noImplicitOverride": true,
+    "noPropertyAccessFromIndexSignature": true,
+    "verbatimModuleSyntax": true,
     "newLine": "lf"
   },
   "include": ["src"]

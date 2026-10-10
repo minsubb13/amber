@@ -2,10 +2,24 @@
   "private": true,
   "scripts": {
     "build": "tsc -p .",
-    "typecheck": "tsc -p . --noEmit"
+    "build:tools": "tsc -p tools",
+    "typecheck": "tsc -p . --noEmit && tsc -p tools --noEmit",
+    "lint": "eslint --max-warnings 0 .",
+    "format": "prettier --write src tools",
+    "format:check": "prettier --check src tools",
+    "test": "npm run --silent build:tools && node build/tools/test/main.mjs",
+    "parity": "npm run --silent build:tools && node build/tools/parity/main.mjs suites",
+    "parity:real": "npm run --silent build:tools && node build/tools/parity/main.mjs real",
+    "parity:selftest": "npm run --silent build:tools && node build/tools/parity/main.mjs selftest",
+    "coverage": "npm run --silent build:tools && node build/tools/coverage/main.mjs"
   },
   "devDependencies": {
+    "@eslint/js": "10.0.1",
     "@types/node": "20.19.43",
-    "typescript": "7.0.2"
+    "c8": "12.0.0",
+    "eslint": "10.12.0",
+    "prettier": "3.9.10",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.71.1"
   }
 }
