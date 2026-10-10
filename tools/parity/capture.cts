@@ -1,16 +1,18 @@
-// Capture of product processes for the test-driven parity run.
+// Preloaded into every node process of a parity run through
+// NODE_OPTIONS=--require. In a product process - a script directly under
+// $AMBER_PARITY_PLUGIN/hooks or /scripts - it records the invocation and every
+// effect Amber shows to the outside into $AMBER_PARITY_CAPTURE_DIR. In any
+// other process it does nothing.
 //
-// In each plugin copy under comparison, every product entry point
-// (ENTRY_POINTS) is moved to <name>.parity-real.cjs and replaced by a small
-// wrapper (wrapperSource). Run as a program, the wrapper starts the real entry
-// as a child process with piped stdin, stdout and stderr, so everything the
-// product writes to file descriptors 1 and 2 - through streams, fs, native
-// code, or a grandchild that inherits them - passes through the pipes and is
-// recorded. It then forwards the output and exit code unchanged, and writes
-// one CaptureRecord into $AMBER_PARITY_CAPTURE_DIR: argv, cwd, stdin, stdout,
-// stderr, exit code, the ledger bytes appended, the state files changed, and
-// the zone's .amber files afterwards. Required as a module (record.cjs
-// requires the hook), the wrapper hands back the real module.
+// Output is captured at the file descriptor level without touching the
+// product: before the product's own module runs, the preload re-runs the same
+// command (same node flags, same script path and arguments, same environment,
+// the same stdin inherited) as a child with stdout and stderr piped, so every
+// write to descriptors 1 and 2 - through streams, fs, native code, or a
+// grandchild that inherits them - reaches the pipes. The outer process then
+// writes the record, forwards the output, and ends the way the child ended
+// (exit code, or the same signal); the product never runs in it. Inside the
+// child the preload only records what the product read from stdin.
 
 import childProcess = require('node:child_process');
 import fs = require('node:fs');
@@ -19,16 +21,26 @@ import path = require('node:path');
 
 import type { CaptureRecord } from './record-types.cjs';
 
-/** Product files that hosts and tests run as programs. */
-const ENTRY_POINTS = [
-  'hooks/amber-hook.cjs',
-  'scripts/record.cjs',
-  'scripts/audit.cjs',
-];
-
-const REAL_SUFFIX = '.parity-real.cjs';
-
 const ZONE_FILES = ['active.json', 'progress.json', 'done.json'];
+const INNER_ENV = 'AMBER_PARITY_INNER_RECORD';
+
+function productEntry(): string | null {
+  const captureDir = process.env['AMBER_PARITY_CAPTURE_DIR'];
+  const pluginDir = process.env['AMBER_PARITY_PLUGIN'];
+  const script = process.argv[1];
+  if (
+    captureDir === undefined ||
+    pluginDir === undefined ||
+    script === undefined
+  ) {
+    return null;
+  }
+  const rel = path
+    .relative(pluginDir, path.resolve(script))
+    .split(path.sep)
+    .join('/');
+  return /^(hooks|scripts)\/[^/]+\.cjs$/.test(rel) ? rel : null;
+}
 
 function readOrNull(file: string): string | null {
   try {
@@ -77,17 +89,48 @@ function zoneRoot(cwd: string): string | null {
   }
 }
 
-function readStdin(): Buffer {
-  if (process.stdin.isTTY) return Buffer.alloc(0);
-  try {
-    return fs.readFileSync(0);
-  } catch {
-    return Buffer.alloc(0);
-  }
+function chunkText(chunk: unknown): string {
+  if (typeof chunk === 'string') return chunk;
+  if (chunk instanceof Uint8Array) return Buffer.from(chunk).toString('utf8');
+  return '';
 }
 
-/** Runs the real entry as a child, forwards its output, records the run. */
-function runWrapped(entry: string, real: string): void {
+function toBuffer(value: unknown): Buffer {
+  return Buffer.isBuffer(value) ? value : Buffer.alloc(0);
+}
+
+/** Child side: record what the product reads from stdin, for the record. */
+function recordStdin(innerFile: string): void {
+  const stdin: string[] = [];
+  let tapped = false;
+  process.stdin.on('newListener', (event: string | symbol) => {
+    if (event !== 'data' || tapped) return;
+    tapped = true;
+    process.stdin.on('data', (chunk: unknown) => {
+      stdin.push(chunkText(chunk));
+    });
+  });
+  const original: unknown = Reflect.get(fs, 'readFileSync');
+  if (typeof original === 'function') {
+    Object.defineProperty(fs, 'readFileSync', {
+      configurable: true,
+      writable: true,
+      value: (...args: unknown[]): unknown => {
+        const result: unknown = Reflect.apply(original, fs, args);
+        if (args[0] === 0 || args[0] === '/dev/stdin') {
+          stdin.push(chunkText(result));
+        }
+        return result;
+      },
+    });
+  }
+  process.on('exit', () => {
+    fs.writeFileSync(innerFile, stdin.join(''));
+  });
+}
+
+/** Outer side: run the command as a child, record, forward, end alike. */
+function runOuter(entry: string): never {
   const captureDir = process.env['AMBER_PARITY_CAPTURE_DIR'] ?? os.tmpdir();
   const home = process.env['AMBER_HOME'] ?? path.join(os.homedir(), '.amber');
   const ledgerFile = path.join(home, 'runs.jsonl');
@@ -96,16 +139,29 @@ function runWrapped(entry: string, real: string): void {
   const stateStart = stamp(stateDir);
   const cwd = process.cwd();
   const args = process.argv.slice(2);
-  const stdin = readStdin();
+  const tag = `${String(process.pid)}-${String(Date.now())}-${String(Math.random()).slice(2)}`;
+  const innerFile = path.join(captureDir, `${tag}.stdin`);
 
-  const child = childProcess.spawnSync(process.execPath, [real, ...args], {
-    input: stdin,
-    stdio: ['pipe', 'pipe', 'pipe'],
-    maxBuffer: 256 * 1024 * 1024,
-  });
-  const stdout = child.stdout;
-  const stderr = child.stderr;
-  const exitCode = child.status ?? 1;
+  const child = childProcess.spawnSync(
+    process.execPath,
+    [...process.execArgv, ...process.argv.slice(1)],
+    {
+      stdio: ['inherit', 'pipe', 'pipe'],
+      env: { ...process.env, [INNER_ENV]: innerFile },
+      maxBuffer: 1024 * 1024 * 1024,
+    },
+  );
+  const stdout = toBuffer(child.stdout);
+  const stderr =
+    child.error === undefined
+      ? toBuffer(child.stderr)
+      : Buffer.concat([
+          toBuffer(child.stderr),
+          Buffer.from(`parity capture: ${child.error.message}\n`),
+        ]);
+  const signal = child.signal;
+  const exitCode =
+    child.status ?? (signal === null ? 1 : 128 + os.constants.signals[signal]);
 
   const ledgerNow = readOrNull(ledgerFile) ?? '';
   const stateNow = stamp(stateDir);
@@ -121,7 +177,7 @@ function runWrapped(entry: string, real: string): void {
     entry,
     args,
     cwd,
-    stdin: stdin.toString('utf8'),
+    stdin: readOrNull(innerFile) ?? '',
     stdout: stdout.toString('utf8'),
     stderr: stderr.toString('utf8'),
     exitCode,
@@ -140,55 +196,20 @@ function runWrapped(entry: string, real: string): void {
             content: readOrNull(path.join(root, '.amber', name)),
           })),
   };
+  fs.rmSync(innerFile, { force: true });
   fs.writeFileSync(
-    path.join(
-      captureDir,
-      `${String(process.pid)}-${String(Date.now())}-${String(Math.random()).slice(2)}.json`,
-    ),
+    path.join(captureDir, `${tag}.json`),
     JSON.stringify(record),
   );
   if (stdout.length > 0) fs.writeSync(1, stdout);
   if (stderr.length > 0) fs.writeSync(2, stderr);
-  process.exitCode = exitCode;
+  if (signal !== null) process.kill(process.pid, signal);
+  process.exit(exitCode);
 }
 
-/** Source of the wrapper that takes the place of `entry` in a copy. */
-function wrapperSource(entry: string): string {
-  const real = `${path.basename(entry, '.cjs')}${REAL_SUFFIX}`;
-  const runtime = path.join(__dirname, 'capture.cjs');
-  return [
-    "'use strict';",
-    '// Parity capture wrapper (tools/parity/capture.cts); not part of Amber.',
-    `const real = require('node:path').join(__dirname, ${JSON.stringify(real)});`,
-    'if (require.main === module) {',
-    `  require(${JSON.stringify(runtime)}).runWrapped(${JSON.stringify(entry)}, real);`,
-    '} else {',
-    '  module.exports = require(real);',
-    '}',
-    '',
-  ].join('\n');
+const entry = productEntry();
+if (entry !== null) {
+  const innerFile = process.env[INNER_ENV];
+  if (innerFile === undefined) runOuter(entry);
+  else recordStdin(innerFile);
 }
-
-/** Replaces every entry point of a plugin copy with its wrapper. */
-function installWrappers(pluginDir: string): void {
-  for (const entry of ENTRY_POINTS) {
-    const file = path.join(pluginDir, entry);
-    const real = path.join(
-      path.dirname(file),
-      `${path.basename(entry, '.cjs')}${REAL_SUFFIX}`,
-    );
-    fs.renameSync(file, real);
-    // A shebang entry stays executable as a program.
-    fs.writeFileSync(file, wrapperSource(entry), {
-      mode: fs.statSync(real).mode,
-    });
-  }
-}
-
-export = {
-  ENTRY_POINTS,
-  REAL_SUFFIX,
-  runWrapped,
-  wrapperSource,
-  installWrappers,
-};
