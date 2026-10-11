@@ -13,7 +13,7 @@ The plugin that users install is the `plugin/` directory. Its hooks and scripts 
 Run `npm ci` once, then:
 
 - `npm run typecheck` - type-check `src/` and `tools/`.
-- `npm run lint` - typescript-eslint `strictTypeChecked` plus exhaustive switches, no type assertions, no non-null assertions, no `@ts-` directives, no `any`; zero warnings allowed. In `src/` it also forbids asynchronous I/O, `async`/`await`, promises, timers, and signal handlers: the plugin is a set of short synchronous programs (only the hook reads stdin through stream events), and keeping the port that way leaves nothing the parity capture cannot observe, such as output released before a pending write or signal handling.
+- `npm run lint` - typescript-eslint `strictTypeChecked` plus exhaustive switches, no type assertions, no non-null assertions, no `@ts-` directives, no `any`; zero warnings allowed. In `src/` it also forbids asynchronous I/O and process APIs, `async`/`await`, promises, timers, and signal handlers, with `node:fs` bound as `fs` and `node:child_process` as `childProcess` so every use is visible to the rule: the plugin is a set of short synchronous programs (only the hook reads stdin through stream events), and keeping the port that way leaves nothing the parity capture cannot observe, such as output released before a pending write or signal handling.
 - `npm run format:check` / `npm run format` - Prettier on `src/` and `tools/`.
 - `npm run build` - compile `src/` into `plugin/`. The committed output must equal a fresh build (CI runs `npm run build && git diff --exit-code`).
 - `npm test` - every suite against `plugin/`.
