@@ -116,6 +116,11 @@ export default defineConfig(
             "CallExpression[callee.object.name='process'][callee.property.name=/^(on|once|addListener|prependListener|prependOnceListener)$/][arguments.0.value=/^SIG/]",
           message: 'Plugin code installs no signal handlers.',
         },
+        {
+          selector:
+            "CallExpression[callee.object.name='process'][callee.property.name=/^(on|once|addListener|prependListener|prependOnceListener)$/][arguments.0.type!='Literal']",
+          message: 'Name process events with a string literal.',
+        },
       ],
     },
   },

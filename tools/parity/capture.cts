@@ -104,7 +104,8 @@ function toBuffer(value: unknown): Buffer {
  * neither the product nor any process it starts sees it. What the product
  * reads from stdin is recorded whatever API it uses: bytes enter
  * process.stdin through push() (data events, readable/read(), async
- * iteration), and reads of fd 0 or /dev/stdin through fs are recorded too.
+ * iteration), and fs reads of fd 0, of the paths that name it, and of
+ * descriptors opened on those paths are recorded too.
  */
 function recordStdin(innerFile: string): void {
   Reflect.deleteProperty(process.env, INNER_ENV);
@@ -119,8 +120,36 @@ function recordStdin(innerFile: string): void {
       return Reflect.apply(push, stream, args);
     },
   });
+  // fd 0, the paths that name it, and descriptors opened on those paths.
+  const stdinPaths = new Set(['/dev/stdin', '/dev/fd/0', '/proc/self/fd/0']);
+  const stdinFds = new Set([0]);
   const isStdin = (target: unknown): boolean =>
-    target === 0 || target === '/dev/stdin';
+    (typeof target === 'number' && stdinFds.has(target)) ||
+    (typeof target === 'string' && stdinPaths.has(target));
+  const openSync: unknown = Reflect.get(fs, 'openSync');
+  if (typeof openSync === 'function') {
+    Object.defineProperty(fs, 'openSync', {
+      configurable: true,
+      writable: true,
+      value: (...args: unknown[]): unknown => {
+        const fd: unknown = Reflect.apply(openSync, fs, args);
+        if (typeof fd === 'number' && isStdin(args[0])) stdinFds.add(fd);
+        return fd;
+      },
+    });
+  }
+  const closeSync: unknown = Reflect.get(fs, 'closeSync');
+  if (typeof closeSync === 'function') {
+    Object.defineProperty(fs, 'closeSync', {
+      configurable: true,
+      writable: true,
+      value: (...args: unknown[]): unknown => {
+        const result: unknown = Reflect.apply(closeSync, fs, args);
+        if (typeof args[0] === 'number') stdinFds.delete(args[0]);
+        return result;
+      },
+    });
+  }
   const readFileSync: unknown = Reflect.get(fs, 'readFileSync');
   if (typeof readFileSync === 'function') {
     Object.defineProperty(fs, 'readFileSync', {
