@@ -361,3 +361,43 @@ test('messages and function calls cover typed planning, markers, and fallback co
     stopsKnown: false, malformed: 1,
   });
 });
+
+test('null rows, null content blocks and null arguments fail with the engine TypeError', () => {
+  const nullRead = (key) => {
+    try { return null[key]; } catch (err) { return err; }
+  };
+  const meta = { type: 'session_meta', payload: { cwd: '/zone' } };
+  const cases = [
+    [[meta, 'null'], 'payload'],
+    [[meta, { type: 'response_item', payload: { type: 'message', role: 'user', content: [null] } }], 'text'],
+    [[meta, { type: 'response_item', payload: { type: 'function_call', name: 'shell', call_id: 'c', arguments: 'null' } }], 'cmd'],
+  ];
+  for (const [rows, key] of cases) {
+    const expected = nullRead(key);
+    assert.throws(() => codexEvents(transcript(rows)), (err) =>
+      err instanceof TypeError && err.message === expected.message);
+  }
+  assert.deepEqual(commandEvents('node record.cjs done', [null, 'x'].slice(1), META),
+    [{ ln: 7, ts: 't', kind: 'cmd done', expect: 'done-declaration', result: 'mention' }]);
+  assert.throws(() => commandEvents('node record.cjs done', [null], META),
+    (err) => err instanceof TypeError && err.message === nullRead('text').message);
+});
+
+test('non-string fields are converted the way the original converts them', () => {
+  const file = transcript([
+    { type: 'session_meta', timestamp: 5, payload: { cwd: 7 } },
+    { type: 'response_item', payload: { type: 'function_call', name: ['shell'], call_id: 1,
+      arguments: [JSON.stringify({ cmd: [['node record.cjs unit start U1']] })] } },
+    { type: 'response_item', payload: { type: 'function_call_output', call_id: 1, output: 3 } },
+    { type: 'event_msg', payload: { type: 'item_completed', item: { type: 'CommandExecution', id: 'e',
+      command: 'node record.cjs unit failed U1', stdout: 'amber: unit U1 -> ', stderr: ['failed', 2] } } },
+  ]);
+  assert.deepEqual(codexEvents(file), {
+    events: [
+      { ln: 2, ts: '', kind: 'cmd unit start', expect: 'unit-start', result: 'mention' },
+      { ln: 4, ts: '', kind: 'cmd unit failed', expect: 'unit-failed', result: 'accepted' },
+    ],
+    users: 0, assistants: 0, lines: 5, cwd: 7, stops: [], reentries: [], host: 'codex',
+    stopsKnown: false, malformed: 0,
+  });
+});
