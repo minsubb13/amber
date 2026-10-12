@@ -77,6 +77,8 @@ export function makeNormalizer(
       record.entry,
       record.args,
       record.cwd,
+      record.env,
+      record.before,
       record.stdin,
     ]);
     const output = JSON.stringify([

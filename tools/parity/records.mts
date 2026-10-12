@@ -18,16 +18,30 @@ function parseEffects(value: unknown): FileEffect[] | null {
   return effects;
 }
 
+function parseEnv(value: unknown): Record<string, string | null> | null {
+  if (!isRecord(value)) return null;
+  const env: Record<string, string | null> = {};
+  for (const [key, item] of Object.entries(value)) {
+    if (!isStringOrNull(item)) return null;
+    env[key] = item;
+  }
+  return env;
+}
+
 export function parseRecord(value: unknown): CaptureRecord | null {
   if (!isRecord(value)) return null;
   const { entry, args, cwd, stdin, stdout, stderr, exitCode, signal, ledger } =
     value;
+  const env = parseEnv(value['env']);
+  const before = parseEffects(value['before']);
   const state = parseEffects(value['state']);
   const zone = parseEffects(value['zone']);
   if (
     typeof entry !== 'string' ||
     !isStringArray(args) ||
     typeof cwd !== 'string' ||
+    env === null ||
+    before === null ||
     typeof stdin !== 'string' ||
     typeof stdout !== 'string' ||
     typeof stderr !== 'string' ||
@@ -43,6 +57,8 @@ export function parseRecord(value: unknown): CaptureRecord | null {
     entry,
     args,
     cwd,
+    env,
+    before,
     stdin,
     stdout,
     stderr,
@@ -54,16 +70,32 @@ export function parseRecord(value: unknown): CaptureRecord | null {
   };
 }
 
-/** Reads every record in dir; a malformed file is an error, never skipped. */
+/**
+ * Reads every record in dir: one per product process (*.json) and one per
+ * line of each suite process's direct calls (*.jsonl). A malformed record is
+ * an error, never skipped.
+ */
 export function loadRecords(dir: string): CaptureRecord[] {
-  return readdirSync(dir)
-    .filter((name) => name.endsWith('.json'))
+  const texts = readdirSync(dir)
     .sort()
-    .map((name) => {
-      const parsed = parseRecord(
-        JSON.parse(readFileSync(join(dir, name), 'utf8')),
-      );
-      if (parsed === null) throw new Error(`malformed capture record ${name}`);
-      return parsed;
+    .flatMap((name) => {
+      if (name.endsWith('.json')) {
+        return [{ name, text: readFileSync(join(dir, name), 'utf8') }];
+      }
+      if (name.endsWith('.jsonl')) {
+        return readFileSync(join(dir, name), 'utf8')
+          .split('\n')
+          .filter((line) => line !== '')
+          .map((text, index) => ({
+            name: `${name}:${String(index + 1)}`,
+            text,
+          }));
+      }
+      return [];
     });
+  return texts.map(({ name, text }) => {
+    const parsed = parseRecord(JSON.parse(text));
+    if (parsed === null) throw new Error(`malformed capture record ${name}`);
+    return parsed;
+  });
 }
