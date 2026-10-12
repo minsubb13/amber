@@ -9,9 +9,9 @@ export interface FileEffect {
 
 /**
  * One input the product took during a run or a call: a file's text, a
- * directory's sorted entries, whether a path exists, the kind of entry a stat
- * found, or a command's stdout, each with its target; `error <code>` where
- * the read threw.
+ * directory's sorted entries, whether a path exists, the kind and age in
+ * hours of the entry a stat found, or a command's stdout, each with its
+ * target; `error <code>` where the read threw.
  */
 export interface InputRead {
   readonly op: string;

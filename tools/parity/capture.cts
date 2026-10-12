@@ -140,19 +140,35 @@ function entryName(entry: unknown): string {
   return `${typeof name === 'string' ? name : ''}${dir ? '/' : ''}`;
 }
 
-function kindOf(stats: unknown): string {
+/**
+ * The kind of entry a stat found and its age in whole hours. The product
+ * reads mtimeMs for ages (the state TTL, the newest driver); the absolute
+ * time differs from run to run, while an age the suites plant (now minus a
+ * whole number of hours) floors to the same hour in every run, and a file
+ * the run itself wrote is 0.
+ */
+function statOf(stats: unknown): string {
   if (typeof stats !== 'object' || stats === null) return 'none';
   const kinds: readonly (readonly [string, string])[] = [
     ['isFile', 'file'],
     ['isDirectory', 'directory'],
   ];
-  for (const [method, kind] of kinds) {
+  let kind = 'other';
+  for (const [method, name] of kinds) {
     const test: unknown = Reflect.get(stats, method);
     if (typeof test === 'function' && Reflect.apply(test, stats, []) === true) {
-      return kind;
+      kind = name;
+      break;
     }
   }
-  return 'other';
+  const mtime: unknown = Reflect.get(stats, 'mtimeMs');
+  const age =
+    typeof mtime === 'number'
+      ? // A file written a moment ago can carry an mtime a few ms ahead of
+        // Date.now(); it is 0 hours old.
+        `${String(Math.max(0, Math.floor((Date.now() - mtime) / 3600000)))}h`
+      : '-';
+  return `${kind} age=${age}`;
 }
 
 /**
@@ -160,8 +176,8 @@ function kindOf(stats: unknown): string {
  * existsSync, readdirSync and statSync, and child_process.execFileSync, which
  * runs git - so that while active() holds each one hands sink what it read:
  * a file's text, a directory's sorted entries, whether a path exists, the
- * kind of entry a stat finds (not its times), a command's stdout, or the
- * error. Reads under the plugin itself (its modules, its manifest) are the
+ * kind and age in hours of the entry a stat finds, a command's stdout, or
+ * the error. Reads under the plugin itself (its modules, its manifest) are the
  * build, not an input, and stdin is recorded on its own; both are left out.
  */
 function recordReads(
@@ -219,7 +235,7 @@ function recordReads(
   wrap(fs, 'readdirSync', 'list', fileTarget, (value) =>
     Array.isArray(value) ? value.map(entryName).sort().join('\n') : '',
   );
-  wrap(fs, 'statSync', 'stat', fileTarget, kindOf);
+  wrap(fs, 'statSync', 'stat', fileTarget, statOf);
   wrap(childProcess, 'execFileSync', 'exec', commandTarget, chunkText);
 }
 
