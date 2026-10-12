@@ -1,0 +1,375 @@
+// The recorder the model runs from the shell: Codex skill invocations and
+// cycle events (invoke, mark), the loop body's unit commands, and the
+// completion signal (done). Every refusal is a message on stderr and exit
+// code 1, written before anything is recorded.
+
+import ledger = require('../lib/ledger.cjs');
+import args = require('../lib/record-args.cjs');
+import clock = require('../lib/clock.cjs');
+import contracts = require('../lib/contract.cjs');
+import done = require('../lib/done-signal.cjs');
+import guards = require('../lib/guards.cjs');
+import inputs = require('../lib/hook-input.cjs');
+import model = require('../lib/progress-model.cjs');
+import ownership = require('../lib/ownership.cjs');
+import store = require('../lib/progress-store.cjs');
+import scope = require('../hooks/scope-check.cjs');
+import skillRecorder = require('../lib/skill-recorder.cjs');
+
+const { USAGE } = args;
+const INVOKED_SKILLS = ['planning', 'set', 'init', 'status', 'audit'];
+const MARK_KINDS = ['skip', 'finding', 'hold'];
+
+function recordUnitEvent(
+  sessionId: string,
+  cwd: string,
+  event: string,
+  summary: string,
+  fields: Readonly<Record<string, unknown>>,
+): void {
+  ledger.appendRecord(
+    { session_id: sessionId, cwd },
+    summary,
+    fields,
+    'unit-' + event,
+  );
+}
+
+function unitCommand(name: string | undefined, rest: readonly string[]): void {
+  const command = args.unitCommandOf(name);
+  if (!command) throw new Error('invalid unit command\n' + USAGE);
+  const cwd = process.cwd();
+  const info = contracts.contractInfo(cwd);
+  if (info.broken) {
+    throw new Error(
+      'active contract pointer is broken: ' + guards.toText(info.error),
+    );
+  }
+  // Session identity: an explicit environment id wins (AMBER_SESSION_ID,
+  // CODEX_THREAD_ID, then CLAUDE_CODE_SESSION_ID - Claude Code exports it to
+  // the tool shell, equal to the hooks' session_id, and subagents inherit it);
+  // otherwise the recorder reads back the driver E1 registered for this run
+  // just before the command.
+  const envSessionId = (
+    process.env['AMBER_SESSION_ID'] ||
+    process.env['CODEX_THREAD_ID'] ||
+    process.env['CLAUDE_CODE_SESSION_ID'] ||
+    ''
+  ).trim();
+  const driver = envSessionId ? null : ownership.driverOfRun(info.boundaryFile);
+  const sessionId = envSessionId || driver?.sessionId || 'shell';
+  if (command === 'init') {
+    const plan = rest.find((a) => !a.startsWith('--'));
+    if (!plan) throw new Error('unit init needs the plan path\n' + USAGE);
+    const preexisting = scope.snapshot(cwd);
+    const p = store.initProgress(
+      info.root,
+      plan,
+      info.boundaryFile,
+      rest.includes('--force'),
+      preexisting,
+      clock.isoNow,
+    );
+    const ids = Object.keys(p.units);
+    recordUnitEvent(
+      sessionId,
+      cwd,
+      'init',
+      String(ids.length) + ' unit(s) from ' + p.plan,
+      { contract: info.boundaryFile, units: ids.length },
+    );
+    process.stdout.write(
+      'amber: progress.json initialized with ' +
+        String(ids.length) +
+        ' unit(s): ' +
+        ids.join(', ') +
+        '\n',
+    );
+    return;
+  }
+  const id = rest[0];
+  if (!/^U\d+$/.test(id || '') || id === undefined) {
+    throw new Error('unit ' + command + ' needs a unit id like U1\n' + USAGE);
+  }
+  const p = store.loadProgress(info.root);
+  if (!p) {
+    throw new Error(
+      'no progress.json in ' + info.root + '; run `unit init <plan>` first',
+    );
+  }
+  if (model.isBroken(p)) {
+    throw new Error('progress.json is broken: ' + p.error);
+  }
+  if (command === 'claim') {
+    const unit = p.units[id];
+    if (!unit) throw new Error('unknown unit ' + id);
+    if (unit.agent_id) {
+      process.stdout.write(
+        'amber: unit ' + id + ' claimed by subagent ' + unit.agent_id + '\n',
+      );
+    } else {
+      process.stdout.write(
+        'amber: warning - the claim of ' +
+          id +
+          ' was not observed by a hook ' +
+          '(no subagent context or no active contract); the unit remains unclaimed\n',
+      );
+    }
+    return;
+  }
+  const text = args.optionText(
+    rest.slice(1),
+    command === 'hold' ? '--reason' : '--evidence',
+  );
+  // verified and failed carry the evidence the ledger audits: a missing or
+  // blank --evidence, or a flag the command does not read (its text would be
+  // dropped silently), refuses the transition before anything is written.
+  if (command === 'verified' || command === 'failed') {
+    const accepted =
+      command === 'verified'
+        ? ['--evidence', '--out-of-scope']
+        : ['--evidence'];
+    const unknown = rest
+      .slice(1)
+      .filter((a) => a.startsWith('--') && !accepted.includes(a));
+    const problems: string[] = [];
+    if (unknown.length > 0) {
+      problems.push(
+        'unknown flag ' +
+          unknown.join(', ') +
+          ' (not read, its text would be lost)',
+      );
+    }
+    if (!text) problems.push('--evidence is missing or blank');
+    if (problems.length > 0) {
+      throw new Error(
+        'unit ' +
+          command +
+          ' ' +
+          id +
+          ' refused: ' +
+          problems.join('; ') +
+          '. The command accepts ' +
+          accepted.join(' and ') +
+          '; nothing was recorded.',
+      );
+    }
+  }
+  // verified advances the run, so the changed files are compared with the
+  // write-scope first; an undeclared out-of-scope file refuses the transition.
+  let scopeFields: ReturnType<typeof scope.recordFields> = {};
+  if (command === 'verified' && info.writeScopes.length > 0) {
+    const options = {
+      cwd,
+      writeScopes: info.writeScopes,
+      boundaryRel: info.boundaryRel,
+      preexisting: p.preexisting,
+      declarations: scope.parseDeclarations(rest.slice(1)),
+    };
+    const result = scope.check(options);
+    if (result.undeclared.length > 0) {
+      throw new Error(
+        scope.refusal(
+          result,
+          String(info.boundaryFile),
+          info.writeScopes,
+          'unit verified ' + id,
+        ),
+      );
+    }
+    scopeFields = scope.recordFields(result.declared);
+  }
+  model.applyEvent(
+    p,
+    command,
+    id,
+    {
+      by: sessionId,
+      evidence: text,
+      reason: text,
+      out_of_scope: scopeFields.out_of_scope,
+    },
+    clock.isoNow,
+  );
+  store.saveProgress(info.root, p, clock.isoNow);
+  const fields: Record<string, unknown> = {
+    contract: info.boundaryFile,
+    unit: id,
+    ...scopeFields,
+  };
+  if (command === 'verified' || command === 'failed') {
+    fields['evidence'] = text.slice(0, 200);
+  }
+  if (command === 'hold') {
+    fields['reason'] = text.slice(0, 200);
+    if (p.hold?.kind) fields['kind'] = p.hold.kind;
+  }
+  recordUnitEvent(
+    sessionId,
+    cwd,
+    command,
+    id + (text ? ' - ' + text : ''),
+    fields,
+  );
+  process.stdout.write(
+    'amber: unit ' +
+      id +
+      ' -> ' +
+      (command === 'hold' ? 'hold' : String(p.units[id]?.status)) +
+      '\n',
+  );
+}
+
+/**
+ * The completion signal. Form checks live here, at write time, so the Stop
+ * hook only has to judge the pointer and the worktrees.
+ */
+function doneCommand(rest: readonly string[]): void {
+  const cwd = process.cwd();
+  const info = contracts.contractInfo(cwd);
+  if (info.broken) {
+    throw new Error(
+      'active contract pointer is broken: ' +
+        guards.toText(info.error) +
+        '; fix or remove it before signalling completion',
+    );
+  }
+  const review = args.optionText(rest, '--review');
+  const goal = args.optionText(rest, '--goal');
+  const summary = args.optionText(rest, '--summary');
+  if (!review || !summary) {
+    throw new Error('done needs --review and --summary\n' + USAGE);
+  }
+  if (info.boundaryFile && !goal) {
+    throw new Error(
+      'done under contract ' +
+        info.boundaryFile +
+        ' needs --goal <goal-test result>\n' +
+        USAGE,
+    );
+  }
+  if (!info.boundaryFile && rest.includes('--goal')) {
+    throw new Error('no active contract in ' + info.root + '; omit --goal');
+  }
+  if (!info.boundaryFile && rest.includes('--out-of-scope')) {
+    throw new Error(
+      'no active contract in ' + info.root + '; omit --out-of-scope',
+    );
+  }
+  let scopeFields: ReturnType<typeof scope.recordFields> = {};
+  if (info.boundaryFile) {
+    const p = store.loadProgress(info.root);
+    if (p && model.isBroken(p)) {
+      throw new Error('progress.json is broken: ' + p.error);
+    }
+    const open = p ? model.openUnits(p) : [];
+    if (open.length > 0) {
+      throw new Error(
+        'units still open: ' +
+          open.join(', ') +
+          ' - verify them (or record a hold and stop) before signalling completion',
+      );
+    }
+    // The changed files of the whole run against the write-scope; declared
+    // out-of-scope files ride in the signal and S2 records them.
+    if (info.writeScopes.length > 0) {
+      const options = {
+        cwd,
+        writeScopes: info.writeScopes,
+        boundaryRel: info.boundaryRel,
+        preexisting: p ? p.preexisting : [],
+        declarations: scope.parseDeclarations(rest),
+      };
+      const result = scope.check(options);
+      if (result.undeclared.length > 0) {
+        throw new Error(
+          scope.refusal(result, info.boundaryFile, info.writeScopes, 'done'),
+        );
+      }
+      scopeFields = scope.recordFields(result.declared);
+    }
+  }
+  const target = info.boundaryFile || 'request';
+  done.writeDoneSignal(info.root, {
+    target,
+    review,
+    goal: goal || null,
+    summary,
+    ...scopeFields,
+  });
+  process.stdout.write(
+    'amber: completion signal written for ' +
+      target +
+      '; end the turn with the completion report (no marker lines)\n',
+  );
+}
+
+/** invoke and mark: a Codex skill call or cycle event, recorded through S3. */
+function recordCall(
+  command: string | undefined,
+  name: string | undefined,
+  rest: readonly string[],
+): void {
+  let skill: string;
+  let skillArgs: string;
+  if (
+    command === 'invoke' &&
+    name !== undefined &&
+    INVOKED_SKILLS.includes(name)
+  ) {
+    skill = 'amber:' + name;
+    skillArgs = rest.join(' ').trim();
+  } else if (
+    command === 'mark' &&
+    name !== undefined &&
+    MARK_KINDS.includes(name) &&
+    rest.join(' ').trim()
+  ) {
+    skill = 'amber:mark';
+    skillArgs = name + ' - ' + rest.join(' ').trim();
+  } else {
+    throw new Error('invalid recording arguments\n' + USAGE);
+  }
+  const sessionId = (process.env['CODEX_THREAD_ID'] || '').trim();
+  if (!sessionId) {
+    throw new Error(
+      'CODEX_THREAD_ID is required; run this command inside the Codex session being recorded',
+    );
+  }
+  skillRecorder.runS3(
+    inputs.hookInput(
+      {
+        session_id: sessionId,
+        cwd: process.cwd(),
+        tool_input: { skill, args: skillArgs },
+      },
+      'S3',
+    ),
+  );
+  process.stdout.write('amber: recorded ' + command + ' ' + name + '\n');
+}
+
+function main(argv: readonly string[]): void {
+  if (argv.length === 1 && (argv[0] === '--help' || argv[0] === '-h')) {
+    process.stdout.write(USAGE + '\n');
+    return;
+  }
+  const [command, name, ...rest] = argv;
+  if (command === 'unit') {
+    unitCommand(name, rest);
+    return;
+  }
+  if (command === 'done') {
+    doneCommand(name === undefined ? [] : [name, ...rest]);
+    return;
+  }
+  recordCall(command, name, rest);
+}
+
+try {
+  main(process.argv.slice(2));
+} catch (err) {
+  const message = guards.isObject(err) ? err['message'] : undefined;
+  process.stderr.write('amber: ' + guards.toText(message) + '\n');
+  process.exitCode = 1;
+}

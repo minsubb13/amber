@@ -43,12 +43,20 @@ export const MUTATIONS: readonly Mutation[] = [
  * message from process.stdout.write to fs.writeSync(1, ...), which capture
  * has to follow.
  */
+// The recorder's "amber: unit U<n> -> <status>" line as compiled.
+const UNIT_LINE =
+  "process.stdout.write('amber: unit ' +\n        id +\n        ' -> '";
+
 export const CONTROLS: readonly Mutation[] = [
   {
     name: 'stdout through fs.writeSync',
     file: 'scripts/record.cjs',
-    find: "process.stdout.write('amber: unit ' + id + ' -> '",
-    replace: "require('node:fs').writeSync(1, 'amber: unit ' + id + ' -> '",
+    // (the compiled recorder of stage 4 breaks this call over lines)
+    find: UNIT_LINE,
+    replace: UNIT_LINE.replace(
+      'process.stdout.write(',
+      "require('node:fs').writeSync(1, ",
+    ),
   },
 ];
 
@@ -61,9 +69,9 @@ export const PROBES: readonly Mutation[] = [
   {
     name: 'stdout from an inherited grandchild',
     file: 'scripts/record.cjs',
-    find: "process.stdout.write('amber: unit ' + id + ' -> '",
+    find: UNIT_LINE,
     replace:
       "require('node:child_process').spawnSync('sh', ['-c', 'printf parity-probe'], { stdio: 'inherit' }); " +
-      "process.stdout.write('amber: unit ' + id + ' -> '",
+      UNIT_LINE,
   },
 ];

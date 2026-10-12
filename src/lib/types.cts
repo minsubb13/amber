@@ -231,3 +231,53 @@ export interface RunDriver {
   readonly model: unknown;
   readonly mtime: number;
 }
+
+/**
+ * An event a transcript shows that the ledger is supposed to mirror, from
+ * either host's adapter. ts is the line's timestamp as the host wrote it.
+ */
+export interface AuditEvent {
+  readonly ln: number;
+  readonly ts: unknown;
+  readonly kind: string;
+  readonly expect: string | null;
+  readonly name?: string;
+  readonly typed?: boolean;
+  /** How the tool result showed a record.cjs call; set after the call. */
+  result?: string;
+  readonly toolId?: unknown;
+}
+
+export interface ClaudeTranscript {
+  readonly events: AuditEvent[];
+  readonly users: number;
+  readonly assistants: number;
+  readonly lines: number;
+  readonly cwd: unknown;
+  readonly stops: {
+    readonly ln: number;
+    readonly ts: unknown;
+    readonly cat: string;
+  }[];
+  readonly reentries: { readonly ln: number; readonly ts: unknown }[];
+}
+
+/** What the audit reads from a transcript of either host. */
+export interface AuditTranscript {
+  readonly events: readonly AuditEvent[];
+  readonly users: number;
+  readonly assistants: number;
+  readonly lines: number;
+  readonly cwd: unknown;
+  readonly stops: readonly { readonly cat: string }[];
+  readonly reentries: readonly { readonly ln: number }[];
+  /** false for Codex rollouts, which keep no stop-hook summaries. */
+  readonly stopsKnown?: boolean;
+  readonly malformed?: number;
+}
+
+/** The period and exclusions every audit count is bounded by. */
+export interface AuditContext {
+  readonly periodEnd: string;
+  readonly exclude: readonly string[];
+}
