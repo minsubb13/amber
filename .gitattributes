@@ -1,2 +1,5 @@
 # Compiled from src/ by `npm run build`; edit the .cts source instead.
 plugin/hooks/patch-paths.cjs linguist-generated=true
+plugin/hooks/progress.cjs linguist-generated=true
+plugin/hooks/scope-check.cjs linguist-generated=true
+plugin/lib/*.cjs linguist-generated=true
