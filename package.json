@@ -12,6 +12,7 @@
     "parity:real": "npm run --silent build:tools && node build/tools/parity/main.mjs real",
     "parity:selftest": "npm run --silent build:tools && node build/tools/parity/main.mjs selftest",
     "parity:tests": "npm run --silent build:tools && node build/tools/parity/main.mjs tests",
+    "parity:legacy": "npm run --silent build:tools && node build/tools/parity/main.mjs legacy",
     "coverage": "npm run --silent build:tools && node build/tools/coverage/main.mjs"
   },
   "devDependencies": {

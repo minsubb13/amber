@@ -7,6 +7,9 @@
 //                           the suites of test/, both against the working
 //                           tree's plugin: the same test names, both passing,
 //                           the same product invocations
+//   legacy   [--ref <rev>]  the legacy suites of <rev> against <rev>'s build
+//                           and against the working tree's: both passing,
+//                           the same product invocations
 // The last line of each command is the machine-readable verdict; progress and
 // difference reports go to stderr.
 
@@ -147,6 +150,34 @@ function tests(workdir: string, commit: string): number {
       `differences=${String(parity.comparison.differences)}`,
   );
   return sameNames && parity.differences === 0 ? 0 : 1;
+}
+
+function legacy(workdir: string, commit: string): number {
+  log(
+    `legacy: suites of ${commit} on ${commit} and on ${join(REPO, 'plugin')}`,
+  );
+  // The reference keeps plugin/tests of its own revision.
+  const reference = runSide(
+    extractReference(REPO, commit, join(workdir, 'reference')),
+    join(workdir, 'reference-run'),
+    { legacy: true },
+  );
+  const candidate = runSide(
+    withLegacySuites(REPO, commit, join(workdir, 'candidate')),
+    join(workdir, 'candidate-run'),
+    { legacy: true },
+  );
+  const parity = compareSides(reference, candidate);
+  for (const line of report(parity, Number(values.limit))) log(line);
+  const names = (side: SideResult): number =>
+    testNames(side, legacyNodeTestFiles(side.pluginDir)).length;
+  console.log(
+    `LEGACY tests=${String(names(reference))}/${String(names(candidate))} ` +
+      `invocations=${String(parity.comparison.invocations)} ` +
+      `failed-suites=${String(parity.failedSuites.length)} ` +
+      `differences=${String(parity.differences)}`,
+  );
+  return parity.differences === 0 ? 0 : 1;
 }
 
 interface Corpus {
@@ -345,10 +376,12 @@ async function main(): Promise<number> {
         return await real(workdir, commit);
       case 'tests':
         return tests(workdir, commit);
+      case 'legacy':
+        return legacy(workdir, commit);
       case undefined:
       default:
         log(
-          'usage: main.mjs suites|selftest|real|tests [--ref <rev>] [--keep]',
+          'usage: main.mjs suites|selftest|real|tests|legacy [--ref <rev>] [--keep]',
         );
         return 2;
     }
