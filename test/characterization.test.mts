@@ -10,7 +10,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
 
-import { at, parseJson } from './support/json.mjs';
+import { get, parseJson } from './support/json.mjs';
 import { PLUGIN } from './support/plugin.mjs';
 
 const HOOK = path.join(PLUGIN, 'hooks', 'amber-hook.cjs');
@@ -113,10 +113,10 @@ function hookE1(
 function reason(decision: unknown): unknown {
   assert.ok(decision, 'expected a deny decision');
   assert.equal(
-    at(decision, 'hookSpecificOutput', 'permissionDecision'),
+    get(decision, 'hookSpecificOutput', 'permissionDecision'),
     'deny',
   );
-  return at(decision, 'hookSpecificOutput', 'permissionDecisionReason');
+  return get(decision, 'hookSpecificOutput', 'permissionDecisionReason');
 }
 
 function record(f: Fixture, args: readonly string[]): SpawnSyncReturns<string> {
@@ -255,7 +255,7 @@ test('E1 refuses a claim on a unit another subagent holds', () => {
   const p = parseJson(
     fs.readFileSync(path.join(f.root, '.amber', 'progress.json'), 'utf8'),
   );
-  assert.equal(at(p, 'units', 'U1', 'agent_id'), 'agent-A');
+  assert.equal(get(p, 'units', 'U1', 'agent_id'), 'agent-A');
 });
 
 // ---- record.cjs ----
@@ -273,7 +273,7 @@ test('record unit claim by the main agent warns and leaves the unit unclaimed', 
   const p = parseJson(
     fs.readFileSync(path.join(f.root, '.amber', 'progress.json'), 'utf8'),
   );
-  assert.equal(at(p, 'units', 'U1', 'agent_id'), null);
+  assert.equal(get(p, 'units', 'U1', 'agent_id'), null);
 });
 
 test('record unit init refuses to replace progress.json without --force', () => {
@@ -301,7 +301,7 @@ test('record unit init outside a git repository records no preexisting paths', (
   const p = parseJson(
     fs.readFileSync(path.join(f.root, '.amber', 'progress.json'), 'utf8'),
   );
-  assert.deepEqual(at(p, 'preexisting'), []);
+  assert.deepEqual(get(p, 'preexisting'), []);
 });
 
 // ---- write-scope globs ----

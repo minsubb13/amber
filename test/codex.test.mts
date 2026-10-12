@@ -6,7 +6,15 @@ import os from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
 
-import { at, items, parseJson, textAt } from './support/json.mjs';
+import {
+  at,
+  get,
+  list,
+  parseJson,
+  show,
+  text,
+  textAt,
+} from './support/json.mjs';
 import { PLUGIN } from './support/plugin.mjs';
 
 const BASE = fs.mkdtempSync(path.join(os.tmpdir(), 'amber-codex-test-'));
@@ -175,13 +183,22 @@ function tree(root: string): Tree {
         : fs.readFileSync(path.join(root, e.name), 'utf8'),
     ]);
 }
-/** `key in value`, which fails the test where value is not an object. */
+/** `key in value`: a TypeError where value is not an object, as `in` throws. */
 function hasKey(value: unknown, key: string): boolean {
-  assert.ok(
-    typeof value === 'object' && value !== null,
-    `cannot use 'in' operator to search for '${key}' in ${typeof value}`,
-  );
+  if (typeof value !== 'object' || value === null) {
+    throw new TypeError(
+      `Cannot use 'in' operator to search for '${key}' in ${show(value)}`,
+    );
+  }
   return key in value;
+}
+/** String(value), the coercion the original applied. */
+function stringOf(value: unknown): string {
+  return String(value);
+}
+/** new RegExp(pattern): undefined is the empty pattern, anything else its text. */
+function regExpOf(pattern: unknown): RegExp {
+  return new RegExp(pattern === undefined ? '' : stringOf(pattern));
 }
 const wrapped = (body: string): string =>
   '*** Begin Patch\n' + body + '\n*** End Patch';
@@ -305,7 +322,7 @@ for (const target of ['.amber/active.json', 'boundary.md']) {
       const out = patch(f, wrapped(body));
       assert.equal(at(out, 'hookSpecificOutput', 'permissionDecision'), 'deny');
       assert.match(
-        textAt(out, 'hookSpecificOutput', 'permissionDecisionReason'),
+        text(get(out, 'hookSpecificOutput', 'permissionDecisionReason')),
         /not editable|contract.*pointer/i,
       );
       assert.deepEqual(tree(f.root), before);
@@ -345,7 +362,7 @@ test('Codex Bash command envelope enforces the existing command rule', () => {
   });
   assert.equal(at(out, 'hookSpecificOutput', 'permissionDecision'), 'deny');
   assert.match(
-    textAt(out, 'hookSpecificOutput', 'permissionDecisionReason'),
+    text(get(out, 'hookSpecificOutput', 'permissionDecisionReason')),
     /bash-deny/,
   );
 });
@@ -415,7 +432,7 @@ test('Codex child patches map absolute linked-worktree paths even when hook cwd 
   );
   assert.equal(at(outside, 'hookSpecificOutput', 'permissionDecision'), 'deny');
   assert.equal(
-    ledger(f).filter((r) => at(r, 'trigger') === 'unit-claim').length,
+    ledger(f).filter((r) => get(r, 'trigger') === 'unit-claim').length,
     1,
   );
 });
@@ -426,11 +443,11 @@ test('Codex startup and resume restore model state and current standing rules', 
     const model = 'gpt-fixture-model-' + source;
     const out = hook(f, 'SessionStart', { source, model });
     assert.match(
-      textAt(out, 'hookSpecificOutput', 'additionalContext'),
+      text(get(out, 'hookSpecificOutput', 'additionalContext')),
       /boundary.md/,
     );
     assert.match(
-      textAt(out, 'hookSpecificOutput', 'additionalContext'),
+      text(get(out, 'hookSpecificOutput', 'additionalContext')),
       /Preserve the experiment journal\./,
     );
     const state = parseJson(
@@ -439,8 +456,8 @@ test('Codex startup and resume restore model state and current standing rules', 
         'utf8',
       ),
     );
-    assert.equal(at(state, 'model'), model);
-    assert.equal(at(state, 'briefed'), 'boundary.md');
+    assert.equal(get(state, 'model'), model);
+    assert.equal(get(state, 'briefed'), 'boundary.md');
   }
   assert.deepEqual(ledger(f), []);
 });
@@ -452,7 +469,7 @@ test('Codex prompt briefs a contract activated after startup once', () => {
     prompt: 'Continue the actual work.',
   });
   assert.match(
-    textAt(out, 'hookSpecificOutput', 'additionalContext'),
+    text(get(out, 'hookSpecificOutput', 'additionalContext')),
     /current-contract.md/,
   );
   assert.equal(hook(f, 'UserPromptSubmit', { prompt: 'Continue.' }), null);
@@ -468,11 +485,14 @@ for (const skill of ['planning', 'set', 'init', 'status', 'audit']) {
     assert.equal(result.status, 0, result.stderr);
     const rows = ledger(f);
     assert.equal(rows.length, 1);
-    assert.equal(at(rows, 0, 'trigger'), 'skill-invocation');
-    assert.equal(at(rows, 0, 'summary'), 'amber:' + skill + ' inspect fixture');
-    assert.equal(at(rows, 0, 'session_id'), f.session);
-    assert.equal(at(rows, 0, 'cwd'), f.cwd);
-    assert.equal(at(rows, 0, 'model'), 'gpt-fixture-model');
+    assert.equal(get(rows, 0, 'trigger'), 'skill-invocation');
+    assert.equal(
+      get(rows, 0, 'summary'),
+      'amber:' + skill + ' inspect fixture',
+    );
+    assert.equal(get(rows, 0, 'session_id'), f.session);
+    assert.equal(get(rows, 0, 'cwd'), f.cwd);
+    assert.equal(get(rows, 0, 'model'), 'gpt-fixture-model');
   });
 }
 for (const kind of ['skip', 'finding']) {
@@ -482,10 +502,10 @@ for (const kind of ['skip', 'finding']) {
     assert.equal(result.status, 0, result.stderr);
     const rows = ledger(f);
     assert.equal(rows.length, 1);
-    assert.equal(at(rows, 0, 'trigger'), kind);
-    assert.equal(at(rows, 0, 'summary'), 'survey result - settled');
-    assert.equal(at(rows, 0, 'session_id'), f.session);
-    assert.equal(at(rows, 0, 'cwd'), f.cwd);
+    assert.equal(get(rows, 0, 'trigger'), kind);
+    assert.equal(get(rows, 0, 'summary'), 'survey result - settled');
+    assert.equal(get(rows, 0, 'session_id'), f.session);
+    assert.equal(get(rows, 0, 'cwd'), f.cwd);
   });
 }
 test('Codex recorder marks an external hold with kind external', () => {
@@ -499,22 +519,22 @@ test('Codex recorder marks an external hold with kind external', () => {
   const result = record(f, ['mark', 'hold', 'U1 - external: sweep running']);
   assert.equal(result.status, 0, result.stderr);
   const holds = (): unknown[] =>
-    ledger(f).filter((r) => at(r, 'trigger') === 'unit-hold');
+    ledger(f).filter((r) => get(r, 'trigger') === 'unit-hold');
   assert.equal(holds().length, 1);
-  assert.equal(at(holds(), 0, 'kind'), 'external');
-  assert.equal(at(holds(), 0, 'unit'), 'U1');
-  assert.match(textAt(holds(), 0, 'summary'), /sweep running/);
-  assert.equal(at(holds(), 0, 'session_id'), f.session);
+  assert.equal(get(holds(), 0, 'kind'), 'external');
+  assert.equal(get(holds(), 0, 'unit'), 'U1');
+  assert.match(text(get(holds(), 0, 'summary')), /sweep running/);
+  assert.equal(get(holds(), 0, 'session_id'), f.session);
   const progress = (): unknown =>
     parseJson(
       fs.readFileSync(path.join(f.root, '.amber', 'progress.json'), 'utf8'),
     );
-  assert.equal(at(progress(), 'hold', 'kind'), 'external');
+  assert.equal(get(progress(), 'hold', 'kind'), 'external');
   const plain = record(f, ['mark', 'hold', 'U1 - waiting on the operator']);
   assert.equal(plain.status, 0, plain.stderr);
   assert.equal(holds().length, 2);
   assert.equal(hasKey(holds()[1], 'kind'), false);
-  assert.equal(hasKey(at(progress(), 'hold'), 'kind'), false);
+  assert.equal(hasKey(get(progress(), 'hold'), 'kind'), false);
 });
 const invalidArgs: string[][] = [
   [],
@@ -612,14 +632,14 @@ test('Codex Stop lifecycle: passed releases the contract', () => {
   assert.equal(stop(false), null);
   const rows = ledger(f);
   assert.equal(rows.length, 1);
-  assert.equal(at(rows, 0, 'gate'), 'passed');
-  assert.equal(at(rows, 0, 'session_id'), f.session);
-  assert.equal(at(rows, 0, 'cwd'), f.cwd);
-  assert.equal(at(rows, 0, 'model'), 'gpt-fixture-model');
-  assert.equal(at(rows, 0, 'summary'), 'fixture complete');
-  assert.equal(at(rows, 0, 'goal'), 'fixture checked');
-  assert.equal(at(rows, 0, 'review_target'), 'boundary.md');
-  assert.match(textAt(rows, 0, 'review'), /current checks/);
+  assert.equal(get(rows, 0, 'gate'), 'passed');
+  assert.equal(get(rows, 0, 'session_id'), f.session);
+  assert.equal(get(rows, 0, 'cwd'), f.cwd);
+  assert.equal(get(rows, 0, 'model'), 'gpt-fixture-model');
+  assert.equal(get(rows, 0, 'summary'), 'fixture complete');
+  assert.equal(get(rows, 0, 'goal'), 'fixture checked');
+  assert.equal(get(rows, 0, 'review_target'), 'boundary.md');
+  assert.match(text(get(rows, 0, 'review')), /current checks/);
   assert.equal(signalExists(f), false, 'signal consumed');
   assert.equal(
     fs.existsSync(path.join(f.root, '.amber', 'active.json')),
@@ -669,7 +689,7 @@ test('Codex Stop leaves a signal alone for a session that does not drive the run
   );
   assert.equal(signalExists(f), false);
   assert.equal(ledger(f).length, 1);
-  assert.equal(at(ledger(f), 0, 'gate'), 'passed');
+  assert.equal(get(ledger(f), 0, 'gate'), 'passed');
   assert.equal(
     fs.existsSync(path.join(f.root, '.amber', 'active.json')),
     false,
@@ -690,11 +710,11 @@ for (const outcome of ['exhausted', 'withdrawn']) {
         stop_hook_active: active,
       });
     };
-    assert.equal(at(stop(false), 'decision'), 'block');
+    assert.equal(get(stop(false), 'decision'), 'block');
     assert.equal(signalExists(f), false, 'a rejected signal is consumed');
     if (outcome === 'exhausted') {
-      assert.equal(at(stop(true), 'decision'), 'block');
-      assert.equal(at(stop(true), 'decision'), 'block');
+      assert.equal(get(stop(true), 'decision'), 'block');
+      assert.equal(get(stop(true), 'decision'), 'block');
       assert.equal(stop(true), null);
     } else {
       assert.equal(
@@ -708,9 +728,9 @@ for (const outcome of ['exhausted', 'withdrawn']) {
     const rows = ledger(f);
     assert.equal(rows.length, outcome === 'withdrawn' ? 0 : 1);
     if (rows.length) {
-      assert.equal(at(rows, 0, 'gate'), 'exhausted');
-      assert.equal(at(rows, 0, 'contract'), 'broken');
-      assert.equal(at(rows, 0, 'summary'), 'fixture complete');
+      assert.equal(get(rows, 0, 'gate'), 'exhausted');
+      assert.equal(get(rows, 0, 'contract'), 'broken');
+      assert.equal(get(rows, 0, 'summary'), 'fixture complete');
     }
     assert.equal(
       fs.existsSync(path.join(f.home, 'state', 'gate-' + f.session + '.json')),
@@ -739,9 +759,9 @@ test('Codex Stop records a request-scoped completion without a contract', () => 
   assert.equal(passed, null);
   const rows = ledger(f);
   assert.equal(rows.length, 1);
-  assert.equal(at(rows, 0, 'review_target'), 'request');
-  assert.match(textAt(rows, 0, 'review'), /artifact and test/);
-  assert.equal(at(rows, 0, 'summary'), 'reviewed');
+  assert.equal(get(rows, 0, 'review_target'), 'request');
+  assert.match(text(get(rows, 0, 'review')), /artifact and test/);
+  assert.equal(get(rows, 0, 'summary'), 'reviewed');
   assert.equal(hasKey(rows[0], 'gate'), false);
 });
 test('Codex Stop ignores old marker lines without a signal', () => {
@@ -788,33 +808,36 @@ test('Codex done compares changed files with the write-scope and records declara
   );
   const rows = ledger(f);
   assert.equal(rows.length, 1);
-  assert.equal(at(rows, 0, 'gate'), 'passed');
-  assert.equal(at(rows, 0, 'out_of_scope_count'), 1);
-  assert.equal(at(rows, 0, 'out_of_scope', 0, 'path'), 'notes.txt');
-  assert.match(textAt(rows, 0, 'out_of_scope', 0, 'reason'), /kept on purpose/);
+  assert.equal(get(rows, 0, 'gate'), 'passed');
+  assert.equal(get(rows, 0, 'out_of_scope_count'), 1);
+  assert.equal(get(rows, 0, 'out_of_scope', 0, 'path'), 'notes.txt');
+  assert.match(
+    text(get(rows, 0, 'out_of_scope', 0, 'reason')),
+    /kept on purpose/,
+  );
 });
 test('hook configuration routes Codex apply_patch and resume to shared handlers', () => {
-  const hooks = at(
+  const hooks = get(
     parseJson(
       fs.readFileSync(path.join(PLUGIN, 'hooks', 'hooks.json'), 'utf8'),
     ),
     'hooks',
   );
   assert.ok(
-    items(at(hooks, 'PreToolUse')).some(
+    list(get(hooks, 'PreToolUse')).some(
       (group) =>
-        new RegExp(textAt(group, 'matcher')).test('apply_patch') &&
-        items(at(group, 'hooks')).some((h) =>
-          / E1$/.test(textAt(h, 'command')),
+        regExpOf(get(group, 'matcher')).test('apply_patch') &&
+        list(get(group, 'hooks')).some((h) =>
+          / E1$/.test(String(get(h, 'command'))),
         ),
     ),
   );
   assert.ok(
-    items(at(hooks, 'SessionStart')).some(
+    list(get(hooks, 'SessionStart')).some(
       (group) =>
-        new RegExp(textAt(group, 'matcher')).test('resume') &&
-        items(at(group, 'hooks')).some((h) =>
-          / S0$/.test(textAt(h, 'command')),
+        regExpOf(get(group, 'matcher')).test('resume') &&
+        list(get(group, 'hooks')).some((h) =>
+          / S0$/.test(String(get(h, 'command'))),
         ),
     ),
   );

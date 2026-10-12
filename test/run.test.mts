@@ -17,7 +17,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
 
-import { at, items, parseJson, show, textAt } from './support/json.mjs';
+import { at, get, list, parseJson, show } from './support/json.mjs';
 import { loadModule, PLUGIN } from './support/plugin.mjs';
 
 const HOOK = path.join(PLUGIN, 'hooks', 'amber-hook.cjs');
@@ -137,9 +137,22 @@ function gateFileExists(home: string, sessionId: string): boolean {
   return fs.existsSync(path.join(home, 'state', 'gate-' + sessionId + '.json'));
 }
 
-function check(label: string, cond: unknown, detail?: string | null): void {
+/** String(value), the coercion string concatenation and regex tests apply. */
+function stringOf(value: unknown): string {
+  return String(value);
+}
+
+/** String(value.k1.k2...): a plain read, coerced as a regex test coerces it. */
+function stringAt(
+  value: unknown,
+  ...path: readonly (string | number)[]
+): string {
+  return stringOf(get(value, ...path));
+}
+
+function check(label: string, cond: unknown, detail?: unknown): void {
   test(label, () => {
-    assert.ok(cond, detail ? label + ' - ' + detail : label);
+    assert.ok(cond, detail ? label + ' - ' + stringOf(detail) : label);
   });
 }
 
@@ -153,22 +166,31 @@ function has(value: unknown, key: string): boolean {
   return key in value;
 }
 
-/** The additionalContext text of a hook answer, or null without one. */
-function contextOf(out: unknown): string | null {
-  const ctx = at(out, 'hookSpecificOutput', 'additionalContext');
-  return typeof ctx === 'string' ? ctx : null;
+/**
+ * `out && out.hookSpecificOutput && out.hookSpecificOutput.additionalContext`:
+ * whatever the answer holds there, falsy where a step is missing.
+ */
+function contextOf(out: unknown): unknown {
+  return at(out, 'hookSpecificOutput', 'additionalContext');
 }
 
-/** The own keys of an object value, in order; none for anything else. */
+/** Object.keys(value): a TypeError for null or undefined, as the original. */
 function keysOf(value: unknown): string[] {
-  return typeof value === 'object' && value !== null ? Object.keys(value) : [];
+  if (value === null || value === undefined) {
+    throw new TypeError('Cannot convert undefined or null to object');
+  }
+  if (typeof value === 'object') return Object.keys(value);
+  return typeof value === 'string'
+    ? Array.from({ length: value.length }, (_, i) => String(i))
+    : [];
 }
 
-/** The comma-joined elements of an array value, as Array#join() writes them. */
+/** value.join(): a TypeError where value is not an array. */
 function joined(value: unknown): string {
-  return items(value).join();
+  return list(value).join();
 }
 
+// `!!(out && out.hookSpecificOutput && ... === 'deny')` in the original.
 function isDeny(out: unknown): boolean {
   return at(out, 'hookSpecificOutput', 'permissionDecision') === 'deny';
 }
@@ -387,7 +409,7 @@ const sessionState = (home: string, sessionId: string): unknown => {
     !!(
       brokenOut &&
       /remove the file to release/.test(
-        textAt(brokenOut, 'hookSpecificOutput', 'permissionDecisionReason'),
+        stringAt(brokenOut, 'hookSpecificOutput', 'permissionDecisionReason'),
       )
     ),
   );
@@ -449,13 +471,13 @@ const sessionState = (home: string, sessionId: string): unknown => {
   check(
     'S2 no-contract record carries the review attestation and summary',
     recs.length === 1 &&
-      at(recs, 0, 'review_target') === 'request' &&
-      /focused test passes/.test(textAt(recs, 0, 'review')) &&
-      at(recs, 0, 'summary') === 'built the thing',
+      get(recs, 0, 'review_target') === 'request' &&
+      /focused test passes/.test(stringAt(recs, 0, 'review')) &&
+      get(recs, 0, 'summary') === 'built the thing',
   );
   check(
     'S2 no-contract record carries model from S0 state',
-    recs.length === 1 && at(recs, 0, 'model') === 'claude-fable-5',
+    recs.length === 1 && get(recs, 0, 'model') === 'claude-fable-5',
   );
   runHook(
     'S2',
@@ -508,7 +530,7 @@ const sessionState = (home: string, sessionId: string): unknown => {
   register(zone, home, 's2-test');
   check(
     'S0 briefed the contract session',
-    at(sessionState(home, 's2-test'), 'briefed') === 'test-boundary.md',
+    get(sessionState(home, 's2-test'), 'briefed') === 'test-boundary.md',
   );
   const noGoal = done(zone, home, [
     '--review',
@@ -535,7 +557,7 @@ const sessionState = (home: string, sessionId: string): unknown => {
     'done under a contract writes the signal naming the contract',
     ok.status === 0 &&
       signalExists(zone) &&
-      at(parseJson(fs.readFileSync(signalPath(zone), 'utf8')), 'target') ===
+      get(parseJson(fs.readFileSync(signalPath(zone), 'utf8')), 'target') ===
         'test-boundary.md',
     ok.stderr,
   );
@@ -553,12 +575,12 @@ const sessionState = (home: string, sessionId: string): unknown => {
   check(
     'gated record carries contract/goal/gate fields',
     recs.length === 1 &&
-      at(recs, 0, 'gate') === 'passed' &&
-      at(recs, 0, 'contract') === 'test-boundary.md' &&
-      at(recs, 0, 'goal') === 'all runner cases pass' &&
-      at(recs, 0, 'review_target') === 'test-boundary.md' &&
-      /test evidence/.test(textAt(recs, 0, 'review')) &&
-      at(recs, 0, 'summary') === 'unit complete',
+      get(recs, 0, 'gate') === 'passed' &&
+      get(recs, 0, 'contract') === 'test-boundary.md' &&
+      get(recs, 0, 'goal') === 'all runner cases pass' &&
+      get(recs, 0, 'review_target') === 'test-boundary.md' &&
+      /test evidence/.test(stringAt(recs, 0, 'review')) &&
+      get(recs, 0, 'summary') === 'unit complete',
     JSON.stringify(recs),
   );
   check('gate counter absent after pass', !gateFileExists(home, 's2-test'));
@@ -607,9 +629,9 @@ const sessionState = (home: string, sessionId: string): unknown => {
     'gate blocks a signal under a broken pointer and says why',
     !!(
       b1 &&
-      at(b1, 'decision') === 'block' &&
-      /broken/.test(textAt(b1, 'reason')) &&
-      /done command again/.test(textAt(b1, 'reason'))
+      get(b1, 'decision') === 'block' &&
+      /broken/.test(stringAt(b1, 'reason')) &&
+      /done command again/.test(stringAt(b1, 'reason'))
     ),
     JSON.stringify(b1),
   );
@@ -620,18 +642,18 @@ const sessionState = (home: string, sessionId: string): unknown => {
   const b4 = attempt(true);
   check(
     'gate blocks exactly 3 times then releases',
-    !!(b2 && at(b2, 'decision') === 'block') &&
-      !!(b3 && at(b3, 'decision') === 'block') &&
+    !!(b2 && get(b2, 'decision') === 'block') &&
+      !!(b3 && get(b3, 'decision') === 'block') &&
       b4 === null,
-    JSON.stringify([b2 && at(b2, 'decision'), b3 && at(b3, 'decision'), b4]),
+    JSON.stringify([b2 && get(b2, 'decision'), b3 && get(b3, 'decision'), b4]),
   );
   const recs = ledger(home);
   check(
     'exhausted declaration recorded with gate:exhausted',
     recs.length === 1 &&
-      at(recs, 0, 'gate') === 'exhausted' &&
-      at(recs, 0, 'goal') === null &&
-      at(recs, 0, 'contract') === 'broken',
+      get(recs, 0, 'gate') === 'exhausted' &&
+      get(recs, 0, 'goal') === null &&
+      get(recs, 0, 'contract') === 'broken',
     JSON.stringify(recs),
   );
   check(
@@ -640,7 +662,7 @@ const sessionState = (home: string, sessionId: string): unknown => {
   );
   check(
     'broken contract never produces a passed completion',
-    !recs.some((r) => at(r, 'gate') === 'passed'),
+    !recs.some((r) => get(r, 'gate') === 'passed'),
   );
 
   const home2 = freshHome('gate4');
@@ -650,7 +672,7 @@ const sessionState = (home: string, sessionId: string): unknown => {
     plantSignal(zoneBrokenPtr, {});
     return runHook('S2', stopEvent(zoneBrokenPtr, 'claimed'), home2).out;
   })();
-  check('withdrawal setup blocked', !!(b && at(b, 'decision') === 'block'));
+  check('withdrawal setup blocked', !!(b && get(b, 'decision') === 'block'));
   const withdrawal = runHook(
     'S2',
     stopEvent(zoneBrokenPtr, 'resuming the work instead, no signal', true),
@@ -727,7 +749,9 @@ const sessionState = (home: string, sessionId: string): unknown => {
   const ctx1 = contextOf(out1);
   check(
     'S1 briefs once when a contract is active and the session is unbriefed',
-    !!ctx1 && /test-boundary\.md/.test(ctx1) && / done --review /.test(ctx1),
+    !!ctx1 &&
+      /test-boundary\.md/.test(stringOf(ctx1)) &&
+      / done --review /.test(stringOf(ctx1)),
     JSON.stringify(out1),
   );
   const out2 = runHook(
@@ -765,33 +789,35 @@ const sessionState = (home: string, sessionId: string): unknown => {
   check(
     'S0 contract-less session injects the arming note',
     !!armCtx &&
-      /no active contract/.test(armCtx) &&
-      /amber:planning/.test(armCtx),
+      /no active contract/.test(stringOf(armCtx)) &&
+      /amber:planning/.test(stringOf(armCtx)),
     JSON.stringify(out),
   );
   check(
     'S0 arming note carries the opening criterion',
-    !!armCtx && /work request/.test(armCtx) && /Q&A/.test(armCtx),
+    !!armCtx &&
+      /work request/.test(stringOf(armCtx)) &&
+      /Q&A/.test(stringOf(armCtx)),
   );
   check(
     'S0 arming note routes the contract judgment inside planning',
     !!armCtx &&
-      /judged inside planning/.test(armCtx) &&
-      /recorded/.test(armCtx),
+      /judged inside planning/.test(stringOf(armCtx)) &&
+      /recorded/.test(stringOf(armCtx)),
   );
   check(
     'S0 contract-less briefing names the done command without --goal',
     !!armCtx &&
-      / done --review /.test(armCtx) &&
-      !/--goal/.test(armCtx) &&
-      /semantic review/.test(armCtx),
+      / done --review /.test(stringOf(armCtx)) &&
+      !/--goal/.test(stringOf(armCtx)) &&
+      /semantic review/.test(stringOf(armCtx)),
   );
   check(
     'S0 contract-less briefing forbids the signal for incomplete reports',
     !!armCtx &&
-      /Never run the command for incomplete/.test(armCtx) &&
-      /governed work unit itself complete/.test(armCtx) &&
-      !/AMBER_/.test(armCtx),
+      /Never run the command for incomplete/.test(stringOf(armCtx)) &&
+      /governed work unit itself complete/.test(stringOf(armCtx)) &&
+      !/AMBER_/.test(stringOf(armCtx)),
   );
   check(
     'S0 wrote the session state file',
@@ -810,9 +836,9 @@ const sessionState = (home: string, sessionId: string): unknown => {
     'S0 surfaces recorded sensor failures',
     !!(
       out2 &&
-      at(out2, 'hookSpecificOutput') &&
+      get(out2, 'hookSpecificOutput') &&
       /sensor failure/.test(
-        textAt(out2, 'hookSpecificOutput', 'additionalContext'),
+        stringAt(out2, 'hookSpecificOutput', 'additionalContext'),
       )
     ),
   );
@@ -839,13 +865,13 @@ const sessionState = (home: string, sessionId: string): unknown => {
   check(
     'S1 records a planning invocation',
     recs.length === 1 &&
-      at(recs, 0, 'trigger') === 'planning-invocation' &&
-      at(recs, 0, 'summary') === '/amber:planning refactor the parser',
+      get(recs, 0, 'trigger') === 'planning-invocation' &&
+      get(recs, 0, 'summary') === '/amber:planning refactor the parser',
     JSON.stringify(recs),
   );
   check(
     'S1 record carries model from S0 state',
-    recs.length === 1 && at(recs, 0, 'model') === 'claude-fable-5',
+    recs.length === 1 && get(recs, 0, 'model') === 'claude-fable-5',
   );
   runHook(
     'S1',
@@ -978,19 +1004,19 @@ const sessionState = (home: string, sessionId: string): unknown => {
   check(
     'S3 records a prefixed skill invocation with args',
     recs.length === 1 &&
-      at(recs, 0, 'trigger') === 'skill-invocation' &&
-      at(recs, 0, 'summary') === 'amber:planning auth refactor',
+      get(recs, 0, 'trigger') === 'skill-invocation' &&
+      get(recs, 0, 'summary') === 'amber:planning auth refactor',
     JSON.stringify(recs),
   );
   check(
     'S3 record carries model from S0 state',
-    recs.length === 1 && at(recs, 0, 'model') === 'claude-fable-5',
+    recs.length === 1 && get(recs, 0, 'model') === 'claude-fable-5',
   );
   s3({ skill: 'set' });
   recs = ledger(home);
   check(
     'S3 records an unprefixed skill name too',
-    recs.length === 2 && at(recs, 1, 'summary') === 'set',
+    recs.length === 2 && get(recs, 1, 'summary') === 'set',
   );
   s3({ skill: 'superpowers:brainstorming' });
   s3({ skill: 'amber:planningish' });
@@ -1009,7 +1035,7 @@ const sessionState = (home: string, sessionId: string): unknown => {
   recs = ledger(home);
   check(
     'S3 records an init invocation with args',
-    recs.length === 4 && at(recs, 3, 'summary') === 'amber:init /home/x/proj',
+    recs.length === 4 && get(recs, 3, 'summary') === 'amber:init /home/x/proj',
     JSON.stringify(recs),
   );
   s3({ skill: 'amber:initx' });
@@ -1019,8 +1045,8 @@ const sessionState = (home: string, sessionId: string): unknown => {
   check(
     'S3 records an audit invocation with args',
     recs.length === 5 &&
-      at(recs, 4, 'trigger') === 'skill-invocation' &&
-      at(recs, 4, 'summary') === 'amber:audit exclude=amber',
+      get(recs, 4, 'trigger') === 'skill-invocation' &&
+      get(recs, 4, 'summary') === 'amber:audit exclude=amber',
     JSON.stringify(recs),
   );
 }
@@ -1036,31 +1062,35 @@ const sessionState = (home: string, sessionId: string): unknown => {
   const ctx = contextOf(out);
   check(
     'S0 injects active-contract identity',
-    !!ctx && /test-boundary\.md/.test(ctx) && /approved by operator/.test(ctx),
+    !!ctx &&
+      /test-boundary\.md/.test(stringOf(ctx)) &&
+      /approved by operator/.test(stringOf(ctx)),
     JSON.stringify(out),
   );
   check(
     'S0 injection carries the standing obligations verbatim',
-    !!ctx && /keep the journal current/.test(ctx),
+    !!ctx && /keep the journal current/.test(stringOf(ctx)),
   );
   check(
     'S0 injection carries the completion-signal and mark conventions',
     !!ctx &&
-      / done --review /.test(ctx) &&
-      /--goal "<goal-test result of test-boundary\.md>"/.test(ctx) &&
-      /releases the contract by itself/.test(ctx) &&
-      /amber:mark/.test(ctx) &&
-      !/AMBER_/.test(ctx),
+      / done --review /.test(stringOf(ctx)) &&
+      /--goal "<goal-test result of test-boundary\.md>"/.test(stringOf(ctx)) &&
+      /releases the contract by itself/.test(stringOf(ctx)) &&
+      /amber:mark/.test(stringOf(ctx)) &&
+      !/AMBER_/.test(stringOf(ctx)),
   );
   check(
     'S0 contract briefing forbids the signal for an incomplete assessment',
     !!ctx &&
-      /Never run the command for incomplete/.test(ctx) &&
-      /never that an assessment, report, or attempt finished/.test(ctx),
+      /Never run the command for incomplete/.test(stringOf(ctx)) &&
+      /never that an assessment, report, or attempt finished/.test(
+        stringOf(ctx),
+      ),
   );
   check(
     'S0 contract session carries no arming note',
-    !!ctx && !/no active contract/.test(ctx),
+    !!ctx && !/no active contract/.test(stringOf(ctx)),
   );
   const outRule = runHook(
     'S0',
@@ -1070,7 +1100,7 @@ const sessionState = (home: string, sessionId: string): unknown => {
   const ctxRule = contextOf(outRule);
   check(
     'S0 extracts the standing-rules section whatever its spacing and case',
-    !!ctxRule && /keep the journal current/.test(ctxRule),
+    !!ctxRule && /keep the journal current/.test(stringOf(ctxRule)),
     JSON.stringify(outRule),
   );
   const out3 = runHook(
@@ -1081,7 +1111,7 @@ const sessionState = (home: string, sessionId: string): unknown => {
   const ctx3 = contextOf(out3);
   check(
     'S0 surfaces a broken pointer at session start',
-    !!ctx3 && /broken/.test(ctx3),
+    !!ctx3 && /broken/.test(stringOf(ctx3)),
     JSON.stringify(out3),
   );
 
@@ -1098,9 +1128,9 @@ const sessionState = (home: string, sessionId: string): unknown => {
     'S2 broken contract cannot produce a passed completion',
     !!(
       brokenDone &&
-      at(brokenDone, 'decision') === 'block' &&
-      /broken/.test(textAt(brokenDone, 'reason'))
-    ) && !ledger(home).some((row) => at(row, 'gate') === 'passed'),
+      get(brokenDone, 'decision') === 'block' &&
+      /broken/.test(stringAt(brokenDone, 'reason'))
+    ) && !ledger(home).some((row) => get(row, 'gate') === 'passed'),
     JSON.stringify(brokenDone),
   );
 }
@@ -1118,9 +1148,9 @@ const sessionState = (home: string, sessionId: string): unknown => {
     'gate rejects a signal written for another contract',
     !!(
       wrong &&
-      at(wrong, 'decision') === 'block' &&
-      /test-boundary\.md/.test(textAt(wrong, 'reason')) &&
-      /older-boundary\.md/.test(textAt(wrong, 'reason'))
+      get(wrong, 'decision') === 'block' &&
+      /test-boundary\.md/.test(stringAt(wrong, 'reason')) &&
+      /older-boundary\.md/.test(stringAt(wrong, 'reason'))
     ),
     JSON.stringify(wrong),
   );
@@ -1154,24 +1184,24 @@ const sessionState = (home: string, sessionId: string): unknown => {
   check(
     'mark skip call records a skip row carrying the verdict text',
     recs.length === 1 &&
-      at(recs, 0, 'trigger') === 'skip' &&
-      /opening verdict/.test(textAt(recs, 0, 'summary')) &&
-      !/^skip\b/.test(textAt(recs, 0, 'summary')),
+      get(recs, 0, 'trigger') === 'skip' &&
+      /opening verdict/.test(stringAt(recs, 0, 'summary')) &&
+      !/^skip\b/.test(stringAt(recs, 0, 'summary')),
     JSON.stringify(recs),
   );
   call('mark', 'finding: null check missing - applied');
   check(
     'mark finding call records a finding row (unprefixed name, colon form)',
     ledger(home).length === 2 &&
-      at(ledger(home), 1, 'trigger') === 'finding' &&
-      /null check/.test(textAt(ledger(home), 1, 'summary')),
+      get(ledger(home), 1, 'trigger') === 'finding' &&
+      /null check/.test(stringAt(ledger(home), 1, 'summary')),
   );
   call('amber:mark', 'note - malformed kind');
   check(
     'malformed mark args fall back to a skill-invocation row',
     ledger(home).length === 3 &&
-      at(ledger(home), 2, 'trigger') === 'skill-invocation' &&
-      /mark/.test(textAt(ledger(home), 2, 'summary')),
+      get(ledger(home), 2, 'trigger') === 'skill-invocation' &&
+      /mark/.test(stringAt(ledger(home), 2, 'summary')),
     JSON.stringify(ledger(home)),
   );
   runHook(
@@ -1259,7 +1289,7 @@ const sessionState = (home: string, sessionId: string): unknown => {
       },
     });
   const rows = (trigger: string): unknown[] =>
-    ledger(home).filter((r) => at(r, 'trigger') === trigger);
+    ledger(home).filter((r) => get(r, 'trigger') === trigger);
 
   // unit init / start
   const init = record(['unit', 'init', 'docs/plan.md']);
@@ -1267,19 +1297,19 @@ const sessionState = (home: string, sessionId: string): unknown => {
     'unit init creates progress.json from the plan unit rows',
     init.status === 0 &&
       fs.existsSync(progressFile) &&
-      keysOf(at(progress(), 'units')).join(',') === 'U1,U2,U3',
+      keysOf(get(progress(), 'units')).join(',') === 'U1,U2,U3',
     (init.stderr || '') + (init.stdout || ''),
   );
   check(
     'unit init parses scope, after, and oracle',
     fs.existsSync(progressFile) &&
-      joined(at(progress(), 'units', 'U1', 'scope')) === 'plugin/hooks/**' &&
-      joined(at(progress(), 'units', 'U3', 'after')) === 'U1,U2' &&
-      joined(at(progress(), 'units', 'U3', 'scope')) ===
+      joined(get(progress(), 'units', 'U1', 'scope')) === 'plugin/hooks/**' &&
+      joined(get(progress(), 'units', 'U3', 'after')) === 'U1,U2' &&
+      joined(get(progress(), 'units', 'U3', 'scope')) ===
         'plugin/**,docs/*.md' &&
-      at(progress(), 'units', 'U2', 'oracle') === 'grep -c ok docs/a.md',
+      get(progress(), 'units', 'U2', 'oracle') === 'grep -c ok docs/a.md',
     fs.existsSync(progressFile)
-      ? JSON.stringify(at(progress(), 'units'))
+      ? JSON.stringify(get(progress(), 'units'))
       : 'no progress file',
   );
   check(
@@ -1292,8 +1322,8 @@ const sessionState = (home: string, sessionId: string): unknown => {
     'unit start marks the unit running and current',
     start.status === 0 &&
       fs.existsSync(progressFile) &&
-      at(progress(), 'units', 'U1', 'status') === 'running' &&
-      at(progress(), 'current') === 'U1',
+      get(progress(), 'units', 'U1', 'status') === 'running' &&
+      get(progress(), 'current') === 'U1',
     (start.stderr || '') + (start.stdout || ''),
   );
   check(
@@ -1348,7 +1378,7 @@ const sessionState = (home: string, sessionId: string): unknown => {
     'E1 denies a subagent write before it claims a unit',
     isDeny(unclaimed) &&
       /claim/.test(
-        textAt(unclaimed, 'hookSpecificOutput', 'permissionDecisionReason'),
+        stringAt(unclaimed, 'hookSpecificOutput', 'permissionDecisionReason'),
       ),
     JSON.stringify(unclaimed),
   );
@@ -1359,8 +1389,10 @@ const sessionState = (home: string, sessionId: string): unknown => {
   );
   check(
     'E1 observes a subagent unit claim and records its agent id',
-    claim === null && at(progress(), 'units', 'U1', 'agent_id') === 'a1',
-    JSON.stringify(claim) + ' ' + JSON.stringify(at(progress(), 'units', 'U1')),
+    claim === null && get(progress(), 'units', 'U1', 'agent_id') === 'a1',
+    JSON.stringify(claim) +
+      ' ' +
+      JSON.stringify(get(progress(), 'units', 'U1')),
   );
   check(
     'E1 allows the claimed subagent inside its unit scope',
@@ -1379,7 +1411,7 @@ const sessionState = (home: string, sessionId: string): unknown => {
     'E1 denies the claimed subagent outside its unit scope even inside the contract scope',
     isDeny(outside) &&
       /U1/.test(
-        textAt(outside, 'hookSpecificOutput', 'permissionDecisionReason'),
+        stringAt(outside, 'hookSpecificOutput', 'permissionDecisionReason'),
       ),
     JSON.stringify(outside),
   );
@@ -1401,35 +1433,39 @@ const sessionState = (home: string, sessionId: string): unknown => {
   register(zone, home, 's2-test');
   check(
     'registration lists the session in progress.json',
-    joined(at(progress(), 'session_ids')) === 's2-test',
+    joined(get(progress(), 'session_ids')) === 's2-test',
   );
   const b1 = runHook('S2', plain(false), home).out;
   check(
     'S2 blocks a plain stop while units remain open',
-    !!(b1 && at(b1, 'decision') === 'block' && /U1/.test(textAt(b1, 'reason'))),
+    !!(
+      b1 &&
+      get(b1, 'decision') === 'block' &&
+      /U1/.test(stringAt(b1, 'reason'))
+    ),
     JSON.stringify(b1),
   );
   check(
     'S2 counts the re-entry on the current unit',
-    at(progress(), 'units', 'U1', 'reentries') === 1,
+    get(progress(), 'units', 'U1', 'reentries') === 1,
   );
   let last = b1;
   for (let i = 2; i <= 10; i += 1) last = runHook('S2', plain(true), home).out;
   check(
     'S2 keeps blocking up to the tenth re-entry',
-    !!(last && at(last, 'decision') === 'block') &&
-      at(progress(), 'units', 'U1', 'reentries') === 10,
+    !!(last && get(last, 'decision') === 'block') &&
+      get(progress(), 'units', 'U1', 'reentries') === 10,
     JSON.stringify(last),
   );
   const eleventh = runHook('S2', plain(true), home).out;
   check(
     'S2 releases the stop after ten re-entries and marks the unit limit',
     eleventh === null &&
-      at(progress(), 'units', 'U1', 'status') === 'limit' &&
+      get(progress(), 'units', 'U1', 'status') === 'limit' &&
       rows('unit-limit').length === 1,
     JSON.stringify(eleventh) +
       ' ' +
-      JSON.stringify(at(progress(), 'units', 'U1')),
+      JSON.stringify(get(progress(), 'units', 'U1')),
   );
   record(['unit', 'start', 'U2']);
   const b2 = runHook('S2', plain(false), home).out;
@@ -1437,9 +1473,9 @@ const sessionState = (home: string, sessionId: string): unknown => {
     'S2 starts a fresh count when the current unit changes',
     !!(
       b2 &&
-      at(b2, 'decision') === 'block' &&
-      /U2/.test(textAt(b2, 'reason'))
-    ) && at(progress(), 'units', 'U2', 'reentries') === 1,
+      get(b2, 'decision') === 'block' &&
+      /U2/.test(stringAt(b2, 'reason'))
+    ) && get(progress(), 'units', 'U2', 'reentries') === 1,
     JSON.stringify(b2),
   );
   const hold = record([
@@ -1452,21 +1488,21 @@ const sessionState = (home: string, sessionId: string): unknown => {
   check(
     'unit hold records the hold',
     hold.status === 0 &&
-      at(progress(), 'hold') &&
-      at(progress(), 'hold', 'unit') === 'U2' &&
+      get(progress(), 'hold') &&
+      get(progress(), 'hold', 'unit') === 'U2' &&
       rows('unit-hold').length === 1,
-    (hold.stderr || '') + JSON.stringify(at(progress(), 'hold')),
+    (hold.stderr || '') + JSON.stringify(get(progress(), 'hold')),
   );
   const held = runHook('S2', plain(false), home).out;
   check(
     'S2 lets a held stop through and consumes the hold',
-    held === null && at(progress(), 'hold') === null,
-    JSON.stringify(held) + ' ' + JSON.stringify(at(progress(), 'hold')),
+    held === null && get(progress(), 'hold') === null,
+    JSON.stringify(held) + ' ' + JSON.stringify(get(progress(), 'hold')),
   );
   const afterHold = runHook('S2', plain(false), home).out;
   check(
     'S2 blocks again once the hold is consumed',
-    !!(afterHold && at(afterHold, 'decision') === 'block'),
+    !!(afterHold && get(afterHold, 'decision') === 'block'),
   );
   const s3 = runHook(
     'S3',
@@ -1485,10 +1521,10 @@ const sessionState = (home: string, sessionId: string): unknown => {
   check(
     'mark hold via S3 records the hold in progress and ledger',
     s3 === null &&
-      at(progress(), 'hold') &&
-      /operator/.test(textAt(progress(), 'hold', 'reason')) &&
+      get(progress(), 'hold') &&
+      /operator/.test(stringAt(progress(), 'hold', 'reason')) &&
       rows('unit-hold').length === 2,
-    JSON.stringify(at(progress(), 'hold')),
+    JSON.stringify(get(progress(), 'hold')),
   );
   runHook('S2', plain(false), home); // consume
 
@@ -1503,7 +1539,7 @@ const sessionState = (home: string, sessionId: string): unknown => {
   check(
     'unit verified records the transition',
     ver.status === 0 &&
-      at(progress(), 'units', 'U2', 'status') === 'verified' &&
+      get(progress(), 'units', 'U2', 'status') === 'verified' &&
       rows('unit-verified').length === 1,
     (ver.stderr || '') + (ver.stdout || ''),
   );
@@ -1517,17 +1553,17 @@ const sessionState = (home: string, sessionId: string): unknown => {
   check(
     'unit failed keeps the unit open and records it',
     fail.status === 0 &&
-      at(progress(), 'units', 'U3', 'status') === 'failed' &&
+      get(progress(), 'units', 'U3', 'status') === 'failed' &&
       rows('unit-failed').length === 1,
   );
 
   // verified / failed refuse a missing or blank --evidence and flags they do not read
-  const u3History = items(at(progress(), 'units', 'U3', 'history')).length;
+  const u3History = get(progress(), 'units', 'U3', 'history', 'length');
   const refuses = (res: SpawnSyncReturns<string>, re: RegExp): boolean =>
     res.status !== 0 &&
     re.test(res.stderr || '') &&
-    at(progress(), 'units', 'U3', 'status') === 'failed' &&
-    items(at(progress(), 'units', 'U3', 'history')).length === u3History &&
+    get(progress(), 'units', 'U3', 'status') === 'failed' &&
+    get(progress(), 'units', 'U3', 'history', 'length') === u3History &&
     rows('unit-verified').length === 1 &&
     rows('unit-failed').length === 1;
   const noFlag = record(['unit', 'verified', 'U3']);
@@ -1613,9 +1649,9 @@ const sessionState = (home: string, sessionId: string): unknown => {
     'S2 rejects a completion signal while a worktree remains',
     !!(
       wtBlock &&
-      at(wtBlock, 'decision') === 'block' &&
-      /worktree/.test(textAt(wtBlock, 'reason')) &&
-      /done command again/.test(textAt(wtBlock, 'reason'))
+      get(wtBlock, 'decision') === 'block' &&
+      /worktree/.test(stringAt(wtBlock, 'reason')) &&
+      /done command again/.test(stringAt(wtBlock, 'reason'))
     ) && !signalExists(zone),
     JSON.stringify(wtBlock),
   );
@@ -1627,7 +1663,8 @@ const sessionState = (home: string, sessionId: string): unknown => {
     wtPass === null &&
       ledger(home2).some(
         (r) =>
-          at(r, 'trigger') === 'done-declaration' && at(r, 'gate') === 'passed',
+          get(r, 'trigger') === 'done-declaration' &&
+          get(r, 'gate') === 'passed',
       ),
     JSON.stringify(wtPass) + ' ' + JSON.stringify(ledger(home2)),
   );
@@ -1676,7 +1713,7 @@ const sessionState = (home: string, sessionId: string): unknown => {
   const contBlock = runHook('S2', plain(false), home3).out;
   check(
     'S2 continuation blocks again with a reopened unit',
-    !!(contBlock && at(contBlock, 'decision') === 'block'),
+    !!(contBlock && get(contBlock, 'decision') === 'block'),
     JSON.stringify(contBlock),
   );
   record(['unit', 'verified', 'U3', '--evidence', 'closed again'], {
@@ -1689,17 +1726,18 @@ const sessionState = (home: string, sessionId: string): unknown => {
     contDecl === null &&
       ledger(home3).some(
         (r) =>
-          at(r, 'trigger') === 'done-declaration' && at(r, 'gate') === 'passed',
+          get(r, 'trigger') === 'done-declaration' &&
+          get(r, 'gate') === 'passed',
       ),
     JSON.stringify(contDecl) +
       ' ' +
-      JSON.stringify(ledger(home3).map((r) => at(r, 'trigger'))),
+      JSON.stringify(ledger(home3).map((r) => get(r, 'trigger'))),
   );
   const foreign = runHook('S2', stopEvent(zone, 'report', true), home3).out;
   check(
     'S2 stays silent on a re-entered stop once the signal is consumed',
     foreign === null &&
-      ledger(home3).filter((r) => at(r, 'trigger') === 'done-declaration')
+      ledger(home3).filter((r) => get(r, 'trigger') === 'done-declaration')
         .length === 1,
   );
 
@@ -1713,7 +1751,9 @@ const sessionState = (home: string, sessionId: string): unknown => {
   const ctx = contextOf(s0);
   check(
     'S0 briefing summarizes progress.json',
-    !!ctx && /3 of 3 unit\(s\) open/.test(ctx) && /U1/.test(ctx),
+    !!ctx &&
+      /3 of 3 unit\(s\) open/.test(stringOf(ctx)) &&
+      /U1/.test(stringOf(ctx)),
     String(ctx).slice(0, 300),
   );
   const home4 = freshHome('loop-s1');
@@ -1731,9 +1771,9 @@ const sessionState = (home: string, sessionId: string): unknown => {
   check(
     'S1 mid-session briefing also carries the progress summary',
     !!ctx1 &&
-      /test-boundary\.md/.test(ctx1) &&
-      /amber progress/.test(ctx1) &&
-      /U1/.test(ctx1),
+      /test-boundary\.md/.test(stringOf(ctx1)) &&
+      /amber progress/.test(stringOf(ctx1)) &&
+      /U1/.test(stringOf(ctx1)),
     String(ctx1).slice(0, 300),
   );
   const quiet = runHook(
@@ -1778,7 +1818,7 @@ const sessionState = (home: string, sessionId: string): unknown => {
   record(['unit', 'start', 'U1']);
   check(
     'progress.json starts with an empty session list',
-    items(at(progress(), 'session_ids')).length === 0,
+    get(progress(), 'session_ids', 'length') === 0,
   );
   for (const id of ['drv', 'talk']) {
     runHook('S0', { session_id: id, cwd: zone, model: 'm' }, home);
@@ -1788,11 +1828,11 @@ const sessionState = (home: string, sessionId: string): unknown => {
   check(
     'E1 registers the session that runs a unit command itself',
     reg === null &&
-      at(sessionState(home, 'drv'), 'run') === 'test-boundary.md' &&
-      joined(at(progress(), 'session_ids')) === 'drv',
+      get(sessionState(home, 'drv'), 'run') === 'test-boundary.md' &&
+      joined(get(progress(), 'session_ids')) === 'drv',
     JSON.stringify(sessionState(home, 'drv')) +
       ' ' +
-      JSON.stringify(at(progress(), 'session_ids')),
+      JSON.stringify(get(progress(), 'session_ids')),
   );
   register(
     zone,
@@ -1802,13 +1842,13 @@ const sessionState = (home: string, sessionId: string): unknown => {
   );
   check(
     'E1 registers on the done command too',
-    at(sessionState(home, 'drv2'), 'run') === 'test-boundary.md' &&
-      items(at(progress(), 'session_ids')).includes('drv2'),
+    get(sessionState(home, 'drv2'), 'run') === 'test-boundary.md' &&
+      list(get(progress(), 'session_ids')).includes('drv2'),
   );
   register(zone, home, 'drv');
   check(
     'registration is idempotent',
-    items(at(progress(), 'session_ids')).filter((x) => x === 'drv').length ===
+    list(get(progress(), 'session_ids')).filter((x) => x === 'drv').length ===
       1,
   );
   runHook(
@@ -1826,8 +1866,8 @@ const sessionState = (home: string, sessionId: string): unknown => {
   );
   check(
     'a subagent call does not register a session',
-    !at(sessionState(home, 'sub'), 'run') &&
-      !items(at(progress(), 'session_ids')).includes('sub'),
+    !get(sessionState(home, 'sub'), 'run') &&
+      !list(get(progress(), 'session_ids')).includes('sub'),
   );
   runHook(
     'E1',
@@ -1842,7 +1882,7 @@ const sessionState = (home: string, sessionId: string): unknown => {
   );
   check(
     'an ordinary command does not register',
-    !at(sessionState(home, 'talk'), 'run'),
+    !get(sessionState(home, 'talk'), 'run'),
   );
 
   const talkStop = runHook(
@@ -1856,12 +1896,12 @@ const sessionState = (home: string, sessionId: string): unknown => {
     },
     home,
   ).out;
-  const blocks = at(progress(), 'blocks');
   check(
     'a non-driving session is not sent back while units are open',
     talkStop === null &&
-      at(progress(), 'units', 'U1', 'reentries') === 0 &&
-      !(typeof blocks === 'number' && blocks > 0) &&
+      get(progress(), 'units', 'U1', 'reentries') === 0 &&
+      // progress().blocks > 0 compares the value converted to a number.
+      !(Number(get(progress(), 'blocks')) > 0) &&
       !fs.existsSync(path.join(home, 'state', 'loop-talk.json')),
     JSON.stringify(talkStop),
   );
@@ -1878,8 +1918,8 @@ const sessionState = (home: string, sessionId: string): unknown => {
   ).out;
   check(
     'the driving session is still sent back',
-    !!(drvStop && at(drvStop, 'decision') === 'block') &&
-      at(progress(), 'units', 'U1', 'reentries') === 1,
+    !!(drvStop && get(drvStop, 'decision') === 'block') &&
+      get(progress(), 'units', 'U1', 'reentries') === 1,
     JSON.stringify(drvStop),
   );
 
@@ -1899,7 +1939,7 @@ const sessionState = (home: string, sessionId: string): unknown => {
     'a non-driving session leaves a completion signal untouched',
     talkSignal === null &&
       signalExists(zone) &&
-      ledger(home).every((r) => at(r, 'trigger') !== 'done-declaration'),
+      ledger(home).every((r) => get(r, 'trigger') !== 'done-declaration'),
   );
   fs.writeFileSync(
     path.join(home, 'state', 'session-drv3.json'),
@@ -1920,7 +1960,7 @@ const sessionState = (home: string, sessionId: string): unknown => {
     'a registration for another contract does not count',
     drv3 === null &&
       signalExists(zone) &&
-      at(progress(), 'units', 'U1', 'reentries') === 1,
+      get(progress(), 'units', 'U1', 'reentries') === 1,
   );
   record(['unit', 'verified', 'U1', '--evidence', 'ok']);
   record(['unit', 'start', 'U2']);
@@ -1944,7 +1984,8 @@ const sessionState = (home: string, sessionId: string): unknown => {
       !fs.existsSync(path.join(zone, '.amber', 'active.json')) &&
       ledger(home).some(
         (r) =>
-          at(r, 'trigger') === 'done-declaration' && at(r, 'gate') === 'passed',
+          get(r, 'trigger') === 'done-declaration' &&
+          get(r, 'gate') === 'passed',
       ),
     JSON.stringify(drvSignal),
   );
@@ -1969,9 +2010,9 @@ const sessionState = (home: string, sessionId: string): unknown => {
   const rctx = contextOf(resumed);
   check(
     'S0 on resume/compact keeps the session driving its run',
-    at(sessionState(home, 'drv4'), 'run') === 'test-boundary.md' &&
+    get(sessionState(home, 'drv4'), 'run') === 'test-boundary.md' &&
       !!rctx &&
-      /this session drives the run/.test(rctx),
+      /this session drives the run/.test(stringOf(rctx)),
     String(rctx).slice(-300),
   );
   const other = runHook(
@@ -1983,9 +2024,9 @@ const sessionState = (home: string, sessionId: string): unknown => {
   check(
     'S0 tells a non-driving session so and how to take over',
     !!octx &&
-      /not one of them/.test(octx) &&
-      /1 session\(s\) drive/.test(octx) &&
-      /unit/.test(octx),
+      /not one of them/.test(stringOf(octx)) &&
+      /1 session\(s\) drive/.test(stringOf(octx)) &&
+      /unit/.test(stringOf(octx)),
     String(octx).slice(-400),
   );
   const s1 = runHook(
@@ -1996,7 +2037,7 @@ const sessionState = (home: string, sessionId: string): unknown => {
   const s1ctx = contextOf(s1);
   check(
     'S1 briefing carries the ownership line too',
-    !!s1ctx && /not one of them/.test(s1ctx),
+    !!s1ctx && /not one of them/.test(stringOf(s1ctx)),
   );
 }
 
@@ -2047,9 +2088,9 @@ const sessionState = (home: string, sessionId: string): unknown => {
   check(
     'a shell unit init is attributed to the session E1 registered (no progress.json yet)',
     init.status === 0 &&
-      at(lastRow(), 'trigger') === 'unit-init' &&
-      at(lastRow(), 'session_id') === 'sa' &&
-      at(lastRow(), 'model') === 'model-a',
+      get(lastRow(), 'trigger') === 'unit-init' &&
+      get(lastRow(), 'session_id') === 'sa' &&
+      get(lastRow(), 'model') === 'model-a',
     (init.stderr || '') + JSON.stringify(lastRow()),
   );
   register(zone, home, 'sb');
@@ -2057,10 +2098,12 @@ const sessionState = (home: string, sessionId: string): unknown => {
   check(
     'the most recently registered driver takes the row and the progress history',
     start.status === 0 &&
-      at(lastRow(), 'session_id') === 'sb' &&
-      at(lastRow(), 'model') === 'model-b' &&
-      at(items(at(progress(), 'units', 'U1', 'history')).slice(-1)[0], 'by') ===
-        'sb',
+      get(lastRow(), 'session_id') === 'sb' &&
+      get(lastRow(), 'model') === 'model-b' &&
+      get(
+        list(get(progress(), 'units', 'U1', 'history')).slice(-1)[0],
+        'by',
+      ) === 'sb',
     (start.stderr || '') + JSON.stringify(lastRow()),
   );
   const old = new Date(Date.now() - 3600 * 1000);
@@ -2070,15 +2113,15 @@ const sessionState = (home: string, sessionId: string): unknown => {
   check(
     'an idempotent re-registration touches the state file, so the issuing session wins',
     hold.status === 0 &&
-      at(lastRow(), 'trigger') === 'unit-hold' &&
-      at(lastRow(), 'session_id') === 'sa' &&
-      at(lastRow(), 'model') === 'model-a',
+      get(lastRow(), 'trigger') === 'unit-hold' &&
+      get(lastRow(), 'session_id') === 'sa' &&
+      get(lastRow(), 'model') === 'model-a',
     (hold.stderr || '') + JSON.stringify(lastRow()),
   );
   const env = bare(['unit', 'start', 'U2'], { AMBER_SESSION_ID: 'env-id' });
   check(
     'an explicit environment session id still wins',
-    env.status === 0 && at(lastRow(), 'session_id') === 'env-id',
+    env.status === 0 && get(lastRow(), 'session_id') === 'env-id',
     (env.stderr || '') + JSON.stringify(lastRow()),
   );
   const none = freshHome('attr-none');
@@ -2088,8 +2131,8 @@ const sessionState = (home: string, sessionId: string): unknown => {
   check(
     'without any registration the row still says shell/unknown (negative control)',
     bareNone.status === 0 &&
-      at(lastRow(none), 'session_id') === 'shell' &&
-      at(lastRow(none), 'model') === 'unknown',
+      get(lastRow(none), 'session_id') === 'shell' &&
+      get(lastRow(none), 'model') === 'unknown',
     (bareNone.stderr || '') + JSON.stringify(lastRow(none)),
   );
 }
@@ -2153,15 +2196,19 @@ const sessionState = (home: string, sessionId: string): unknown => {
   check(
     'S0 in a sibling worktree without a pointer briefs no active contract, not the main contract',
     !!ctxSide &&
-      /no active contract in this zone/.test(ctxSide) &&
-      !/an active contract governs this zone/.test(ctxSide),
+      /no active contract in this zone/.test(stringOf(ctxSide)) &&
+      !/an active contract governs this zone/.test(stringOf(ctxSide)),
     ctxSide,
   );
   check(
     'S0 in a sibling worktree names the main checkout and its active contract',
     !!ctxSide &&
-      /linked worktree of \S*\/wtz and a zone of its own/.test(ctxSide) &&
-      /main checkout has an active contract - test-boundary\.md/.test(ctxSide),
+      /linked worktree of \S*\/wtz and a zone of its own/.test(
+        stringOf(ctxSide),
+      ) &&
+      /main checkout has an active contract - test-boundary\.md/.test(
+        stringOf(ctxSide),
+      ),
     ctxSide,
   );
   const sideNoContract = done(side, home, [
@@ -2189,13 +2236,13 @@ const sessionState = (home: string, sessionId: string): unknown => {
     home,
   ).out;
   const sideRow = ledger(home).find(
-    (r) => at(r, 'summary') === 'sibling no-contract done',
+    (r) => get(r, 'summary') === 'sibling no-contract done',
   );
   check(
     'the sibling worktree completion is recorded under its own project name without a contract',
     sidePlain === null &&
       !!sideRow &&
-      at(sideRow, 'project') === 'wtz-side' &&
+      get(sideRow, 'project') === 'wtz-side' &&
       !has(sideRow, 'contract') &&
       !fs.existsSync(path.join(side, '.amber', 'done.json')) &&
       fs.existsSync(path.join(zone, '.amber', 'active.json')),
@@ -2220,7 +2267,7 @@ const sessionState = (home: string, sessionId: string): unknown => {
     'a linked worktree with its own pointer is its own zone (its contract governs)',
     isDeny(sideDeny) &&
       /side-boundary\.md/.test(
-        textAt(sideDeny, 'hookSpecificOutput', 'permissionDecisionReason'),
+        stringAt(sideDeny, 'hookSpecificOutput', 'permissionDecisionReason'),
       ) &&
       e1At(side, path.join(side, 'docs', 'a.md')) === null,
     JSON.stringify(sideDeny),
@@ -2238,7 +2285,9 @@ const sessionState = (home: string, sessionId: string): unknown => {
   const ctx = contextOf(s0);
   check(
     'S0 in the side zone briefs the side contract',
-    !!ctx && /side-boundary\.md/.test(ctx) && /side rule/.test(ctx),
+    !!ctx &&
+      /side-boundary\.md/.test(stringOf(ctx)) &&
+      /side rule/.test(stringOf(ctx)),
   );
   register(side, home, 'wt');
   const sideDone = done(side, home, [
@@ -2274,8 +2323,8 @@ const sessionState = (home: string, sessionId: string): unknown => {
       fs.existsSync(path.join(zone, '.amber', 'active.json')) &&
       ledger(home).some(
         (r) =>
-          at(r, 'contract') === 'side-boundary.md' &&
-          at(r, 'gate') === 'passed',
+          get(r, 'contract') === 'side-boundary.md' &&
+          get(r, 'gate') === 'passed',
       ),
     JSON.stringify(sidePass),
   );
@@ -2308,8 +2357,8 @@ const sessionState = (home: string, sessionId: string): unknown => {
       fs.existsSync(path.join(side, '.amber', 'active.json')) &&
       ledger(home).some(
         (r) =>
-          at(r, 'contract') === 'test-boundary.md' &&
-          at(r, 'gate') === 'passed',
+          get(r, 'contract') === 'test-boundary.md' &&
+          get(r, 'gate') === 'passed',
       ),
     JSON.stringify(mainPass),
   );
@@ -2377,7 +2426,7 @@ const sessionState = (home: string, sessionId: string): unknown => {
       },
     });
   const rows = (trigger: string): unknown[] =>
-    ledger(home).filter((r) => at(r, 'trigger') === trigger);
+    ledger(home).filter((r) => get(r, 'trigger') === trigger);
   const SCOPE_DONE = [
     '--review',
     'checked',
@@ -2391,9 +2440,9 @@ const sessionState = (home: string, sessionId: string): unknown => {
   record(['unit', 'init', 'docs/plan.md']);
   check(
     'unit init snapshots the paths already dirty when the run begins',
-    items(at(progress(), 'preexisting')).slice().sort().join() ===
+    list(get(progress(), 'preexisting')).slice().sort().join() ===
       'preexist.txt,top.txt',
-    JSON.stringify(at(progress(), 'preexisting')),
+    JSON.stringify(get(progress(), 'preexisting')),
   );
   record(['unit', 'start', 'U1']);
   fs.writeFileSync(path.join(zone, 'plugin', 'new.cjs'), 'ok\n');
@@ -2407,7 +2456,7 @@ const sessionState = (home: string, sessionId: string): unknown => {
   check(
     'verified passes when every change is inside the write-scope (pre-run dirt excepted)',
     inScope.status === 0 &&
-      at(progress(), 'units', 'U1', 'status') === 'verified',
+      get(progress(), 'units', 'U1', 'status') === 'verified',
     inScope.stderr,
   );
   check(
@@ -2424,13 +2473,13 @@ const sessionState = (home: string, sessionId: string): unknown => {
     refused.status !== 0 &&
       /working-tree\s+stray\.md/.test(refused.stderr) &&
       /--out-of-scope/.test(refused.stderr) &&
-      at(progress(), 'units', 'U2', 'status') === 'running',
+      get(progress(), 'units', 'U2', 'status') === 'running',
     refused.stderr,
   );
   check(
     'a refused verified writes no ledger row and no history entry',
     rows('unit-verified').length === 1 &&
-      items(at(progress(), 'units', 'U2', 'history')).length === 1,
+      get(progress(), 'units', 'U2', 'history', 'length') === 1,
   );
   const failedRun = record([
     'unit',
@@ -2442,7 +2491,7 @@ const sessionState = (home: string, sessionId: string): unknown => {
   check(
     'failed is not gated by the scope check',
     failedRun.status === 0 &&
-      at(progress(), 'units', 'U2', 'status') === 'failed',
+      get(progress(), 'units', 'U2', 'status') === 'failed',
     failedRun.stderr,
   );
   const declared = record([
@@ -2457,13 +2506,13 @@ const sessionState = (home: string, sessionId: string): unknown => {
   check(
     'verified passes with the file declared and records the declaration',
     declared.status === 0 &&
-      at(progress(), 'units', 'U2', 'status') === 'verified' &&
+      get(progress(), 'units', 'U2', 'status') === 'verified' &&
       !!declRow &&
-      at(declRow, 'out_of_scope_count') === 1 &&
-      at(declRow, 'out_of_scope', 0, 'path') === 'stray.md' &&
-      at(declRow, 'out_of_scope', 0, 'reason') === 'generated by the tool' &&
-      at(
-        items(at(progress(), 'units', 'U2', 'history')).slice(-1)[0],
+      get(declRow, 'out_of_scope_count') === 1 &&
+      get(declRow, 'out_of_scope', 0, 'path') === 'stray.md' &&
+      get(declRow, 'out_of_scope', 0, 'reason') === 'generated by the tool' &&
+      get(
+        list(get(progress(), 'units', 'U2', 'history')).slice(-1)[0],
         'out_of_scope',
         0,
         'path',
@@ -2525,26 +2574,27 @@ const sessionState = (home: string, sessionId: string): unknown => {
     'done passes with every out-of-scope file declared and ignores the contract file',
     declaredDone.status === 0 &&
       !!signal &&
-      at(signal, 'out_of_scope_count') === 2 &&
-      items(at(signal, 'out_of_scope'))
-        .map((o) => at(o, 'path'))
+      get(signal, 'out_of_scope_count') === 2 &&
+      list(get(signal, 'out_of_scope'))
+        .map((o) => get(o, 'path'))
         .sort()
         .join() === 'other.txt,stray.md',
     (declaredDone.stderr || '') + JSON.stringify(signal),
   );
   const pass = runHook('S2', stopEvent(zone, 'report'), home).out;
   const doneRow = ledger(home).find(
-    (r) => at(r, 'trigger') === 'done-declaration',
+    (r) => get(r, 'trigger') === 'done-declaration',
   );
   check(
     'S2 copies the declared out-of-scope files into the done-declaration row',
     pass === null &&
       !!doneRow &&
-      at(doneRow, 'gate') === 'passed' &&
-      at(doneRow, 'out_of_scope_count') === 2 &&
-      items(at(doneRow, 'out_of_scope')).some(
+      get(doneRow, 'gate') === 'passed' &&
+      get(doneRow, 'out_of_scope_count') === 2 &&
+      list(get(doneRow, 'out_of_scope')).some(
         (o) =>
-          at(o, 'path') === 'other.txt' && /hotfix/.test(textAt(o, 'reason')),
+          get(o, 'path') === 'other.txt' &&
+          /hotfix/.test(stringAt(o, 'reason')),
       ),
     JSON.stringify(doneRow),
   );
@@ -2640,23 +2690,23 @@ const sessionState = (home: string, sessionId: string): unknown => {
   check(
     'a unit init row takes CLAUDE_CODE_SESSION_ID',
     init.status === 0 &&
-      at(lastRow(), 'trigger') === 'unit-init' &&
-      at(lastRow(), 'session_id') === 'cc-sess',
+      get(lastRow(), 'trigger') === 'unit-init' &&
+      get(lastRow(), 'session_id') === 'cc-sess',
     (init.stderr || '') + JSON.stringify(lastRow()),
   );
   const start = cc(['unit', 'start', 'U1']);
   check(
     'a unit start row takes CLAUDE_CODE_SESSION_ID and the model of that session state',
     start.status === 0 &&
-      at(lastRow(), 'trigger') === 'unit-start' &&
-      at(lastRow(), 'session_id') === 'cc-sess' &&
-      at(lastRow(), 'model') === 'm-cc',
+      get(lastRow(), 'trigger') === 'unit-start' &&
+      get(lastRow(), 'session_id') === 'cc-sess' &&
+      get(lastRow(), 'model') === 'm-cc',
     (start.stderr || '') + JSON.stringify(lastRow()),
   );
   const env = cc(['unit', 'start', 'U2'], { AMBER_SESSION_ID: 'env-id' });
   check(
     'AMBER_SESSION_ID wins over CLAUDE_CODE_SESSION_ID',
-    env.status === 0 && at(lastRow(), 'session_id') === 'env-id',
+    env.status === 0 && get(lastRow(), 'session_id') === 'env-id',
     (env.stderr || '') + JSON.stringify(lastRow()),
   );
 }
@@ -2676,9 +2726,9 @@ const sessionState = (home: string, sessionId: string): unknown => {
   check(
     'S1 records a typed /amber:init as a bare skill-invocation row',
     recs.length === 1 &&
-      at(recs, 0, 'trigger') === 'skill-invocation' &&
-      at(recs, 0, 'summary') === 'amber:init (typed)' &&
-      at(recs, 0, 'model') === 'claude-fable-5',
+      get(recs, 0, 'trigger') === 'skill-invocation' &&
+      get(recs, 0, 'summary') === 'amber:init (typed)' &&
+      get(recs, 0, 'model') === 'claude-fable-5',
     JSON.stringify(recs),
   );
   typed('$amber:init');
@@ -2686,8 +2736,8 @@ const sessionState = (home: string, sessionId: string): unknown => {
   check(
     'S1 records the $ form of a typed init the same way',
     recs.length === 2 &&
-      at(recs, 1, 'trigger') === 'skill-invocation' &&
-      at(recs, 1, 'summary') === 'amber:init (typed)',
+      get(recs, 1, 'trigger') === 'skill-invocation' &&
+      get(recs, 1, 'summary') === 'amber:init (typed)',
     JSON.stringify(recs),
   );
   typed('/amber:status');
@@ -2705,8 +2755,8 @@ const sessionState = (home: string, sessionId: string): unknown => {
     res.exit === 0 &&
       res.out === null &&
       recs.length === 3 &&
-      at(recs, 2, 'trigger') === 'planning-invocation' &&
-      at(recs, 2, 'summary') === '/amber:planning x',
+      get(recs, 2, 'trigger') === 'planning-invocation' &&
+      get(recs, 2, 'summary') === '/amber:planning x',
     JSON.stringify(recs),
   );
 }
@@ -2726,9 +2776,9 @@ const sessionState = (home: string, sessionId: string): unknown => {
   check(
     'S1 records a typed /amber:audit as a bare skill-invocation row without its arguments',
     recs.length === 1 &&
-      at(recs, 0, 'trigger') === 'skill-invocation' &&
-      at(recs, 0, 'summary') === 'amber:audit (typed)' &&
-      at(recs, 0, 'model') === 'claude-fable-5',
+      get(recs, 0, 'trigger') === 'skill-invocation' &&
+      get(recs, 0, 'summary') === 'amber:audit (typed)' &&
+      get(recs, 0, 'model') === 'claude-fable-5',
     JSON.stringify(recs),
   );
   typed('$amber:audit');
@@ -2736,8 +2786,8 @@ const sessionState = (home: string, sessionId: string): unknown => {
   check(
     'S1 records the $ form of a typed audit the same way',
     recs.length === 2 &&
-      at(recs, 1, 'trigger') === 'skill-invocation' &&
-      at(recs, 1, 'summary') === 'amber:audit (typed)',
+      get(recs, 1, 'trigger') === 'skill-invocation' &&
+      get(recs, 1, 'summary') === 'amber:audit (typed)',
     JSON.stringify(recs),
   );
   typed('/amber:status');
@@ -2755,8 +2805,8 @@ const sessionState = (home: string, sessionId: string): unknown => {
     res.exit === 0 &&
       res.out === null &&
       recs.length === 3 &&
-      at(recs, 2, 'trigger') === 'planning-invocation' &&
-      at(recs, 2, 'summary') === '/amber:planning x',
+      get(recs, 2, 'trigger') === 'planning-invocation' &&
+      get(recs, 2, 'summary') === '/amber:planning x',
     JSON.stringify(recs),
   );
 }
@@ -2788,7 +2838,7 @@ const sessionState = (home: string, sessionId: string): unknown => {
       env: { ...process.env, AMBER_HOME: home, AMBER_SESSION_ID: 'ext-shell' },
     });
   const holds = (): unknown[] =>
-    ledger(home).filter((r) => at(r, 'trigger') === 'unit-hold');
+    ledger(home).filter((r) => get(r, 'trigger') === 'unit-hold');
   const stop = (): unknown =>
     runHook(
       'S2',
@@ -2834,17 +2884,17 @@ const sessionState = (home: string, sessionId: string): unknown => {
   check(
     'mark hold with an external: reason stores kind external in progress.json',
     s3 === null &&
-      !!at(progress(), 'hold') &&
-      at(progress(), 'hold', 'kind') === 'external' &&
-      at(progress(), 'hold', 'unit') === 'U1' &&
-      /waiting on the sweep/.test(textAt(progress(), 'hold', 'reason')),
-    JSON.stringify(at(progress(), 'hold')),
+      !!get(progress(), 'hold') &&
+      get(progress(), 'hold', 'kind') === 'external' &&
+      get(progress(), 'hold', 'unit') === 'U1' &&
+      /waiting on the sweep/.test(stringAt(progress(), 'hold', 'reason')),
+    JSON.stringify(get(progress(), 'hold')),
   );
   check(
     'the mark path puts kind external on the unit-hold ledger row',
     holds().length === 1 &&
-      at(holds(), 0, 'kind') === 'external' &&
-      at(holds(), 0, 'unit') === 'U1',
+      get(holds(), 0, 'kind') === 'external' &&
+      get(holds(), 0, 'unit') === 'U1',
     JSON.stringify(holds()),
   );
   const first = stop();
@@ -2853,10 +2903,10 @@ const sessionState = (home: string, sessionId: string): unknown => {
     'an external hold lets every stop of the driving session through and persists',
     first === null &&
       second === null &&
-      !!at(progress(), 'hold') &&
-      at(progress(), 'hold', 'kind') === 'external' &&
-      at(progress(), 'units', 'U1', 'reentries') === 0,
-    JSON.stringify([first, second, at(progress(), 'hold')]),
+      !!get(progress(), 'hold') &&
+      get(progress(), 'hold', 'kind') === 'external' &&
+      get(progress(), 'units', 'U1', 'reentries') === 0,
+    JSON.stringify([first, second, get(progress(), 'hold')]),
   );
   const brief = runHook(
     'S0',
@@ -2868,10 +2918,10 @@ const sessionState = (home: string, sessionId: string): unknown => {
     'the S0 briefing names the external hold with its unit, timestamp, and text',
     !!bctx &&
       /external hold on U1 since \S+: external: waiting on the sweep/.test(
-        bctx,
+        stringOf(bctx),
       ) &&
       /hold: U1 - external since \S+ - external: waiting on the sweep/.test(
-        bctx,
+        stringOf(bctx),
       ),
     String(bctx).slice(-700),
   );
@@ -2884,14 +2934,14 @@ const sessionState = (home: string, sessionId: string): unknown => {
   ]);
   check(
     'verified on the held unit releases the external hold',
-    ver.status === 0 && at(progress(), 'hold') === null,
-    (ver.stderr || '') + JSON.stringify(at(progress(), 'hold')),
+    ver.status === 0 && get(progress(), 'hold') === null,
+    (ver.stderr || '') + JSON.stringify(get(progress(), 'hold')),
   );
   const blocked = stop();
   check(
     'a plain stop with open units is blocked again once the external hold is gone',
-    !!(blocked && at(blocked, 'decision') === 'block') &&
-      /U2/.test(textAt(blocked, 'reason')),
+    !!(blocked && get(blocked, 'decision') === 'block') &&
+      /U2/.test(stringAt(blocked, 'reason')),
     JSON.stringify(blocked),
   );
   const shell = record([
@@ -2904,19 +2954,19 @@ const sessionState = (home: string, sessionId: string): unknown => {
   check(
     'record.cjs unit hold with an external: reason yields kind external in progress and ledger',
     shell.status === 0 &&
-      at(progress(), 'hold', 'kind') === 'external' &&
-      at(progress(), 'hold', 'unit') === 'U2' &&
+      get(progress(), 'hold', 'kind') === 'external' &&
+      get(progress(), 'hold', 'unit') === 'U2' &&
       holds().length === 2 &&
-      at(holds(), 1, 'kind') === 'external',
+      get(holds(), 1, 'kind') === 'external',
     (shell.stderr || '') + JSON.stringify(holds()),
   );
   const third = stop();
   check(
     'the shell-recorded external hold passes a stop and persists too',
     third === null &&
-      !!at(progress(), 'hold') &&
-      at(progress(), 'hold', 'kind') === 'external',
-    JSON.stringify(at(progress(), 'hold')),
+      !!get(progress(), 'hold') &&
+      get(progress(), 'hold', 'kind') === 'external',
+    JSON.stringify(get(progress(), 'hold')),
   );
   const plain = record([
     'unit',
@@ -2928,33 +2978,33 @@ const sessionState = (home: string, sessionId: string): unknown => {
   check(
     'a plain hold recorded after an external one replaces it (no kind)',
     plain.status === 0 &&
-      !!at(progress(), 'hold') &&
-      !has(at(progress(), 'hold'), 'kind') &&
-      /operator/.test(textAt(progress(), 'hold', 'reason')) &&
+      !!get(progress(), 'hold') &&
+      !has(get(progress(), 'hold'), 'kind') &&
+      /operator/.test(stringAt(progress(), 'hold', 'reason')) &&
       holds().length === 3 &&
       !has(holds()[2], 'kind'),
-    JSON.stringify(at(progress(), 'hold')),
+    JSON.stringify(get(progress(), 'hold')),
   );
   const once = stop();
   const again = stop();
   check(
     'a plain hold passes exactly one stop',
-    once === null && !!(again && at(again, 'decision') === 'block'),
+    once === null && !!(again && get(again, 'decision') === 'block'),
     JSON.stringify([once, again]),
   );
   record(['unit', 'hold', 'U2', '--reason', 'External: mixed case']);
   const startHeld = record(['unit', 'start', 'U2']);
   check(
     'start on the held unit releases the external hold too',
-    startHeld.status === 0 && at(progress(), 'hold') === null,
-    (startHeld.stderr || '') + JSON.stringify(at(progress(), 'hold')),
+    startHeld.status === 0 && get(progress(), 'hold') === null,
+    (startHeld.stderr || '') + JSON.stringify(get(progress(), 'hold')),
   );
   record(['unit', 'hold', 'U2', '--reason', 'external: other unit moves']);
   record(['unit', 'failed', 'U1', '--evidence', 'reopened']);
   check(
     'a transition on another unit leaves the external hold standing',
-    !!at(progress(), 'hold') && at(progress(), 'hold', 'kind') === 'external',
-    JSON.stringify(at(progress(), 'hold')),
+    !!get(progress(), 'hold') && get(progress(), 'hold', 'kind') === 'external',
+    JSON.stringify(get(progress(), 'hold')),
   );
   const failHeld = record([
     'unit',
@@ -2965,8 +3015,8 @@ const sessionState = (home: string, sessionId: string): unknown => {
   ]);
   check(
     'failed on the held unit releases the external hold too',
-    failHeld.status === 0 && at(progress(), 'hold') === null,
-    JSON.stringify(at(progress(), 'hold')),
+    failHeld.status === 0 && get(progress(), 'hold') === null,
+    JSON.stringify(get(progress(), 'hold')),
   );
 }
 
@@ -2998,8 +3048,8 @@ const sessionState = (home: string, sessionId: string): unknown => {
       { session_id: id, cwd: zone, model: 'm', prompt: 'hello' },
       home,
     ).out;
-    return out && at(out, 'hookSpecificOutput')
-      ? at(out, 'hookSpecificOutput', 'additionalContext')
+    return out && get(out, 'hookSpecificOutput')
+      ? get(out, 'hookSpecificOutput', 'additionalContext')
       : null;
   };
   for (const id of ['drv', 'talk']) {
@@ -3008,45 +3058,45 @@ const sessionState = (home: string, sessionId: string): unknown => {
   register(zone, home, 'drv');
   check(
     'no waiting line before a signal exists',
-    !/completion signal is waiting/.test(show(ctxOf('S0', 'talk'))),
+    !/completion signal is waiting/.test(stringOf(ctxOf('S0', 'talk'))),
   );
   plantSignal(zone, { summary: 'left by the driver' });
   const s0talk = ctxOf('S0', 'talk');
   check(
     'S0 tells a non-driving session that a completion signal is waiting',
     !!s0talk &&
-      /completion signal is waiting/.test(show(s0talk)) &&
-      /take the run over/.test(show(s0talk)),
-    show(s0talk).slice(-400),
+      /completion signal is waiting/.test(stringOf(s0talk)) &&
+      /take the run over/.test(stringOf(s0talk)),
+    stringOf(s0talk).slice(-400),
   );
   const s1talk = ctxOf('S1', 'talk');
   check(
     'S1 delivers the waiting line to an already briefed non-driving session',
     !!s1talk &&
-      /completion signal is waiting/.test(show(s1talk)) &&
-      !/an active contract governs/.test(show(s1talk)),
-    show(s1talk),
+      /completion signal is waiting/.test(stringOf(s1talk)) &&
+      !/an active contract governs/.test(stringOf(s1talk)),
+    stringOf(s1talk),
   );
   const s1new = ctxOf('S1', 'talk2');
   check(
     'S1 briefing for an unbriefed non-driving session carries the waiting line with the briefing',
     !!s1new &&
-      /completion signal is waiting/.test(show(s1new)) &&
-      /an active contract governs/.test(show(s1new)),
-    show(s1new).slice(-400),
+      /completion signal is waiting/.test(stringOf(s1new)) &&
+      /an active contract governs/.test(stringOf(s1new)),
+    stringOf(s1new).slice(-400),
   );
   const s0drv = ctxOf('S0', 'drv');
   check(
     'S0 for the driving session carries no waiting line',
     !!s0drv &&
-      !/completion signal is waiting/.test(show(s0drv)) &&
-      /this session drives the run/.test(show(s0drv)),
-    show(s0drv).slice(-400),
+      !/completion signal is waiting/.test(stringOf(s0drv)) &&
+      /this session drives the run/.test(stringOf(s0drv)),
+    stringOf(s0drv).slice(-400),
   );
   check(
     'the briefing never consumes the signal or records a row',
     signalExists(zone) &&
-      ledger(home).every((r) => at(r, 'trigger') !== 'done-declaration'),
+      ledger(home).every((r) => get(r, 'trigger') !== 'done-declaration'),
   );
   fs.unlinkSync(signalPath(zone));
   check(

@@ -12,7 +12,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
 
-import { at, items, parseJson, textAt } from './support/json.mjs';
+import { get, list, parseJson, text } from './support/json.mjs';
 import { loadModule, PLUGIN } from './support/plugin.mjs';
 
 const HOOK = path.join(PLUGIN, 'hooks', 'amber-hook.cjs');
@@ -104,11 +104,11 @@ function hook(
   input: unknown,
   { home, cwd, env, script = HOOK }: HookOptions = {},
 ): unknown {
-  assert.ok(home ?? env, 'every hook process needs its own AMBER_HOME or HOME');
+  assert.ok(home || env, 'every hook process needs its own AMBER_HOME or HOME');
   const r = spawnSync(process.execPath, [script, event], {
     input: typeof input === 'string' ? input : JSON.stringify(input),
     cwd,
-    env: env ?? { ...process.env, AMBER_HOME: home },
+    env: env || { ...process.env, AMBER_HOME: home },
     encoding: 'utf8',
     timeout: 10000,
   });
@@ -131,9 +131,15 @@ function readJson(file: string): unknown {
   return parseJson(fs.readFileSync(file, 'utf8'));
 }
 
-/** The own keys of an object value, in order; none for anything else. */
+/** Object.keys(value): a TypeError for null or undefined, as the original. */
 function keysOf(value: unknown): string[] {
-  return typeof value === 'object' && value !== null ? Object.keys(value) : [];
+  if (value === null || value === undefined) {
+    throw new TypeError('Cannot convert undefined or null to object');
+  }
+  if (typeof value === 'object') return Object.keys(value);
+  return typeof value === 'string'
+    ? Array.from({ length: value.length }, (_, i) => String(i))
+    : [];
 }
 
 function writeState(home: string, sessionId: string, state: unknown): void {
@@ -184,15 +190,17 @@ function progressFile(
   };
 }
 
+// Every caller applies a string method or assert.match to the context, which
+// throw for anything but a string.
 function context(output: unknown): string {
   assert.ok(output, 'expected additionalContext');
-  return textAt(output, 'hookSpecificOutput', 'additionalContext');
+  return text(get(output, 'hookSpecificOutput', 'additionalContext'));
 }
 
 function denyReason(output: unknown): unknown {
   assert.ok(output, 'expected a deny decision');
-  assert.equal(at(output, 'hookSpecificOutput', 'permissionDecision'), 'deny');
-  return at(output, 'hookSpecificOutput', 'permissionDecisionReason');
+  assert.equal(get(output, 'hookSpecificOutput', 'permissionDecision'), 'deny');
+  return get(output, 'hookSpecificOutput', 'permissionDecisionReason');
 }
 
 // ---- where the hook keeps its state ----
@@ -211,7 +219,7 @@ test('without AMBER_HOME the hook keeps its ledger under HOME/.amber', () => {
   );
   const ledger = rows(path.join(f.base, '.amber'));
   assert.equal(ledger.length, 1);
-  assert.equal(at(ledger, 0, 'trigger'), 'planning-invocation');
+  assert.equal(get(ledger, 0, 'trigger'), 'planning-invocation');
 });
 
 test('a missing or unusable session id becomes unknown', () => {
@@ -219,7 +227,7 @@ test('a missing or unusable session id becomes unknown', () => {
   hook('S0', { cwd: f.root }, { home: f.home });
   const state = readJson(path.join(f.home, 'state', 'session-unknown.json'));
   assert.deepEqual(keysOf(state), ['model', 'started_at']);
-  assert.equal(at(state, 'model'), null);
+  assert.equal(get(state, 'model'), null);
   fs.rmSync(path.join(f.home, 'state', 'session-unknown.json'));
   hook(
     'S0',
@@ -227,7 +235,7 @@ test('a missing or unusable session id becomes unknown', () => {
     { home: f.home },
   );
   assert.equal(
-    at(readJson(path.join(f.home, 'state', 'session-unknown.json')), 'model'),
+    get(readJson(path.join(f.home, 'state', 'session-unknown.json')), 'model'),
     'm',
   );
 });
@@ -241,7 +249,13 @@ test('a manifest without a version, or no manifest, reports plugin_version unkno
   });
   const manifest = path.join(copy, '.claude-plugin', 'plugin.json');
   const m = readJson(manifest);
-  if (typeof m === 'object' && m !== null) Reflect.deleteProperty(m, 'version');
+  // delete m.version: a TypeError on null or undefined, nothing on a primitive.
+  if (m === null || m === undefined) {
+    throw new TypeError(
+      `Cannot convert undefined or null to object (deleting 'version')`,
+    );
+  }
+  if (typeof m === 'object') Reflect.deleteProperty(m, 'version');
   fs.writeFileSync(manifest, JSON.stringify(m));
   const script = path.join(copy, 'hooks', 'amber-hook.cjs');
   hook(
@@ -256,7 +270,7 @@ test('a manifest without a version, or no manifest, reports plugin_version unkno
     { home: f.home, script },
   );
   assert.deepEqual(
-    rows(f.home).map((r) => at(r, 'plugin_version')),
+    rows(f.home).map((r) => get(r, 'plugin_version')),
     ['unknown', 'unknown'],
   );
 });
@@ -280,7 +294,7 @@ test('a repository with a separate git dir is its own zone', () => {
     { session_id: 's', cwd: root, prompt: '/amber:planning x' },
     { home },
   );
-  assert.equal(at(rows(home), 0, 'project'), 'sepzone');
+  assert.equal(get(rows(home), 0, 'project'), 'sepzone');
   assert.match(
     context(hook('S0', { session_id: 's', cwd: root }, { home })),
     /^amber: no active contract in this zone\./,
@@ -294,9 +308,9 @@ test('without a cwd outside git the zone is the process directory', () => {
   fs.mkdirSync(dir);
   hook('S1', { prompt: '/amber:planning x' }, { home, cwd: dir });
   const [row] = rows(home);
-  assert.equal(at(row, 'session_id'), 'unknown');
-  assert.equal(at(row, 'cwd'), '');
-  assert.equal(at(row, 'project'), 'plainzone');
+  assert.equal(get(row, 'session_id'), 'unknown');
+  assert.equal(get(row, 'cwd'), '');
+  assert.equal(get(row, 'project'), 'plainzone');
 });
 
 test('a linked worktree outside the zone names the main checkout state', () => {
@@ -375,7 +389,7 @@ test('S1 briefs a broken pointer once, keyed as broken', () => {
   );
   assert.match(first, /^amber: the active contract pointer .* is broken \(/);
   assert.equal(
-    at(readJson(path.join(f.home, 'state', 'session-s.json')), 'briefed'),
+    get(readJson(path.join(f.home, 'state', 'session-s.json')), 'briefed'),
     'broken',
   );
   assert.equal(
@@ -491,11 +505,11 @@ test('a unit command without a session id registers the session unknown', () => 
     null,
   );
   assert.equal(
-    at(readJson(path.join(f.home, 'state', 'session-unknown.json')), 'run'),
+    get(readJson(path.join(f.home, 'state', 'session-unknown.json')), 'run'),
     'boundary.md',
   );
   assert.deepEqual(
-    at(readJson(path.join(f.root, '.amber', 'progress.json')), 'session_ids'),
+    get(readJson(path.join(f.root, '.amber', 'progress.json')), 'session_ids'),
     ['unknown'],
   );
 });
@@ -549,14 +563,14 @@ test('S2 passes a completion in a zone that is not a git repository', () => {
   const [row] = rows(f.home);
   assert.deepEqual(
     [
-      at(row, 'trigger'),
-      at(row, 'contract'),
-      at(row, 'goal'),
-      at(row, 'gate'),
-      at(row, 'review_target'),
-      at(row, 'review'),
-      at(row, 'out_of_scope'),
-      at(row, 'out_of_scope_count'),
+      get(row, 'trigger'),
+      get(row, 'contract'),
+      get(row, 'goal'),
+      get(row, 'gate'),
+      get(row, 'review_target'),
+      get(row, 'review'),
+      get(row, 'out_of_scope'),
+      get(row, 'out_of_scope_count'),
     ],
     [
       'done-declaration',
@@ -590,9 +604,9 @@ test('a gate file without attempts counts as none', () => {
     review: 'r',
   });
   const out = hook('S2', { session_id: 's', cwd: f.root }, { home: f.home });
-  assert.equal(at(out, 'decision'), 'block');
+  assert.equal(get(out, 'decision'), 'block');
   assert.ok(
-    textAt(out, 'reason').startsWith(
+    text(get(out, 'reason')).startsWith(
       'amber gate (attempt 1/3): the completion signal names other.md but the ' +
         'active contract is boundary.md.',
     ),
@@ -618,7 +632,7 @@ test('a stop with no open units, or no focus unit, is let through', () => {
     null,
   );
   assert.equal(
-    at(
+    get(
       readJson(path.join(f.root, '.amber', 'progress.json')),
       'units',
       '',
@@ -633,27 +647,27 @@ test('the re-entry limit without a session id is recorded by stop', () => {
   writeState(f.home, 'unknown', { run: 'boundary.md' });
   writeProgress(f, progressFile({ U1: unit({ reentries: 10 }) }));
   assert.equal(hook('S2', { cwd: f.root }, { home: f.home }), null);
-  const u = at(
+  const u = get(
     readJson(path.join(f.root, '.amber', 'progress.json')),
     'units',
     'U1',
   );
-  assert.equal(at(u, 'status'), 'limit');
+  assert.equal(get(u, 'status'), 'limit');
   assert.deepEqual(
-    items(at(u, 'history')).map((h) => [
-      at(h, 'event'),
-      at(h, 'by'),
-      at(h, 'note'),
+    list(get(u, 'history')).map((h) => [
+      get(h, 'event'),
+      get(h, 'by'),
+      get(h, 'note'),
     ]),
     [['limit', 'stop', 'reentry limit 10 reached']],
   );
   const [row] = rows(f.home);
   assert.deepEqual(
     [
-      at(row, 'trigger'),
-      at(row, 'session_id'),
-      at(row, 'unit'),
-      at(row, 'reentries'),
+      get(row, 'trigger'),
+      get(row, 'session_id'),
+      get(row, 'unit'),
+      get(row, 'reentries'),
     ],
     ['unit-limit', 'unknown', 'U1', 10],
   );
@@ -746,27 +760,27 @@ test('a hold without a unit, or naming an unknown one, holds the run without a u
   mark(f, 'hold - waiting for ci');
   let p = readJson(path.join(f.root, '.amber', 'progress.json'));
   assert.deepEqual(
-    [at(p, 'hold', 'unit'), at(p, 'hold', 'reason'), at(p, 'hold', 'by')],
+    [get(p, 'hold', 'unit'), get(p, 'hold', 'reason'), get(p, 'hold', 'by')],
     [null, 'waiting for ci', 's'],
   );
   mark(f, 'hold - U9 - external: build', { session_id: undefined });
   p = readJson(path.join(f.root, '.amber', 'progress.json'));
   assert.deepEqual(
     [
-      at(p, 'hold', 'unit'),
-      at(p, 'hold', 'reason'),
-      at(p, 'hold', 'by'),
-      at(p, 'hold', 'kind'),
+      get(p, 'hold', 'unit'),
+      get(p, 'hold', 'reason'),
+      get(p, 'hold', 'by'),
+      get(p, 'hold', 'kind'),
     ],
     [null, 'external: build', 'model', 'external'],
   );
   assert.deepEqual(
     rows(f.home).map((r) => [
-      at(r, 'trigger'),
-      at(r, 'unit'),
-      at(r, 'reason'),
-      at(r, 'kind'),
-      at(r, 'contract'),
+      get(r, 'trigger'),
+      get(r, 'unit'),
+      get(r, 'reason'),
+      get(r, 'kind'),
+      get(r, 'contract'),
     ]),
     [
       ['unit-hold', null, 'waiting for ci', undefined, 'boundary.md'],
@@ -784,7 +798,11 @@ test('a hold still leaves its ledger row when progress.json has null units', () 
     '{"units": null}',
   );
   assert.deepEqual(
-    rows(f.home).map((r) => [at(r, 'trigger'), at(r, 'unit'), at(r, 'reason')]),
+    rows(f.home).map((r) => [
+      get(r, 'trigger'),
+      get(r, 'unit'),
+      get(r, 'reason'),
+    ]),
     [['unit-hold', 'U1', 'r']],
   );
 });
@@ -816,7 +834,7 @@ test('driverOfRun picks the newest registered session and skips what it cannot r
   );
   const best = amberHook.driverOfRun('b.md');
   assert.deepEqual(
-    [best?.sessionId, best?.model, typeof best?.mtime],
+    [get(best, 'sessionId'), get(best, 'model'), typeof get(best, 'mtime')],
     ['a', null, 'number'],
   );
 });
@@ -825,14 +843,14 @@ test('recordUnitEvent without fields writes a bare unit row', () => {
   const f = fixture({ contract: false });
   amberHook.recordUnitEvent('s', f.root, 'start', 'U1 started');
   const [row] = rows(DIRECT_HOME).filter(
-    (r) => at(r, 'summary') === 'U1 started',
+    (r) => get(r, 'summary') === 'U1 started',
   );
   assert.deepEqual(
     [
-      at(row, 'trigger'),
-      at(row, 'session_id'),
-      at(row, 'cwd'),
-      at(row, 'model'),
+      get(row, 'trigger'),
+      get(row, 'session_id'),
+      get(row, 'cwd'),
+      get(row, 'model'),
     ],
     ['unit-start', 's', f.root, 'unknown'],
   );
