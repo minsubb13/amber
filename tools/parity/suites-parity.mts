@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { compare, describe, type Comparison } from './compare.mjs';
-import { makeNormalizer } from './normalize.mjs';
+import { makeNormalizer, type Literal } from './normalize.mjs';
 import { runSide, type SideResult } from './side.mjs';
 
 export interface SuitesParity {
@@ -19,9 +19,14 @@ export function runReference(pluginDir: string, workdir: string): SideResult {
   return runSide(pluginDir, join(workdir, 'reference-run'));
 }
 
+/**
+ * literals adds exact strings both sides write differently for the same
+ * thing, such as where each side's suites keep their fixtures.
+ */
 export function compareSides(
   reference: SideResult,
   candidate: SideResult,
+  literals: readonly Literal[] = [],
 ): SuitesParity {
   const normalize = makeNormalizer(
     [
@@ -29,6 +34,7 @@ export function compareSides(
       { text: candidate.pluginDir, label: 'PLUGIN' },
       { text: reference.tmpRoot, label: 'TMPROOT' },
       { text: candidate.tmpRoot, label: 'TMPROOT' },
+      ...literals,
     ],
     tmpdir(),
   );

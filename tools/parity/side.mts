@@ -5,7 +5,11 @@ import { join } from 'node:path';
 
 import type { CaptureRecord } from './record-types.cjs';
 import { loadRecords } from './records.mjs';
-import { runSuites, type SuiteRun } from '../shared/suites.mjs';
+import {
+  runLegacySuites,
+  runSuites,
+  type SuiteRun,
+} from '../shared/suites.mjs';
 
 export interface SideResult {
   readonly pluginDir: string;
@@ -21,12 +25,21 @@ const PRELOADS = ['determinism.cjs', 'capture.cjs'].map((name) =>
   join(import.meta.dirname, name),
 );
 
+export interface SideOptions {
+  /** Run the legacy suites of pluginDir/tests instead of test/. */
+  readonly legacy?: boolean;
+}
+
 /**
- * Runs the suites of pluginDir with every product invocation captured into
- * sideDir/capture (see capture.cts) and every temporary directory created
- * under sideDir/tmp.
+ * Runs the suites against pluginDir with every product invocation captured
+ * into sideDir/capture (see capture.cts) and every temporary directory
+ * created under sideDir/tmp. node:test reports in TAP, which names each test.
  */
-export function runSide(pluginDir: string, sideDir: string): SideResult {
+export function runSide(
+  pluginDir: string,
+  sideDir: string,
+  options: SideOptions = {},
+): SideResult {
   const captureDir = join(sideDir, 'capture');
   const tmpRoot = join(sideDir, 'tmp');
   mkdirSync(captureDir, { recursive: true });
@@ -37,7 +50,9 @@ export function runSide(pluginDir: string, sideDir: string): SideResult {
   ]
     .join(' ')
     .trim();
-  const suites = runSuites(pluginDir, {
+  const run = options.legacy === true ? runLegacySuites : runSuites;
+  const suites = run(pluginDir, {
+    tap: true,
     env: {
       NODE_OPTIONS: nodeOptions,
       TMPDIR: tmpRoot,
