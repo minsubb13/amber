@@ -16,12 +16,13 @@
 // child the preload only records what the product read from stdin.
 //
 // Besides argv, cwd and stdin, a product record holds the product's other
-// inputs: the environment variables Amber reads and what it finds before it
-// runs (the zone's .amber files, the contract they name, Amber's state files).
-// In any other process - a test suite - a plugin module the suite requires
-// itself is handed back behind a proxy that records each call of an export
-// with its arguments, so two suites that drive the plugin alike leave the
-// same records whether they start processes or call modules.
+// inputs: the environment variables Amber reads, and every file text,
+// directory listing, existence check, stat and git output the product read
+// while it ran. In any other process - a test suite - a plugin module the
+// suite requires itself is handed back behind a proxy that records each call
+// of an export with its arguments and the reads made during it, so two
+// suites that drive the plugin alike leave the same records whether they
+// start processes or call modules.
 
 import childProcess = require('node:child_process');
 import fs = require('node:fs');
@@ -29,7 +30,7 @@ import Module = require('node:module');
 import os = require('node:os');
 import path = require('node:path');
 
-import type { CaptureRecord, FileEffect } from './record-types.cjs';
+import type { CaptureRecord, InputRead } from './record-types.cjs';
 
 const ZONE_FILES = ['active.json', 'progress.json', 'done.json'];
 const INNER_ENV = 'AMBER_PARITY_INNER_RECORD';
@@ -45,6 +46,7 @@ const ENV_KEYS = [
   'HOME',
 ];
 const PLUGIN_MODULE = /^(hooks|scripts|lib)\/[^/]+\.cjs$/;
+const STDIN_PATHS = new Set(['/dev/stdin', '/dev/fd/0', '/proc/self/fd/0']);
 
 function productEntry(): string | null {
   const captureDir = process.env['AMBER_PARITY_CAPTURE_DIR'];
@@ -117,42 +119,108 @@ function amberEnv(): Record<string, string | null> {
   return env;
 }
 
-/** The zone's .amber files, the contract active.json names, the state files. */
-function snapshotBefore(root: string | null, stateDir: string): FileEffect[] {
-  const before: FileEffect[] = [];
-  if (root !== null) {
-    for (const name of ZONE_FILES) {
-      before.push({
-        path: `.amber/${name}`,
-        content: readOrNull(path.join(root, '.amber', name)),
-      });
-    }
-    let boundary: unknown;
-    try {
-      const pointer: unknown = JSON.parse(
-        readOrNull(path.join(root, '.amber', 'active.json')) ?? '',
-      );
-      boundary =
-        typeof pointer === 'object' && pointer !== null
-          ? Reflect.get(pointer, 'boundary')
-          : undefined;
-    } catch {
-      boundary = undefined;
-    }
-    if (typeof boundary === 'string') {
-      before.push({
-        path: `contract/${boundary}`,
-        content: readOrNull(path.join(root, boundary)),
-      });
+function errorOf(err: unknown): string {
+  const code: unknown =
+    typeof err === 'object' && err !== null ? Reflect.get(err, 'code') : null;
+  const status: unknown =
+    typeof err === 'object' && err !== null ? Reflect.get(err, 'status') : null;
+  if (typeof code === 'string') return `error ${code}`;
+  if (typeof status === 'number') return `error status ${String(status)}`;
+  return 'error thrown';
+}
+
+function entryName(entry: unknown): string {
+  if (typeof entry === 'string') return entry;
+  if (typeof entry !== 'object' || entry === null) return '';
+  const name: unknown = Reflect.get(entry, 'name');
+  const isDirectory: unknown = Reflect.get(entry, 'isDirectory');
+  const dir =
+    typeof isDirectory === 'function' &&
+    Reflect.apply(isDirectory, entry, []) === true;
+  return `${typeof name === 'string' ? name : ''}${dir ? '/' : ''}`;
+}
+
+function kindOf(stats: unknown): string {
+  if (typeof stats !== 'object' || stats === null) return 'none';
+  const kinds: readonly (readonly [string, string])[] = [
+    ['isFile', 'file'],
+    ['isDirectory', 'directory'],
+  ];
+  for (const [method, kind] of kinds) {
+    const test: unknown = Reflect.get(stats, method);
+    if (typeof test === 'function' && Reflect.apply(test, stats, []) === true) {
+      return kind;
     }
   }
-  for (const name of listDir(stateDir).sort()) {
-    before.push({
-      path: `state/${name}`,
-      content: readOrNull(path.join(stateDir, name)),
+  return 'other';
+}
+
+/**
+ * Wraps the functions src/ takes its inputs with - fs.readFileSync,
+ * existsSync, readdirSync and statSync, and child_process.execFileSync, which
+ * runs git - so that while active() holds each one hands sink what it read:
+ * a file's text, a directory's sorted entries, whether a path exists, the
+ * kind of entry a stat finds (not its times), a command's stdout, or the
+ * error. Reads under the plugin itself (its modules, its manifest) are the
+ * build, not an input, and stdin is recorded on its own; both are left out.
+ */
+function recordReads(
+  pluginDir: string,
+  sink: (read: InputRead) => void,
+  active: () => boolean,
+): void {
+  const fileTarget = (args: readonly unknown[]): string | null => {
+    const [file] = args;
+    if (typeof file !== 'string' || STDIN_PATHS.has(file)) return null;
+    const abs = path.resolve(file);
+    return inside(pluginDir, abs) === null ? abs : null;
+  };
+  const commandTarget = (args: readonly unknown[]): string => {
+    const [file, argv, options] = args;
+    const cwd: unknown =
+      typeof options === 'object' && options !== null
+        ? Reflect.get(options, 'cwd')
+        : undefined;
+    return (
+      `${String(file)} ${JSON.stringify(argv)} cwd=` +
+      (typeof cwd === 'string' ? path.resolve(cwd) : process.cwd())
+    );
+  };
+  const wrap = (
+    owner: object,
+    name: string,
+    op: string,
+    targetOf: (args: readonly unknown[]) => string | null,
+    resultOf: (value: unknown) => string,
+  ): void => {
+    const original: unknown = Reflect.get(owner, name);
+    if (typeof original !== 'function') return;
+    Object.defineProperty(owner, name, {
+      configurable: true,
+      writable: true,
+      value: (...args: unknown[]): unknown => {
+        const target = active() ? targetOf(args) : null;
+        if (target === null) return Reflect.apply(original, owner, args);
+        try {
+          const value: unknown = Reflect.apply(original, owner, args);
+          sink({ op, target, result: resultOf(value) });
+          return value;
+        } catch (err) {
+          sink({ op, target, result: errorOf(err) });
+          throw err;
+        }
+      },
     });
-  }
-  return before;
+  };
+  wrap(fs, 'readFileSync', 'read', fileTarget, chunkText);
+  wrap(fs, 'existsSync', 'exists', fileTarget, (value) =>
+    value === true ? 'true' : 'false',
+  );
+  wrap(fs, 'readdirSync', 'list', fileTarget, (value) =>
+    Array.isArray(value) ? value.map(entryName).sort().join('\n') : '',
+  );
+  wrap(fs, 'statSync', 'stat', fileTarget, kindOf);
+  wrap(childProcess, 'execFileSync', 'exec', commandTarget, chunkText);
 }
 
 /** JSON text of call arguments, with the values JSON has no text for named. */
@@ -197,23 +265,54 @@ function recordCalls(captureDir: string, pluginDir: string): void {
     `calls-${String(process.pid)}-${String(Math.random()).slice(2)}.jsonl`,
   );
   const proxies = new WeakMap<object, object>();
-  const record = (rel: string, name: string, args: unknown[]): void => {
-    const call: CaptureRecord = {
-      entry: `call ${rel}#${name}`,
-      args: [serializeArgs(args)],
-      cwd: process.cwd(),
-      env: amberEnv(),
-      before: [],
-      stdin: '',
-      stdout: '',
-      stderr: '',
-      exitCode: 0,
-      signal: null,
-      ledger: '',
-      state: [],
-      zone: [],
-    };
-    fs.appendFileSync(file, `${JSON.stringify(call)}\n`);
+  // The reads of the calls in progress, innermost last.
+  const open: InputRead[][] = [];
+  recordReads(
+    pluginDir,
+    (read) => {
+      open.at(-1)?.push(read);
+    },
+    () => open.length > 0,
+  );
+  const call = (
+    rel: string,
+    name: string,
+    fn: unknown,
+    target: object,
+    args: unknown[],
+  ): unknown => {
+    const entry = `call ${rel}#${name}`;
+    const serialized = serializeArgs(args);
+    const cwd = process.cwd();
+    const env = amberEnv();
+    const reads: InputRead[] = [];
+    open.push(reads);
+    try {
+      const result: unknown = Reflect.apply(
+        typeof fn === 'function' ? fn : () => undefined,
+        target,
+        args,
+      );
+      return result;
+    } finally {
+      open.pop();
+      const record: CaptureRecord = {
+        entry,
+        args: [serialized],
+        cwd,
+        env,
+        reads,
+        stdin: '',
+        stdout: '',
+        stderr: '',
+        exitCode: 0,
+        signal: null,
+        ledger: '',
+        state: [],
+        zone: [],
+      };
+      fs.appendFileSync(file, `${JSON.stringify(record)}\n`);
+    }
   };
   const proxyFor = (exports: object, rel: string): object => {
     const known = proxies.get(exports);
@@ -227,11 +326,8 @@ function recordCalls(captureDir: string, pluginDir: string): void {
         }
         let wrapper = wrappers.get(key);
         if (wrapper === undefined) {
-          wrapper = (...args: unknown[]): unknown => {
-            record(rel, key, args);
-            const result: unknown = Reflect.apply(value, target, args);
-            return result;
-          };
+          wrapper = (...args: unknown[]): unknown =>
+            call(rel, key, value, target, args);
           wrappers.set(key, wrapper);
         }
         return wrapper;
@@ -293,9 +389,17 @@ function toBuffer(value: unknown): Buffer {
  * iteration), and fs reads of fd 0, of the paths that name it, and of
  * descriptors opened on those paths are recorded too.
  */
-function recordStdin(innerFile: string): void {
+function recordStdin(innerFile: string, pluginDir: string): void {
   Reflect.deleteProperty(process.env, INNER_ENV);
   const stdin: string[] = [];
+  const reads: InputRead[] = [];
+  recordReads(
+    pluginDir,
+    (read) => {
+      reads.push(read);
+    },
+    () => true,
+  );
   const stream = process.stdin;
   const push = stream.push.bind(stream);
   Object.defineProperty(stream, 'push', {
@@ -436,8 +540,57 @@ function recordStdin(innerFile: string): void {
     });
   }
   process.on('exit', () => {
-    fs.writeFileSync(innerFile, stdin.join(''));
+    fs.writeFileSync(
+      innerFile,
+      JSON.stringify({ stdin: stdin.join(''), reads }),
+    );
   });
+}
+
+/** What the child wrote: the stdin and the reads of the product it ran. */
+function innerRecord(text: string | null): {
+  stdin: string;
+  reads: InputRead[];
+} {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text ?? 'null');
+  } catch {
+    parsed = null;
+  }
+  const stdin: unknown =
+    typeof parsed === 'object' && parsed !== null
+      ? Reflect.get(parsed, 'stdin')
+      : undefined;
+  const list: unknown =
+    typeof parsed === 'object' && parsed !== null
+      ? Reflect.get(parsed, 'reads')
+      : undefined;
+  const reads: InputRead[] = [];
+  if (Array.isArray(list)) {
+    for (const item of list) {
+      const op: unknown =
+        typeof item === 'object' && item !== null
+          ? Reflect.get(item, 'op')
+          : undefined;
+      const target: unknown =
+        typeof item === 'object' && item !== null
+          ? Reflect.get(item, 'target')
+          : undefined;
+      const result: unknown =
+        typeof item === 'object' && item !== null
+          ? Reflect.get(item, 'result')
+          : undefined;
+      if (
+        typeof op === 'string' &&
+        typeof target === 'string' &&
+        typeof result === 'string'
+      ) {
+        reads.push({ op, target, result });
+      }
+    }
+  }
+  return { stdin: typeof stdin === 'string' ? stdin : '', reads };
 }
 
 /** Outer side: run the command as a child, record, forward, end alike. */
@@ -450,7 +603,6 @@ function runOuter(entry: string): never {
   const stateStart = stamp(stateDir);
   const cwd = process.cwd();
   const env = amberEnv();
-  const before = snapshotBefore(zoneRoot(cwd), stateDir);
   const args = process.argv.slice(2);
   const tag = `${String(process.pid)}-${String(Date.now())}-${String(Math.random()).slice(2)}`;
   const innerFile = path.join(captureDir, `${tag}.stdin`);
@@ -489,8 +641,7 @@ function runOuter(entry: string): never {
     args,
     cwd,
     env,
-    before,
-    stdin: readOrNull(innerFile) ?? '',
+    ...innerRecord(readOrNull(innerFile)),
     stdout: stdout.toString('utf8'),
     stderr: stderr.toString('utf8'),
     exitCode: child.status,
@@ -525,7 +676,7 @@ const entry = productEntry();
 if (entry !== null) {
   const innerFile = process.env[INNER_ENV];
   if (innerFile === undefined) runOuter(entry);
-  else recordStdin(innerFile);
+  else recordStdin(innerFile, process.env['AMBER_PARITY_PLUGIN'] ?? '');
 } else {
   const captureDir = process.env['AMBER_PARITY_CAPTURE_DIR'];
   const pluginDir = process.env['AMBER_PARITY_PLUGIN'];

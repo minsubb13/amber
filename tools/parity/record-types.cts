@@ -3,8 +3,20 @@
 
 export interface FileEffect {
   readonly path: string;
-  /** File content (after the process, or before it in `before`), or null when the file is absent. */
+  /** File content after the process, or null when the file is absent. */
   readonly content: string | null;
+}
+
+/**
+ * One input the product took during a run or a call: a file's text, a
+ * directory's sorted entries, whether a path exists, the kind of entry a stat
+ * found, or a command's stdout, each with its target; `error <code>` where
+ * the read threw.
+ */
+export interface InputRead {
+  readonly op: string;
+  readonly target: string;
+  readonly result: string;
 }
 
 export interface CaptureRecord {
@@ -15,8 +27,8 @@ export interface CaptureRecord {
   readonly cwd: string;
   /** The environment variables Amber reads, null where unset. */
   readonly env: Readonly<Record<string, string | null>>;
-  /** What the process found before it ran: the zone's .amber files, the contract they name, and Amber's state files. Empty for a direct call. */
-  readonly before: readonly FileEffect[];
+  /** Every input the product read, in order (see recordReads in capture.cts). */
+  readonly reads: readonly InputRead[];
   readonly stdin: string;
   readonly stdout: string;
   readonly stderr: string;

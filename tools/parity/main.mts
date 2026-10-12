@@ -126,10 +126,16 @@ function tests(workdir: string, commit: string): number {
   for (const name of missing) log(`only in the legacy suites: ${name}`);
   for (const name of extra) log(`only in test/: ${name}`);
   // Each side's suites name their fixtures by where they keep them.
-  const parity = compareSides(legacy, current, [
-    { text: join(legacyPlugin, 'tests'), label: 'TESTS' },
-    { text: join(REPO, 'test'), label: 'TESTS' },
-  ]);
+  // Both sides run one build, so what the product read is an input here.
+  const parity = compareSides(
+    legacy,
+    current,
+    [
+      { text: join(legacyPlugin, 'tests'), label: 'TESTS' },
+      { text: join(REPO, 'test'), label: 'TESTS' },
+    ],
+    { reads: true },
+  );
   for (const line of report(parity, Number(values.limit))) log(line);
   const sameNames = missing.length === 0 && extra.length === 0;
   console.log(

@@ -3,7 +3,7 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import type { CaptureRecord, FileEffect } from './record-types.cjs';
+import type { CaptureRecord, FileEffect, InputRead } from './record-types.cjs';
 import { isRecord, isStringArray, isStringOrNull } from '../shared/guards.mjs';
 
 function parseEffects(value: unknown): FileEffect[] | null {
@@ -16,6 +16,24 @@ function parseEffects(value: unknown): FileEffect[] | null {
     effects.push({ path, content });
   }
   return effects;
+}
+
+function parseReads(value: unknown): InputRead[] | null {
+  if (!Array.isArray(value)) return null;
+  const reads: InputRead[] = [];
+  for (const item of value) {
+    if (!isRecord(item)) return null;
+    const { op, target, result } = item;
+    if (
+      typeof op !== 'string' ||
+      typeof target !== 'string' ||
+      typeof result !== 'string'
+    ) {
+      return null;
+    }
+    reads.push({ op, target, result });
+  }
+  return reads;
 }
 
 function parseEnv(value: unknown): Record<string, string | null> | null {
@@ -33,7 +51,7 @@ export function parseRecord(value: unknown): CaptureRecord | null {
   const { entry, args, cwd, stdin, stdout, stderr, exitCode, signal, ledger } =
     value;
   const env = parseEnv(value['env']);
-  const before = parseEffects(value['before']);
+  const reads = parseReads(value['reads']);
   const state = parseEffects(value['state']);
   const zone = parseEffects(value['zone']);
   if (
@@ -41,7 +59,7 @@ export function parseRecord(value: unknown): CaptureRecord | null {
     !isStringArray(args) ||
     typeof cwd !== 'string' ||
     env === null ||
-    before === null ||
+    reads === null ||
     typeof stdin !== 'string' ||
     typeof stdout !== 'string' ||
     typeof stderr !== 'string' ||
@@ -58,7 +76,7 @@ export function parseRecord(value: unknown): CaptureRecord | null {
     args,
     cwd,
     env,
-    before,
+    reads,
     stdin,
     stdout,
     stderr,

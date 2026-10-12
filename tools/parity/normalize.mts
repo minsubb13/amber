@@ -66,9 +66,19 @@ export interface Literal {
  * keeps its plugin copy and its TMPDIR. tmpRoot is the system temp directory
  * for the TMP rule.
  */
+export interface NormalizerOptions {
+  /**
+   * Count what the product read as input. Only for two sets of suites on one
+   * build (parity:tests): between two builds, which files a build reads and
+   * in which order is its own business, and their outputs are compared.
+   */
+  readonly reads?: boolean;
+}
+
 export function makeNormalizer(
   literals: readonly Literal[],
   tmpRoot: string,
+  options: NormalizerOptions = {},
 ): (record: CaptureRecord) => Normalized {
   const ordered = [...literals].sort((a, b) => b.text.length - a.text.length);
   const ruleList = rules(tmpRoot);
@@ -78,7 +88,7 @@ export function makeNormalizer(
       record.args,
       record.cwd,
       record.env,
-      record.before,
+      ...(options.reads === true ? [record.reads] : []),
       record.stdin,
     ]);
     const output = JSON.stringify([

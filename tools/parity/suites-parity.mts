@@ -5,7 +5,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { compare, describe, type Comparison } from './compare.mjs';
-import { makeNormalizer, type Literal } from './normalize.mjs';
+import {
+  makeNormalizer,
+  type Literal,
+  type NormalizerOptions,
+} from './normalize.mjs';
 import { runSide, type SideResult } from './side.mjs';
 
 export interface SuitesParity {
@@ -27,6 +31,7 @@ export function compareSides(
   reference: SideResult,
   candidate: SideResult,
   literals: readonly Literal[] = [],
+  options: NormalizerOptions = {},
 ): SuitesParity {
   const normalize = makeNormalizer(
     [
@@ -37,6 +42,7 @@ export function compareSides(
       ...literals,
     ],
     tmpdir(),
+    options,
   );
   const comparison = compare(
     reference.records.map(normalize),
