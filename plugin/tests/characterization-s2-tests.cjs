@@ -401,3 +401,31 @@ test('non-string fields are converted the way the original converts them', () =>
     stopsKnown: false, malformed: 0,
   });
 });
+
+test('item_completed rows without an item are skipped; array fields join like String()', () => {
+  const file = transcript([
+    { type: 'session_meta', payload: {} },
+    { type: 'event_msg', payload: { type: 'item_completed' } },
+    { type: 'event_msg', payload: { type: 'item_completed', item: null } },
+    { type: 'response_item', payload: { type: 'function_call', name: [null, 'a.shell'], call_id: 'a',
+      arguments: '{"cmd":"node record.cjs done"}' } },
+    { type: 'response_item', payload: { type: 'function_call', name: ['x', { a: 1 }], call_id: 'b',
+      arguments: '{"cmd":"node record.cjs done"}' } },
+  ]);
+  assert.deepEqual(codexEvents(file), {
+    events: [{ ln: 4, ts: '', kind: 'cmd done', expect: 'done-declaration', result: 'unobserved' }],
+    users: 0, assistants: 0, lines: 6, cwd: null, stops: [], reentries: [], host: 'codex',
+    stopsKnown: false, malformed: 0,
+  });
+});
+
+test('a user message without a typed skill counts only as a user turn', () => {
+  const file = transcript([
+    { type: 'session_meta', payload: { cwd: '/zone' } },
+    { type: 'response_item', payload: { type: 'message', role: 'user', content: 'please port amber:planning' } },
+  ]);
+  assert.deepEqual(codexEvents(file), {
+    events: [], users: 1, assistants: 0, lines: 3, cwd: '/zone', stops: [], reentries: [], host: 'codex',
+    stopsKnown: false, malformed: 0,
+  });
+});
