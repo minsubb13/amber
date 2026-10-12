@@ -14,7 +14,7 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { at, parseJson } from '../shared/json.mjs';
+import { get, parseJson } from '../shared/json.mjs';
 import { pluginDir } from '../shared/paths.mjs';
 
 const base = mkdtempSync(join(tmpdir(), 'amber-host-probe-'));
@@ -173,13 +173,13 @@ const rows = readFileSync(join(base, 'hooks.jsonl'), 'utf8')
   .split('\n')
   .map((line) => parseJson(line));
 const tools = rows.filter(
-  (r) => at(r, 'input', 'hook_event_name') === 'PreToolUse',
+  (r) => get(r, 'input', 'hook_event_name') === 'PreToolUse',
 );
 const identity = tools.map((r) => ({
-  tool: at(r, 'input', 'tool_name'),
-  session: at(r, 'input', 'session_id'),
-  agent: at(r, 'input', 'agent_id'),
-  cwd: at(r, 'input', 'cwd'),
+  tool: get(r, 'input', 'tool_name'),
+  session: get(r, 'input', 'session_id'),
+  agent: get(r, 'input', 'agent_id'),
+  cwd: get(r, 'input', 'cwd'),
 }));
 writeFileSync(
   join(base, 'identity.json'),
@@ -195,7 +195,7 @@ assert.ok(
 );
 assert.ok(existsSync(join(root, 'src', 'parent.txt')), 'parent patch absent');
 assert.ok(
-  rows.some((r) => at(r, 'input', 'hook_event_name') === 'SubagentStart'),
+  rows.some((r) => get(r, 'input', 'hook_event_name') === 'SubagentStart'),
   'no child hook',
 );
 const decisions = readFileSync(join(base, 'decisions.jsonl'), 'utf8')
@@ -204,21 +204,21 @@ const decisions = readFileSync(join(base, 'decisions.jsonl'), 'utf8')
   .map((line) => parseJson(line));
 assert.ok(
   decisions.some((d) =>
-    /blocked by unit U1/.test(JSON.stringify(at(d, 'output'))),
+    /blocked by unit U1/.test(JSON.stringify(get(d, 'output'))),
   ),
   'no unit-specific denial',
 );
 const progress = parseJson(
   readFileSync(join(root, '.amber', 'progress.json'), 'utf8'),
 );
-assert.ok(at(progress, 'units', 'U1', 'agent_id'), 'claim missing');
+assert.ok(get(progress, 'units', 'U1', 'agent_id'), 'claim missing');
 const childShell = rows.find((r) => {
-  const agent = at(r, 'input', 'agent_id');
+  const agent = get(r, 'input', 'agent_id');
   return (
-    at(r, 'input', 'hook_event_name') === 'PostToolUse' &&
-    at(r, 'input', 'tool_name') === 'Bash' &&
+    get(r, 'input', 'hook_event_name') === 'PostToolUse' &&
+    get(r, 'input', 'tool_name') === 'Bash' &&
     Boolean(agent) &&
-    String(at(r, 'input', 'tool_response')).includes(String(agent))
+    String(get(r, 'input', 'tool_response')).includes(String(agent))
   );
 });
 assert.ok(
@@ -226,15 +226,15 @@ assert.ok(
   'child shell must expose the hook agent id as CODEX_THREAD_ID',
 );
 assert.notEqual(
-  at(childShell, 'input', 'agent_id'),
-  at(childShell, 'input', 'session_id'),
+  get(childShell, 'input', 'agent_id'),
+  get(childShell, 'input', 'session_id'),
 );
 assert.ok(
   tools.some(
     (r) =>
-      Boolean(at(r, 'input', 'agent_id')) &&
-      at(r, 'input', 'tool_name') === 'apply_patch' &&
-      at(r, 'input', 'cwd') === root,
+      Boolean(get(r, 'input', 'agent_id')) &&
+      get(r, 'input', 'tool_name') === 'apply_patch' &&
+      get(r, 'input', 'cwd') === root,
   ),
   'absolute child patch with inherited cwd not observed',
 );

@@ -31,7 +31,16 @@ import {
   type Run,
   type RunOptions,
 } from './model-qa-runtime.mjs';
-import { at, items, parseJson, show, textAt } from '../shared/json.mjs';
+import {
+  asText,
+  at,
+  get,
+  list,
+  parseJson,
+  show,
+  text,
+  textAt,
+} from '../shared/json.mjs';
 import { pluginDir, REPO } from '../shared/paths.mjs';
 
 const SCENARIOS = [
@@ -82,7 +91,7 @@ const BASE = assessExisting
 const CONTRACT = 'qa-contract.md';
 // The version this checkout declares: the installed copy and every ledger
 // row the scenarios produce must carry it (a literal here went stale twice).
-const DECLARED_VERSION = textAt(
+const DECLARED_VERSION = get(
   parseJson(
     readFileSync(join(PLUGIN, '.claude-plugin', 'plugin.json'), 'utf8'),
   ),
@@ -107,14 +116,14 @@ function installedClaudePlugin(): string {
     }
   };
   // The development zone installs the checkout as amber@amber-dev instead.
-  const rows = items(parseJson(result.stdout)).filter(
+  const rows = list(parseJson(result.stdout)).filter(
     (item) =>
-      oneOf(['amber@amber', 'amber@amber-dev'], at(item, 'id')) &&
-      Boolean(at(item, 'enabled')),
+      oneOf(['amber@amber', 'amber@amber-dev'], get(item, 'id')) &&
+      Boolean(get(item, 'enabled')),
   );
   const row =
     rows.find((item) => {
-      const projectPath = at(item, 'projectPath');
+      const projectPath = get(item, 'projectPath');
       return (
         typeof projectPath === 'string' &&
         projectPath !== '' &&
@@ -123,7 +132,7 @@ function installedClaudePlugin(): string {
     }) ??
     rows.find(
       (item) =>
-        at(item, 'id') === 'amber@amber' && at(item, 'scope') === 'user',
+        get(item, 'id') === 'amber@amber' && get(item, 'scope') === 'user',
     );
   assert.ok(
     row,
@@ -133,18 +142,18 @@ function installedClaudePlugin(): string {
   // The installed copy must be the version this checkout declares, so the
   // scenario exercises the code under test rather than a stale cache.
   assert.equal(
-    at(row, 'version'),
+    get(row, 'version'),
     DECLARED_VERSION,
     'installed ' +
-      show(at(row, 'id')) +
+      show(get(row, 'id')) +
       ' is ' +
-      show(at(row, 'version')) +
+      show(get(row, 'version')) +
       ' but the source manifest says ' +
-      DECLARED_VERSION +
+      show(DECLARED_VERSION) +
       ' - run claude plugin update ' +
-      show(at(row, 'id')) +
+      show(get(row, 'id')) +
       ' --scope ' +
-      show(at(row, 'scope')),
+      show(get(row, 'scope')),
   );
   return textAt(row, 'installPath');
 }
@@ -155,21 +164,21 @@ function installedCodexPlugin(): string {
     encoding: 'utf8',
   });
   assert.equal(r.status, 0, r.stderr);
-  const row = items(at(parseJson(r.stdout), 'installed')).find(
+  const row = list(get(parseJson(r.stdout), 'installed')).find(
     (p) =>
-      at(p, 'pluginId') === 'amber@personal' &&
-      Boolean(at(p, 'installed')) &&
-      Boolean(at(p, 'enabled')),
+      get(p, 'pluginId') === 'amber@personal' &&
+      Boolean(get(p, 'installed')) &&
+      Boolean(get(p, 'enabled')),
   );
   assert.ok(row, 'enabled amber@personal required in the source zone');
-  const wanted = at(
+  const wanted = get(
     parseJson(
       readFileSync(join(PLUGIN, '.codex-plugin', 'plugin.json'), 'utf8'),
     ),
     'version',
   );
   assert.equal(
-    at(row, 'version'),
+    get(row, 'version'),
     wanted,
     'Codex installed version differs from source',
   );
@@ -179,7 +188,7 @@ function installedCodexPlugin(): string {
     'cache',
     'personal',
     'amber',
-    textAt(row, 'version'),
+    text(get(row, 'version')),
   );
   assert.ok(
     existsSync(join(root, 'scripts', 'audit-codex.cjs')),
@@ -222,21 +231,21 @@ function runHost(
         .split('\n')
         .map((line) => parseJson(line));
       assert.ok(
-        events.some((e) => at(e, 'type') === 'turn.completed'),
+        events.some((e) => get(e, 'type') === 'turn.completed'),
         'captured turn did not finish',
       );
       assert.ok(
-        !events.some((e) => at(e, 'type') === 'turn.failed'),
+        !events.some((e) => get(e, 'type') === 'turn.failed'),
         'captured model run failed',
       );
       sessionId = at(
-        events.find((e) => at(e, 'type') === 'thread.started'),
+        events.find((e) => get(e, 'type') === 'thread.started'),
         'thread_id',
       );
     } else {
       const payload = parseJson(stdout);
-      assert.ok(!at(payload, 'is_error'), 'captured model run failed');
-      sessionId = at(payload, 'session_id');
+      assert.ok(!get(payload, 'is_error'), 'captured model run failed');
+      sessionId = get(payload, 'session_id');
     }
     assert.ok(sessionId, 'captured session identity missing');
     return {
@@ -314,27 +323,27 @@ function runHost(
           return {};
         }
       })
-      .find((e) => at(e, 'type') === 'thread.started');
+      .find((e) => get(e, 'type') === 'thread.started');
     assert.ok(at(start, 'thread_id'), 'Codex thread id missing');
     return {
       ...fixture,
       final: readFileSync(lastFile, 'utf8'),
-      sessionId: show(at(start, 'thread_id')),
+      sessionId: show(get(start, 'thread_id')),
     };
   }
   const payload = parseJson(result.stdout);
   assert.ok(
-    !at(payload, 'is_error'),
+    !get(payload, 'is_error'),
     'model returned error: ' + JSON.stringify(payload),
   );
-  const final = textAt(payload, 'result');
+  const final = asText(get(payload, 'result') || '');
   writeFileSync(lastFile, final);
   return {
     ...fixture,
     final,
-    sessionId: show(at(payload, 'session_id')),
-    cost: at(payload, 'total_cost_usd'),
-    turns: at(payload, 'num_turns'),
+    sessionId: show(get(payload, 'session_id')),
+    cost: get(payload, 'total_cost_usd'),
+    turns: get(payload, 'num_turns'),
   };
 }
 
@@ -342,7 +351,7 @@ function transcriptFiles(run: Run, includeChildren = false): string[] {
   const ids = new Set([run.sessionId]);
   if (includeChildren) {
     for (const r of ledger(run.home)) {
-      const agent = at(r, 'agent_id');
+      const agent = get(r, 'agent_id');
       if (agent) ids.add(show(agent));
     }
   }
@@ -537,7 +546,7 @@ function assess(run: Run): Record<string, unknown> {
   if (run.kind === 'missing') {
     assert.equal(existsSync(join(run.root, 'required.txt')), false);
     assert.equal(
-      rows.some((row) => at(row, 'trigger') === 'done-declaration'),
+      rows.some((row) => get(row, 'trigger') === 'done-declaration'),
       false,
       'missing work must not be signalled complete',
     );
@@ -551,7 +560,7 @@ function assess(run: Run): Record<string, unknown> {
   }
   if (run.kind === 'broken') {
     assert.equal(
-      rows.some((row) => at(row, 'gate') === 'passed'),
+      rows.some((row) => get(row, 'gate') === 'passed'),
       false,
     );
     assert.equal(
@@ -573,25 +582,25 @@ function assess(run: Run): Record<string, unknown> {
     .map((line) => parseJson(line));
   assert.ok(
     checks.some(
-      (row) => at(row, 'pass') === false && at(row, 'value') === 'wrong\n',
+      (row) => get(row, 'pass') === false && get(row, 'value') === 'wrong\n',
     ),
   );
-  assert.equal(at(checks.at(-1), 'pass'), true);
-  assert.equal(at(checks.at(-1), 'value'), 'amber-b01-ok\n');
+  assert.equal(get(checks.at(-1), 'pass'), true);
+  assert.equal(get(checks.at(-1), 'value'), 'amber-b01-ok\n');
   assert.doesNotMatch(
     run.final,
     /AMBER_(REVIEW|GOAL|DONE):/,
     'no marker line in the final message',
   );
   const completions = rows.filter(
-    (row) => at(row, 'trigger') === 'done-declaration',
+    (row) => get(row, 'trigger') === 'done-declaration',
   );
   assert.equal(completions.length, 1, JSON.stringify(rows));
-  assert.equal(at(completions[0], 'gate'), 'passed');
-  assert.equal(at(completions[0], 'review_target'), CONTRACT);
-  assert.ok(at(completions[0], 'review'));
-  assert.ok(at(completions[0], 'goal'));
-  assert.equal(at(completions[0], 'plugin_version'), DECLARED_VERSION);
+  assert.equal(get(completions[0], 'gate'), 'passed');
+  assert.equal(get(completions[0], 'review_target'), CONTRACT);
+  assert.ok(get(completions[0], 'review'));
+  assert.ok(get(completions[0], 'goal'));
+  assert.equal(get(completions[0], 'plugin_version'), DECLARED_VERSION);
   assert.equal(
     existsSync(pointer),
     false,
@@ -765,15 +774,15 @@ function assessLoop(run: Run): Record<string, unknown> {
     false,
     'signal consumed',
   );
-  const claims = rows.filter((r) => at(r, 'trigger') === 'unit-claim');
-  const agents = new Set(claims.map((r) => at(r, 'agent_id')));
+  const claims = rows.filter((r) => get(r, 'trigger') === 'unit-claim');
+  const agents = new Set(claims.map((r) => get(r, 'agent_id')));
   assert.ok(
     agents.size >= 2,
     'two distinct subagent claims expected: ' + JSON.stringify(claims),
   );
   const verified = rows
-    .filter((r) => at(r, 'trigger') === 'unit-verified')
-    .map((r) => at(r, 'unit'));
+    .filter((r) => get(r, 'trigger') === 'unit-verified')
+    .map((r) => get(r, 'unit'));
   for (const id of ['U1', 'U2', 'U3']) {
     assert.ok(verified.includes(id), 'unit-verified ' + id);
   }
@@ -833,11 +842,11 @@ function assessLoop(run: Run): Record<string, unknown> {
     'no marker line in the final message',
   );
   const completions = rows.filter(
-    (r) => at(r, 'trigger') === 'done-declaration',
+    (r) => get(r, 'trigger') === 'done-declaration',
   );
   assert.equal(completions.length, 1, JSON.stringify(completions));
-  assert.equal(at(completions[0], 'gate'), 'passed');
-  assert.equal(at(completions[0], 'plugin_version'), DECLARED_VERSION);
+  assert.equal(get(completions[0], 'gate'), 'passed');
+  assert.equal(get(completions[0], 'plugin_version'), DECLARED_VERSION);
   return {
     outcome: 'loop-pass',
     rows,
@@ -957,8 +966,8 @@ function assessPlanning(run: Run): Record<string, unknown> {
   // (e) the ledger shows this session invoking the planning skill.
   const invocations = rows.filter(
     (r) =>
-      at(r, 'trigger') === 'skill-invocation' &&
-      /\bplanning\b/.test(textAt(r, 'summary')),
+      get(r, 'trigger') === 'skill-invocation' &&
+      /\bplanning\b/.test(asText(get(r, 'summary') || '')),
   );
   assert.ok(
     invocations.length >= 1,
@@ -966,7 +975,7 @@ function assessPlanning(run: Run): Record<string, unknown> {
   );
   if (run.sessionId) {
     assert.ok(
-      invocations.some((r) => at(r, 'session_id') === run.sessionId),
+      invocations.some((r) => get(r, 'session_id') === run.sessionId),
       'invocation belongs to this session',
     );
   }
@@ -989,36 +998,36 @@ function assessPlanning(run: Run): Record<string, unknown> {
     assert.ok(
       oneOf(
         ['conflict', 'gap', 'unanswered', 'solo-decision'],
-        at(row, 'kind'),
+        get(row, 'kind'),
       ),
       'kind: ' + JSON.stringify(row),
     );
     assert.ok(
-      oneOf(['ask', 'default', 'self-answered'], at(row, 'verdict')),
+      oneOf(['ask', 'default', 'self-answered'], get(row, 'verdict')),
       'verdict: ' + JSON.stringify(row),
     );
     assert.equal(
-      typeof at(row, 'load_bearing'),
+      typeof get(row, 'load_bearing'),
       'boolean',
       'load_bearing: ' + JSON.stringify(row),
     );
   }
   // (b) the owner-decision (settings file format / parser / shape) is asked
   // and marked load-bearing; no such row was silently defaulted.
-  const owner = tension.filter((r) => OWNER_SUBJECT(String(at(r, 'subject'))));
+  const owner = tension.filter((r) => OWNER_SUBJECT(String(get(r, 'subject'))));
   assert.ok(
     owner.length >= 1,
     'a row about the settings file format expected: ' + JSON.stringify(tension),
   );
   assert.ok(
     owner.some(
-      (r) => at(r, 'verdict') === 'ask' && at(r, 'load_bearing') === true,
+      (r) => get(r, 'verdict') === 'ask' && get(r, 'load_bearing') === true,
     ),
     'the file-format row must be asked as load-bearing: ' +
       JSON.stringify(owner),
   );
   assert.equal(
-    owner.some((r) => at(r, 'verdict') === 'default'),
+    owner.some((r) => get(r, 'verdict') === 'default'),
     false,
     'an owner-decision was defaulted: ' + JSON.stringify(owner),
   );
@@ -1027,11 +1036,11 @@ function assessPlanning(run: Run): Record<string, unknown> {
   // instead of being asked.
   const tunable = tension.filter(
     (r) =>
-      at(r, 'verdict') === 'default' &&
-      at(r, 'load_bearing') === false &&
-      at(r, 'default') !== null &&
-      String(at(r, 'default')).trim() !== '' &&
-      !OWNER_SUBJECT(String(at(r, 'subject'))),
+      get(r, 'verdict') === 'default' &&
+      get(r, 'load_bearing') === false &&
+      get(r, 'default') !== null &&
+      String(get(r, 'default')).trim() !== '' &&
+      !OWNER_SUBJECT(String(get(r, 'subject'))),
   );
   assert.ok(
     tunable.length >= 1,
@@ -1130,22 +1139,22 @@ function assessSessions(run: Run): Record<string, unknown> {
     readFileSync(join(run.root, '.amber', 'progress.json'), 'utf8'),
   );
   assert.equal(
-    at(progress, 'units', 'U1', 'reentries'),
+    get(progress, 'units', 'U1', 'reentries'),
     0,
-    're-entries must stay 0: ' + JSON.stringify(at(progress, 'units', 'U1')),
+    're-entries must stay 0: ' + JSON.stringify(get(progress, 'units', 'U1')),
   );
-  assert.equal(at(progress, 'blocks') || 0, 0, 'no continuation block');
-  assert.equal(at(progress, 'hold'), null);
+  assert.equal(get(progress, 'blocks') || 0, 0, 'no continuation block');
+  assert.equal(get(progress, 'hold'), null);
   assert.deepEqual(
-    at(progress, 'session_ids'),
+    get(progress, 'session_ids'),
     [],
     'the sibling session must not be registered',
   );
   assert.equal(
     rows.some(
       (r) =>
-        at(r, 'session_id') === run.sessionId &&
-        /^unit-|^done-declaration$/.test(textAt(r, 'trigger')),
+        get(r, 'session_id') === run.sessionId &&
+        /^unit-|^done-declaration$/.test(String(get(r, 'trigger'))),
     ),
     false,
     'no unit/done rows from the sibling session: ' + JSON.stringify(rows),
@@ -1306,8 +1315,8 @@ function assessApprove(run: Run): Record<string, unknown> {
   );
   const invocations = rows.filter(
     (r) =>
-      at(r, 'trigger') === 'skill-invocation' &&
-      /\bset\b/.test(textAt(r, 'summary')),
+      get(r, 'trigger') === 'skill-invocation' &&
+      /\bset\b/.test(asText(get(r, 'summary') || '')),
   );
   assert.ok(
     invocations.length >= 1,
@@ -1316,7 +1325,7 @@ function assessApprove(run: Run): Record<string, unknown> {
       JSON.stringify(rows),
   );
   assert.equal(
-    rows.some((r) => at(r, 'trigger') === 'done-declaration'),
+    rows.some((r) => get(r, 'trigger') === 'done-declaration'),
     false,
     run.name + ': no completion signal',
   );
@@ -1338,7 +1347,7 @@ function assessApprove(run: Run): Record<string, unknown> {
     );
     assert.equal(existsSync(progress), false, 'no loop body without approval');
     assert.equal(
-      rows.some((r) => /^unit-/.test(textAt(r, 'trigger'))),
+      rows.some((r) => /^unit-/.test(String(get(r, 'trigger')))),
       false,
       'no unit rows without approval: ' + JSON.stringify(rows),
     );
@@ -1361,19 +1370,19 @@ function assessApprove(run: Run): Record<string, unknown> {
     'an explicit approval must create the pointer',
   );
   const p = parseJson(readFileSync(pointer, 'utf8'));
-  assert.equal(at(p, 'v'), 1, 'pointer schema v1: ' + JSON.stringify(p));
+  assert.equal(get(p, 'v'), 1, 'pointer schema v1: ' + JSON.stringify(p));
   assert.equal(
-    at(p, 'boundary'),
+    get(p, 'boundary'),
     APPROVE_CONTRACT,
     'pointer boundary: ' + JSON.stringify(p),
   );
   assert.equal(
-    at(p, 'ratified_by'),
+    get(p, 'ratified_by'),
     'qa',
     'ratified_by from the contract approval line: ' + JSON.stringify(p),
   );
   assert.equal(
-    at(p, 'ratified_at'),
+    get(p, 'ratified_at'),
     localToday(),
     'ratified_at = the day of the utterance: ' + JSON.stringify(p),
   );
@@ -1385,11 +1394,11 @@ function assessApprove(run: Run): Record<string, unknown> {
   assert.equal(existsSync(progress), true, 'unit init must seed the loop body');
   const pr = parseJson(readFileSync(progress, 'utf8'));
   assert.ok(
-    at(pr, 'units') && at(pr, 'units', 'U1'),
+    get(pr, 'units') && get(pr, 'units', 'U1'),
     'progress.json carries U1: ' + JSON.stringify(pr),
   );
   assert.ok(
-    rows.some((r) => at(r, 'trigger') === 'unit-init'),
+    rows.some((r) => get(r, 'trigger') === 'unit-init'),
     'unit-init row expected: ' + JSON.stringify(rows),
   );
   return {
@@ -1530,8 +1539,8 @@ function assessAudit(run: Run): Record<string, unknown> {
   const fresh = rows.slice(run.fixtureRows);
   const typed = fresh.filter(
     (r) =>
-      at(r, 'trigger') === 'skill-invocation' &&
-      at(r, 'summary') === 'amber:audit (typed)',
+      get(r, 'trigger') === 'skill-invocation' &&
+      get(r, 'summary') === 'amber:audit (typed)',
   );
   assert.equal(
     typed.length,
@@ -1540,8 +1549,8 @@ function assessAudit(run: Run): Record<string, unknown> {
   );
   const skips = fresh.filter(
     (r) =>
-      at(r, 'trigger') === 'skip' &&
-      /^opening verdict/.test(textAt(r, 'summary')),
+      get(r, 'trigger') === 'skip' &&
+      /^opening verdict/.test(asText(get(r, 'summary') || '')),
   );
   assert.ok(
     skips.length >= 1,
@@ -1549,9 +1558,9 @@ function assessAudit(run: Run): Record<string, unknown> {
   );
   const completions = fresh.filter(
     (r) =>
-      at(r, 'trigger') === 'done-declaration' &&
-      !at(r, 'contract') &&
-      /^audit:/.test(textAt(r, 'summary')),
+      get(r, 'trigger') === 'done-declaration' &&
+      !get(r, 'contract') &&
+      /^audit:/.test(asText(get(r, 'summary') || '')),
   );
   assert.equal(
     completions.length,
@@ -1559,7 +1568,7 @@ function assessAudit(run: Run): Record<string, unknown> {
     'one no-contract completion with an audit: summary expected: ' +
       JSON.stringify(fresh),
   );
-  assert.equal(at(completions[0], 'plugin_version'), DECLARED_VERSION);
+  assert.equal(get(completions[0], 'plugin_version'), DECLARED_VERSION);
   return {
     outcome: 'audit-pass',
     rows: fresh,

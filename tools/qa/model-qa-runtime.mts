@@ -7,7 +7,7 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { at, items, parseJson, textAt } from '../shared/json.mjs';
+import { asText, at, get, list, parseJson } from '../shared/json.mjs';
 
 export type Host = 'claude' | 'codex';
 
@@ -62,8 +62,8 @@ export function toolEvidence(files: readonly string[]): string {
       ? content
       : Array.isArray(content)
         ? content
-            .map((b: unknown) =>
-              typeof b === 'string' ? b : textAt(b, 'text'),
+            .map((b: unknown): unknown =>
+              typeof b === 'string' ? b : get(b, 'text') || '',
             )
             .join('\n')
         : JSON.stringify(content);
@@ -76,29 +76,33 @@ export function toolEvidence(files: readonly string[]): string {
       } catch {
         return [];
       }
-      const p = at(r, 'payload');
+      const p: unknown = get(r, 'payload') || {};
       if (
-        at(r, 'type') === 'response_item' &&
+        get(r, 'type') === 'response_item' &&
         /^(custom_tool_call_output|function_call_output)$/.test(
-          textAt(p, 'type'),
+          String(get(p, 'type')),
         )
       ) {
-        return [textOf(at(p, 'output'))];
+        return [textOf(get(p, 'output'))];
       }
       if (
-        at(r, 'type') === 'event_msg' &&
-        at(p, 'type') === 'item_completed' &&
-        at(p, 'item', 'type') === 'CommandExecution'
+        get(r, 'type') === 'event_msg' &&
+        get(p, 'type') === 'item_completed' &&
+        at(get(p, 'item'), 'type') === 'CommandExecution'
       ) {
         return [
-          textAt(p, 'item', 'stdout') || textAt(p, 'item', 'aggregated_output'),
+          asText(
+            get(p, 'item', 'stdout') ||
+              get(p, 'item', 'aggregated_output') ||
+              '',
+          ),
         ];
       }
-      const content = at(r, 'message', 'content');
+      const content = at(get(r, 'message'), 'content');
       return Array.isArray(content)
         ? content
-            .filter((b: unknown) => at(b, 'type') === 'tool_result')
-            .map((b: unknown) => textOf(at(b, 'content')))
+            .filter((b: unknown) => get(b, 'type') === 'tool_result')
+            .map((b: unknown) => textOf(get(b, 'content')))
         : [];
     })
     .join('\n');
@@ -198,8 +202,8 @@ function assertStatusEvidence(
 ): void {
   const invocations = rows.filter(
     (r) =>
-      at(r, 'trigger') === 'skill-invocation' &&
-      /amber:status/.test(textAt(r, 'summary')),
+      get(r, 'trigger') === 'skill-invocation' &&
+      /amber:status/.test(String(get(r, 'summary'))),
   );
   if (host === 'codex') {
     assert.ok(
@@ -225,16 +229,16 @@ function assertStatusEvidence(
           } catch {
             return false;
           }
-          const content = at(r, 'message', 'content');
+          const content = at(get(r, 'message'), 'content');
           return (
-            at(r, 'type') === 'user' &&
+            get(r, 'type') === 'user' &&
             typeof content === 'string' &&
             content.includes('<command-name>/amber:status</command-name>')
           );
         }),
     );
     assert.ok(typed, 'actual Claude status slash-command event missing');
-    const expected = textAt(
+    const expected: unknown = get(
       parseJson(
         readFileSync(
           join(activePlugin, '.claude-plugin', 'plugin.json'),
@@ -246,11 +250,11 @@ function assertStatusEvidence(
     const output = toolEvidence(files);
     assert.match(output, /\bamber\b/, 'plugin name missing from tool output');
     assert.ok(
-      output.includes(expected),
+      output.includes(String(expected)),
       'installed version missing from tool output',
     );
     assert.ok(
-      run.final.includes(expected),
+      run.final.includes(String(expected)),
       'status reports the wrong installed version',
     );
   }
@@ -312,11 +316,11 @@ export function runtimeQA(ctx: QaContext): Record<string, unknown> {
     const state = join(home, 'state', 'session-' + run.sessionId + '.json');
     assert.ok(existsSync(state), 'S0 did not run with persisted hook trust');
     assert.ok(
-      at(parseJson(readFileSync(state, 'utf8')), 'started_at'),
+      get(parseJson(readFileSync(state, 'utf8')), 'started_at'),
       'S0 timestamp absent',
     );
     assert.ok(
-      !rows.some((r) => at(r, 'trigger') === 'done-declaration'),
+      !rows.some((r) => get(r, 'trigger') === 'done-declaration'),
       'status must not declare completion',
     );
     return {
@@ -349,13 +353,13 @@ export function runtimeQA(ctx: QaContext): Record<string, unknown> {
     assert.ok(
       rows.some(
         (r) =>
-          at(r, 'trigger') === 'skill-invocation' &&
-          /amber:init/.test(textAt(r, 'summary')),
+          get(r, 'trigger') === 'skill-invocation' &&
+          /amber:init/.test(String(get(r, 'summary'))),
       ),
       'init invocation missing',
     );
     assert.ok(
-      !rows.some((r) => at(r, 'trigger') === 'done-declaration'),
+      !rows.some((r) => get(r, 'trigger') === 'done-declaration'),
       'empty-repo init must not declare completion',
     );
     assert.ok(
@@ -420,13 +424,13 @@ export function runtimeQA(ctx: QaContext): Record<string, unknown> {
     assert.ok(
       rows.some(
         (r) =>
-          at(r, 'trigger') === 'skill-invocation' &&
-          /amber:init/.test(textAt(r, 'summary')),
+          get(r, 'trigger') === 'skill-invocation' &&
+          /amber:init/.test(String(get(r, 'summary'))),
       ),
       'init invocation missing',
     );
     assert.ok(
-      !rows.some((r) => at(r, 'trigger') === 'done-declaration'),
+      !rows.some((r) => get(r, 'trigger') === 'done-declaration'),
       'draft init must not complete before ratification',
     );
     assert.ok(
@@ -539,12 +543,12 @@ export function runtimeQA(ctx: QaContext): Record<string, unknown> {
   const firstId = run.sessionId;
   const initial = progress();
   assert.ok(
-    items(at(initial, 'session_ids')).includes(firstId),
+    list(get(initial, 'session_ids')).includes(firstId),
     'driver was not registered',
   );
-  assert.equal(at(initial, 'hold', 'kind'), 'external');
-  assert.equal(at(initial, 'units', 'U1', 'status'), 'running');
-  assert.equal(at(initial, 'units', 'U1', 'reentries'), 0);
+  assert.equal(get(initial, 'hold', 'kind'), 'external');
+  assert.equal(get(initial, 'units', 'U1', 'status'), 'running');
+  assert.equal(get(initial, 'units', 'U1', 'reentries'), 0);
   assert.ok(
     !existsSync(join(root, 'forbidden.txt')),
     'denied file was written',
@@ -562,7 +566,7 @@ export function runtimeQA(ctx: QaContext): Record<string, unknown> {
   );
   assert.match(raw, /blocked.*forbidden\.txt|forbidden\.txt.*outside/i);
   assert.ok(
-    !ledger(home).some((r) => at(r, 'trigger') === 'unit-verified'),
+    !ledger(home).some((r) => get(r, 'trigger') === 'unit-verified'),
     'negative scope probe passed',
   );
 
@@ -573,11 +577,11 @@ export function runtimeQA(ctx: QaContext): Record<string, unknown> {
   );
   assert.equal(run.sessionId, firstId, 'resume changed identity');
   assert.deepEqual(
-    at(progress(), 'hold'),
-    at(initial, 'hold'),
+    get(progress(), 'hold'),
+    get(initial, 'hold'),
     'external hold must survive another stop',
   );
-  assert.equal(at(progress(), 'units', 'U1', 'reentries'), 0);
+  assert.equal(get(progress(), 'units', 'U1', 'reentries'), 0);
 
   run = runHost(
     { ...fixture, name: 'runtime-resume-status' },
@@ -593,8 +597,8 @@ export function runtimeQA(ctx: QaContext): Record<string, unknown> {
     activePlugin,
   );
   assert.deepEqual(
-    at(progress(), 'hold'),
-    at(initial, 'hold'),
+    get(progress(), 'hold'),
+    get(initial, 'hold'),
     'status must preserve the external hold',
   );
 
@@ -609,11 +613,11 @@ export function runtimeQA(ctx: QaContext): Record<string, unknown> {
   );
   assert.equal(run.sessionId, firstId);
   assert.equal(
-    at(progress(), 'hold'),
+    get(progress(), 'hold'),
     null,
     'plain hold must be consumed once',
   );
-  assert.equal(at(progress(), 'units', 'U1', 'reentries'), 0);
+  assert.equal(get(progress(), 'units', 'U1', 'reentries'), 0);
 
   run = runHost(
     { ...fixture, name: 'runtime-resume-complete' },
@@ -632,7 +636,7 @@ export function runtimeQA(ctx: QaContext): Record<string, unknown> {
   assert.equal(
     rows.filter(
       (r) =>
-        at(r, 'trigger') === 'done-declaration' && at(r, 'gate') === 'passed',
+        get(r, 'trigger') === 'done-declaration' && get(r, 'gate') === 'passed',
     ).length,
     1,
   );
