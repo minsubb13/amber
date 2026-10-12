@@ -28,6 +28,8 @@ const PRELOADS = ['determinism.cjs', 'capture.cjs'].map((name) =>
 export interface SideOptions {
   /** Run the legacy suites of pluginDir/tests instead of test/. */
   readonly legacy?: boolean;
+  /** The compiled suites of test/ to run; every suite when absent. */
+  readonly files?: readonly string[];
 }
 
 /**
@@ -53,6 +55,7 @@ export function runSide(
   const run = options.legacy === true ? runLegacySuites : runSuites;
   const suites = run(pluginDir, {
     tap: true,
+    ...(options.files === undefined ? {} : { files: options.files }),
     env: {
       NODE_OPTIONS: nodeOptions,
       TMPDIR: tmpRoot,
