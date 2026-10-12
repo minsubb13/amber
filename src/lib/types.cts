@@ -259,7 +259,12 @@ export type Expectation =
   | `unit-${Exclude<UnitCall, 'claim'>}`
   | 'done-declaration';
 
-/** What a transcript event is, from either host's adapter. */
+/**
+ * What a transcript event is, from either host's adapter. Every kind is a
+ * closed set except the skill name after `skill amber:`, which stays open:
+ * the Claude adapter records any amber: skill a transcript shows, as the
+ * original did, so a skill added later is still counted.
+ */
 export type AuditEventKind =
   | `skill amber:${string}`
   | `typed amber:${TypedSkill}`

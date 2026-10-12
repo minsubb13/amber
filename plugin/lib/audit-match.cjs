@@ -23,19 +23,20 @@ function gapOf(row, ev) {
         (Date.parse(toText(ev.ts || '')) || 0));
 }
 function initialStatus(ev) {
-    if (ev.result === 'unobserved') {
-        return 'unobservable (command outcome absent or ambiguous)';
+    const result = ev.result;
+    switch (result) {
+        case 'unobserved':
+            return 'unobservable (command outcome absent or ambiguous)';
+        case 'mention':
+            return 'not an invocation (command text only mentions record.cjs)';
+        case 'refused':
+            // A refused command wrote no row, so it must not take the row of the
+            // accepted call that followed it.
+            return 'refused by the command (no row by design)';
+        case 'accepted':
+        case undefined:
+            return ev.expect ? 'MISSING' : 'n/a (no row by design)';
     }
-    if (ev.result === 'mention') {
-        return 'not an invocation (command text only mentions record.cjs)';
-    }
-    // A refused command wrote no row, so it must not take the row of the
-    // accepted call that followed it.
-    if (ev.result === 'refused')
-        return 'refused by the command (no row by design)';
-    if (!ev.expect)
-        return 'n/a (no row by design)';
-    return 'MISSING';
 }
 /**
  * Closest pairs first (same trigger, inside the window), so an earlier call

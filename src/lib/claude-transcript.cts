@@ -3,10 +3,12 @@
 // kind and the amber skill or command name.
 //
 // The transcript format belongs to Claude Code, so every line is read as
-// unknown through guards.readField and guards.toText. The original converted
-// every field it read with String(), as toText does, so a malformed line -
-// a null line or block, a missing or non-string field - fails or passes
-// exactly as it did before the port.
+// unknown through guards.readField and guards.toText. The adapter's result is
+// the original's for any line: it converts the fields it reads with String(),
+// as toText does, and fails on a null line or block with the same TypeError.
+// The timestamp is kept as written; where the session report prints it
+// (lib/audit-match), a non-string timestamp is read as text - the accepted
+// difference listed in the coverage document.
 
 import guards = require('./guards.cjs');
 import type {

@@ -3,7 +3,7 @@
 
 import audit = require('./audit-report.cjs');
 import guards = require('./guards.cjs');
-import type { AuditEvent, AuditTranscript } from './types.cjs';
+import type { AuditEvent, AuditTranscript, CallResult } from './types.cjs';
 
 /** What the comparison found for an event. */
 type MatchStatus =
@@ -55,18 +55,20 @@ function gapOf(row: unknown, ev: AuditEvent): number {
 }
 
 function initialStatus(ev: AuditEvent): MatchStatus {
-  if (ev.result === 'unobserved') {
-    return 'unobservable (command outcome absent or ambiguous)';
+  const result: CallResult | undefined = ev.result;
+  switch (result) {
+    case 'unobserved':
+      return 'unobservable (command outcome absent or ambiguous)';
+    case 'mention':
+      return 'not an invocation (command text only mentions record.cjs)';
+    case 'refused':
+      // A refused command wrote no row, so it must not take the row of the
+      // accepted call that followed it.
+      return 'refused by the command (no row by design)';
+    case 'accepted':
+    case undefined:
+      return ev.expect ? 'MISSING' : 'n/a (no row by design)';
   }
-  if (ev.result === 'mention') {
-    return 'not an invocation (command text only mentions record.cjs)';
-  }
-  // A refused command wrote no row, so it must not take the row of the
-  // accepted call that followed it.
-  if (ev.result === 'refused')
-    return 'refused by the command (no row by design)';
-  if (!ev.expect) return 'n/a (no row by design)';
-  return 'MISSING';
 }
 
 /**
