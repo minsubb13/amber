@@ -39,7 +39,6 @@ import {
   parseJson,
   show,
   text,
-  textAt,
 } from '../shared/json.mjs';
 import { pluginDir, REPO } from '../shared/paths.mjs';
 
@@ -98,7 +97,7 @@ const DECLARED_VERSION = get(
   'version',
 );
 
-function installedClaudePlugin(): string {
+function installedClaudePlugin(): string | null {
   const result = spawnSync('claude', ['plugin', 'list', '--json'], {
     encoding: 'utf8',
   });
@@ -155,7 +154,11 @@ function installedClaudePlugin(): string {
       ' --scope ' +
       show(get(row, 'scope')),
   );
-  return textAt(row, 'installPath');
+  // The original returned row.installPath as it stood: an absent or empty
+  // value fell through to the Codex install below, any other non-string
+  // failed where it was first used as a path; text() fails here instead.
+  const installPath = get(row, 'installPath');
+  return installPath ? text(installPath) : null;
 }
 
 const claudePlugin = host === 'claude' ? installedClaudePlugin() : null;
