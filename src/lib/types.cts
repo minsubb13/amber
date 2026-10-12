@@ -239,6 +239,12 @@ export type UnitCall =
 /** The cycle-event kinds of amber:mark. */
 export type MarkKind = 'skip' | 'finding' | 'hold';
 
+/**
+ * The skills `record.cjs invoke` records for a host without the S3 hook
+ * (Codex); mark goes through `record.cjs mark`.
+ */
+export type InvokedSkill = 'planning' | 'set' | 'init' | 'status' | 'audit';
+
 /** The marker lines of the older declaration form. */
 export type Marker =
   'AMBER_SKIP' | 'AMBER_DONE' | 'AMBER_GOAL' | 'AMBER_REVIEW';

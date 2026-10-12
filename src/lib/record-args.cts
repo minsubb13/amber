@@ -1,5 +1,7 @@
-// The recorder's command line without I/O: the usage text, the unit
-// commands it accepts, and reading an option's words.
+// The recorder's command line without I/O: the usage text, the skills, mark
+// kinds and unit commands it accepts, and reading an option's words.
+
+import type { InvokedSkill, MarkKind } from './types.cjs';
 
 const USAGE = [
   'Usage:',
@@ -47,6 +49,34 @@ const USAGE = [
   'declarations are recorded in progress.json and the ledger.',
 ].join('\n');
 
+/** The skill a `record.cjs invoke <name>` records, or null. */
+function invokedSkillOf(name: string | undefined): InvokedSkill | null {
+  if (name === undefined) return null;
+  switch (name) {
+    case 'planning':
+    case 'set':
+    case 'init':
+    case 'status':
+    case 'audit':
+      return name;
+    default:
+      return null;
+  }
+}
+
+/** The cycle-event kind of a `record.cjs mark <kind>`, or null. */
+function markKindOf(name: string | undefined): MarkKind | null {
+  if (name === undefined) return null;
+  switch (name) {
+    case 'skip':
+    case 'finding':
+    case 'hold':
+      return name;
+    default:
+      return null;
+  }
+}
+
 /** A `record.cjs unit <command>` the recorder accepts. */
 type UnitCommand = 'init' | 'claim' | 'start' | 'verified' | 'failed' | 'hold';
 
@@ -77,4 +107,4 @@ function optionText(rest: readonly string[], flag: string): string {
   return value.join(' ').trim();
 }
 
-export = { USAGE, unitCommandOf, optionText };
+export = { USAGE, invokedSkillOf, markKindOf, unitCommandOf, optionText };

@@ -15,10 +15,9 @@ import ownership = require('../lib/ownership.cjs');
 import store = require('../lib/progress-store.cjs');
 import scope = require('../hooks/scope-check.cjs');
 import skillRecorder = require('../lib/skill-recorder.cjs');
+import type { InvokedSkill } from '../lib/types.cjs';
 
 const { USAGE } = args;
-const INVOKED_SKILLS = ['planning', 'set', 'init', 'status', 'audit'];
-const MARK_KINDS = ['skip', 'finding', 'hold'];
 
 function recordUnitEvent(
   sessionId: string,
@@ -310,23 +309,19 @@ function recordCall(
   name: string | undefined,
   rest: readonly string[],
 ): void {
-  let skill: string;
+  const invoked = command === 'invoke' ? args.invokedSkillOf(name) : null;
+  const mark = command === 'mark' ? args.markKindOf(name) : null;
+  let skill: `amber:${InvokedSkill}` | 'amber:mark';
   let skillArgs: string;
-  if (
-    command === 'invoke' &&
-    name !== undefined &&
-    INVOKED_SKILLS.includes(name)
-  ) {
-    skill = 'amber:' + name;
+  let recorded: string;
+  if (invoked !== null) {
+    skill = `amber:${invoked}`;
     skillArgs = rest.join(' ').trim();
-  } else if (
-    command === 'mark' &&
-    name !== undefined &&
-    MARK_KINDS.includes(name) &&
-    rest.join(' ').trim()
-  ) {
+    recorded = 'invoke ' + invoked;
+  } else if (mark !== null && rest.join(' ').trim()) {
     skill = 'amber:mark';
-    skillArgs = name + ' - ' + rest.join(' ').trim();
+    skillArgs = mark + ' - ' + rest.join(' ').trim();
+    recorded = 'mark ' + mark;
   } else {
     throw new Error('invalid recording arguments\n' + USAGE);
   }
@@ -346,7 +341,7 @@ function recordCall(
       'S3',
     ),
   );
-  process.stdout.write('amber: recorded ' + command + ' ' + name + '\n');
+  process.stdout.write('amber: recorded ' + recorded + '\n');
 }
 
 function main(argv: readonly string[]): void {
