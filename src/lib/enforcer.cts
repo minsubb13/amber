@@ -7,7 +7,8 @@
 
 import path = require('node:path');
 
-import applyPatch = require('./apply-patch.cjs');
+// The apply_patch parser keeps its stage 2 module at hooks/patch-paths.
+import patchPathsModule = require('../hooks/patch-paths.cjs');
 import clock = require('./clock.cjs');
 import contracts = require('./contract.cjs');
 import glob = require('./glob.cjs');
@@ -164,7 +165,7 @@ function runE1(input: HookInput): HookOutput {
   let targets: string[];
   if (input.tool_name === 'apply_patch') {
     try {
-      targets = applyPatch.patchPaths(input.tool_input['command']);
+      targets = patchPathsModule.patchPaths(input.tool_input['command']);
     } catch (err) {
       return deny(
         'cannot inspect apply_patch under contract ' +

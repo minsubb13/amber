@@ -7,7 +7,8 @@
 // claim and the driving session are registered here, the one party that sees
 // the host-assigned ids.
 const path = require("node:path");
-const applyPatch = require("./apply-patch.cjs");
+// The apply_patch parser keeps its stage 2 module at hooks/patch-paths.
+const patchPathsModule = require("../hooks/patch-paths.cjs");
 const clock = require("./clock.cjs");
 const contracts = require("./contract.cjs");
 const glob = require("./glob.cjs");
@@ -130,7 +131,7 @@ function runE1(input) {
     let targets;
     if (input.tool_name === 'apply_patch') {
         try {
-            targets = applyPatch.patchPaths(input.tool_input['command']);
+            targets = patchPathsModule.patchPaths(input.tool_input['command']);
         }
         catch (err) {
             return deny('cannot inspect apply_patch under contract ' +
