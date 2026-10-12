@@ -65,7 +65,7 @@ Per claim: time, number of sources, citation depth. On reaching it, dispose that
 - Incomplete, blocked, waiting, and status-only turns run no completion signal. The signal declares the contracted pass itself complete, never that an assessment, report, or attempt finished [self-report]
 - The re-check result goes into `record.cjs done --review "<evidence summary>" --goal "<verdict>" --summary "<summary>"` (the last tool call; no marker line in the message). S2 checks only the signal, the pointer, the current contract link, and leftover worktrees; semantic completion is the model's judgment. On a pass the hook removes the pointer and progress.json [hook: S2]
 - Numbers and claims carry provenance (verified / quoted / unverified)
-- Plan units (investigation rounds, experiments) transition only through `record.cjs unit` (`.amber/progress.json`); a stop while units are open is announced first with `amber:mark hold`. Parallel units run as subagents in worktrees; the main agent re-verifies each with the same oracle and merges last. A leftover worktree means not complete [hook: E1, S2]
+- Plan units (investigation rounds, experiments) transition only through `record.cjs unit` (`.amber/progress.json`); a stop while units are open is announced first with `amber:mark hold`. Parallel units run as subagents in worktrees; the main agent re-runs the same oracle itself whichever worker did the unit's work (a subagent in its worktree, another session, a person), records what it showed in `unit verified --evidence` (an empty `--evidence` is refused), and merges last. A leftover worktree means not complete [hook: E1, S2]
 
 ## Assumptions
 

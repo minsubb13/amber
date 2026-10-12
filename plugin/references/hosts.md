@@ -85,8 +85,8 @@ write-scope and bash-deny rows, but never pulled into the loop.
 ```sh
 node "$amber_plugin_root/scripts/record.cjs" unit init <plan-path>          # once, after approval
 node "$amber_plugin_root/scripts/record.cjs" unit start U1
-node "$amber_plugin_root/scripts/record.cjs" unit verified U1 --evidence '<what the oracle showed>' [--out-of-scope <path>=<reason> ...]
-node "$amber_plugin_root/scripts/record.cjs" unit failed U1 --evidence '<what failed>'
+node "$amber_plugin_root/scripts/record.cjs" unit verified U1 --evidence '<what the oracle showed>' [--out-of-scope <path>=<reason> ...]   # --evidence is required
+node "$amber_plugin_root/scripts/record.cjs" unit failed U1 --evidence '<what failed>'   # --evidence is required
 node "$amber_plugin_root/scripts/record.cjs" unit hold U1 --reason '<why you must stop>'
 node "$amber_plugin_root/scripts/record.cjs" unit hold U1 --reason "external: <job>"   # waiting on an external job
 node "$amber_plugin_root/scripts/record.cjs" unit claim U1                  # a subagent's first action
@@ -131,8 +131,11 @@ the child's shell `CODEX_THREAD_ID` is the child id. Claims use the authoritativ
 hook `agent_id`, never a model-invented id. Codex file hooks can retain the
 parent cwd, so E1 maps absolute targets in git-registered linked worktrees
 before applying the contract and unit scopes. Do not work around a denied
-patch with a shell write. The main agent re-runs each oracle in its worktree,
-records verified there, and merges as the run protocol's "Loop body"
+patch with a shell write. The main agent re-runs each oracle itself in the
+tree where the work landed, whichever worker did the unit's work (a subagent
+in its worktree, another session, a person), records `verified` there with
+what the oracle showed (the record command refuses an empty `--evidence` and
+any flag it does not read), and merges as the run protocol's "Loop body"
 describes.
 
 A worktree placed outside the zone directory is not a unit worktree: the

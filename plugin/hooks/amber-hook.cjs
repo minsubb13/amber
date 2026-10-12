@@ -581,7 +581,8 @@ function continuationDirective(contract, p, id) {
     progress.summary(p) + '\n' +
     'Continue the contract work now: run `node ' + RECORD_CLI + ' unit start ' + id +
     '` if it is not running, do the unit, verify it with its oracle, then `unit verified ' + id +
-    ' --evidence "<what the oracle showed>"` (or `unit failed ' + id + ' --evidence "..."`). ' +
+    ' --evidence "<what the oracle showed>"` (or `unit failed ' + id + ' --evidence "..."`); ' +
+    '--evidence is required and a blank one is refused. ' +
     'Units listed as ready whose scopes do not overlap may run in parallel as subagents in worktrees; ' +
     'each subagent first runs `unit claim U<n>`. ' +
     'If you must stop instead - waiting on the operator, budget reached, an out-of-contract decision - ' +
