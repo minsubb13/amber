@@ -75,9 +75,14 @@ function newProgress(units, contract, plan, preexisting, now) {
     }
     return p;
 }
+// Membership is tested on a Set, which compares values as they are: a status
+// in a hand-edited file that is not one of these strings (an array that
+// prints like one, an object, a number) is not open, as before.
+const OPEN_STATUSES = new Set(Object.entries(OPEN)
+    .filter(([, open]) => open)
+    .map(([status]) => status));
 function isOpen(unit) {
-    // A status outside the union (a hand-edited file) is not open, as before.
-    return Object.hasOwn(OPEN, unit.status) && OPEN[unit.status];
+    return OPEN_STATUSES.has(unit.status);
 }
 function openUnits(p) {
     return Object.keys(p.units).filter((id) => {

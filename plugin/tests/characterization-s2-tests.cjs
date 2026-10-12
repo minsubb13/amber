@@ -475,3 +475,16 @@ test('a transition on a unit that is not an object is refused with a TypeError',
     assert.match(progress.summary({ units: { U1: unit }, hold: null }), /^amber progress \(progress\.json\): 0 of 1 unit\(s\) open/);
   }
 });
+
+test('a unit status that is not a string is never open, even when it prints like one', () => {
+  for (const status of [['pending'], ['running'], { toString: null }, 0, null]) {
+    const p = fresh();
+    p.units.U1.status = status;
+    assert.deepEqual(progress.openUnits(p), ['U2']);
+    assert.equal(progress.focusUnit(p), 'U2');
+  }
+  const p = fresh();
+  p.units.U1.status = ['pending'];
+  assert.throws(() => progress.applyEvent(p, 'claim', 'U1', { agent_id: 'a' }),
+    { message: 'unit U1 is pending, not open' });
+});
