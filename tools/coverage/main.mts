@@ -1,7 +1,8 @@
-// `npm run coverage`: line coverage of the plugin's product files under every
-// test suite, child processes included (NODE_V8_COVERAGE is inherited by each
-// node process the suites spawn), reported through c8.
+// `npm run coverage`: line and branch coverage of the plugin's product files
+// under every test suite, child processes included (NODE_V8_COVERAGE is
+// inherited by each node process the suites spawn), reported through c8.
 //   --plugin <dir>  measure another plugin copy (default: plugin/)
+//   --branches      also print one BRANCH line per branch no suite took
 // Prints one COVERAGE line per product file with its uncovered line ranges,
 // then the total as the last line.
 
@@ -15,16 +16,67 @@ import { isRecord } from '../shared/guards.mjs';
 import { runSuites } from '../shared/suites.mjs';
 
 const REPO = resolve(import.meta.dirname, '..', '..', '..');
-const PRODUCT_GLOBS = ['hooks/*.cjs', 'scripts/*.cjs'];
+const PRODUCT_GLOBS = ['hooks/*.cjs', 'scripts/*.cjs', 'lib/*.cjs'];
 
 const { values } = parseArgs({
-  options: { plugin: { type: 'string', default: join(REPO, 'plugin') } },
+  options: {
+    plugin: { type: 'string', default: join(REPO, 'plugin') },
+    branches: { type: 'boolean', default: false },
+  },
 });
+
+interface UncoveredBranch {
+  readonly line: number;
+  readonly column: number;
+  readonly type: string;
+  readonly index: number;
+}
 
 interface FileCoverage {
   readonly file: string;
   readonly total: number;
   readonly uncovered: readonly number[];
+  readonly branches: number;
+  readonly uncoveredBranches: readonly UncoveredBranch[];
+}
+
+function position(value: unknown): { line: number; column: number } | null {
+  if (!isRecord(value)) return null;
+  const { line, column } = value;
+  return typeof line === 'number' && typeof column === 'number'
+    ? { line, column }
+    : null;
+}
+
+/** Branch outcomes and the ones no suite took, from an istanbul entry. */
+function branchCoverage(entry: Record<string, unknown>): {
+  total: number;
+  uncovered: UncoveredBranch[];
+} {
+  const { branchMap, b } = entry;
+  const uncovered: UncoveredBranch[] = [];
+  let total = 0;
+  if (!isRecord(branchMap) || !isRecord(b)) return { total, uncovered };
+  for (const [id, branch] of Object.entries(branchMap)) {
+    const counts = b[id];
+    if (!isRecord(branch) || !Array.isArray(counts)) continue;
+    const { type, locations } = branch;
+    if (!Array.isArray(locations)) continue;
+    locations.forEach((location, index) => {
+      total += 1;
+      const count = counts[index];
+      if (typeof count === 'number' && count > 0) return;
+      const start = isRecord(location) ? position(location['start']) : null;
+      if (start === null) return;
+      uncovered.push({
+        ...start,
+        type: typeof type === 'string' ? type : 'unknown',
+        index,
+      });
+    });
+  }
+  uncovered.sort((x, y) => x.line - y.line || x.column - y.column);
+  return { total, uncovered };
 }
 
 /** Uncovered lines from an istanbul coverage-final.json entry. */
@@ -46,7 +98,14 @@ function fileCoverage(file: string, entry: unknown): FileCoverage | null {
     .filter(([, hit]) => !hit)
     .map(([line]) => line)
     .sort((a, b) => a - b);
-  return { file, total: lines.size, uncovered };
+  const branches = branchCoverage(entry);
+  return {
+    file,
+    total: lines.size,
+    uncovered,
+    branches: branches.total,
+    uncoveredBranches: branches.uncovered,
+  };
 }
 
 function ranges(lines: readonly number[]): string {
@@ -119,8 +178,18 @@ function main(): number {
       covered += coverage.total - coverage.uncovered.length;
       console.log(
         `COVERAGE ${coverage.file} lines=${String(coverage.total - coverage.uncovered.length)}/` +
-          `${String(coverage.total)} uncovered=${ranges(coverage.uncovered) || '-'}`,
+          `${String(coverage.total)} branches=` +
+          `${String(coverage.branches - coverage.uncoveredBranches.length)}/` +
+          `${String(coverage.branches)} uncovered=${ranges(coverage.uncovered) || '-'}`,
       );
+      if (values.branches) {
+        for (const branch of coverage.uncoveredBranches) {
+          console.log(
+            `BRANCH ${coverage.file} ${String(branch.line)}:${String(branch.column)} ` +
+              `${branch.type}#${String(branch.index)}`,
+          );
+        }
+      }
     }
     console.log(`COVERAGE total lines=${String(covered)}/${String(total)}`);
     return 0;
