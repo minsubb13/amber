@@ -90,7 +90,7 @@ function continuation(input) {
 function gateAttempts(gateFile) {
     try {
         const attempts = guards.readField(JSON.parse(fs.readFileSync(gateFile, 'utf8')), 'attempts');
-        return typeof attempts === 'number' ? attempts || 0 : 0;
+        return typeof attempts === 'number' ? attempts : 0;
     }
     catch {
         return 0;

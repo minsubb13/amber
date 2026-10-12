@@ -108,7 +108,7 @@ function gateAttempts(gateFile: string): number {
       JSON.parse(fs.readFileSync(gateFile, 'utf8')),
       'attempts',
     );
-    return typeof attempts === 'number' ? attempts || 0 : 0;
+    return typeof attempts === 'number' ? attempts : 0;
   } catch {
     return 0;
   }

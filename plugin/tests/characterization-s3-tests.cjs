@@ -416,3 +416,44 @@ test('recordUnitEvent without fields writes a bare unit row', () => {
   assert.deepEqual(Object.keys(row), ['v', 'ts', 'session_id', 'cwd', 'project', 'host', 'model',
     'plugin_version', 'trigger', 'summary']);
 });
+
+// ---- inputs that are not hook objects ----
+
+function crashLines(home) {
+  const file = path.join(home, 'state', 'sensor-failures.log');
+  return fs.existsSync(file)
+    ? fs.readFileSync(file, 'utf8').split('\n').filter(Boolean).map((l) => l.replace(/^\S+ /, ''))
+    : [];
+}
+
+test('a JSON null input fails each handler at the first field it reads', () => {
+  const f = fixture();
+  for (const event of ['S0', 'S1', 'S2', 'S3', 'E1']) assert.equal(hook(event, 'null', { home: f.home }), null);
+  assert.deepEqual(crashLines(f.home), [
+    "hook-crash event=S0 Cannot read properties of null (reading 'cwd')",
+    "hook-crash event=S1 Cannot read properties of null (reading 'session_id')",
+    "hook-crash event=S2 Cannot read properties of null (reading 'session_id')",
+    "hook-crash event=S3 Cannot read properties of null (reading 'tool_input')",
+    "hook-crash event=E1 Cannot read properties of null (reading 'cwd')",
+  ]);
+});
+
+test('a non-object input reads as an empty one; an unknown event does nothing', () => {
+  const base = fs.mkdtempSync(path.join(BASE, 'case-'));
+  const dir = path.join(base, 'plainzone');
+  const home = path.join(base, 'amber-home');
+  fs.mkdirSync(dir);
+  for (const raw of ['5', '"x"', '[1]']) {
+    assert.match(context(hook('S0', raw, { home, cwd: dir })), /^amber: no active contract in this zone\./);
+  }
+  assert.equal(hook('XX', '{}', { home, cwd: dir }), null);
+  assert.equal(hook('XX', 'not json', { home, cwd: dir }), null);
+  assert.deepEqual(crashLines(home).map((l) => l.split(' ').slice(0, 2).join(' ')), ['hook-crash event=XX']);
+});
+
+test('an empty standing-rules section briefs as none listed', () => {
+  const f = fixture();
+  fs.writeFileSync(path.join(f.root, 'boundary.md'), BOUNDARY + '\n## Standing rules\n\n## Budget\n- none\n');
+  const brief = context(hook('S0', { session_id: 's', cwd: f.root }, { home: f.home }));
+  assert.ok(brief.includes('Standing rules:\n(none listed)\n'));
+});
