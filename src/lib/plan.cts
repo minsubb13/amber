@@ -1,0 +1,65 @@
+// The plan's unit rows, one per line with a column-0 checkbox:
+//   - [ ] U1 <title> [unit: U1 scope=<glob>[,<glob>] [after=U2,U3] [oracle=<command to end of tag>]]
+
+import type { PlanUnit } from './types.cjs';
+
+const UNIT_ROW = /^-\s*\[[ xX]\]\s*(U\d+)\b(.*?)\[unit:\s*(U\d+)\s+(.*)\]\s*$/;
+
+interface UnitFields {
+  scope: string[];
+  after: string[];
+  oracle: string;
+}
+
+/** The fields of a unit tag; `oracle=` runs to the end of the tag. */
+function parseUnitFields(rest: string): UnitFields {
+  const fields: UnitFields = { scope: [], after: [], oracle: '' };
+  const oracleAt = rest.indexOf('oracle=');
+  const head = oracleAt === -1 ? rest : rest.slice(0, oracleAt);
+  if (oracleAt !== -1) {
+    fields.oracle = rest.slice(oracleAt + 'oracle='.length).trim();
+  }
+  for (const token of head.trim().split(/\s+/).filter(Boolean)) {
+    const eq = token.indexOf('=');
+    if (eq === -1) continue;
+    const key = token.slice(0, eq);
+    const value = token
+      .slice(eq + 1)
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
+    if (key === 'scope') fields.scope = value;
+    else if (key === 'after') fields.after = value;
+  }
+  return fields;
+}
+
+/**
+ * The unit rows of a plan, in order. Throws on a row whose two ids differ, a
+ * unit without a scope, and a dependency on an unknown unit.
+ */
+function parsePlanUnits(text: string): PlanUnit[] {
+  const units: PlanUnit[] = [];
+  for (const raw of text.split('\n')) {
+    const m = UNIT_ROW.exec(raw.trim());
+    if (!m) continue;
+    const [, id = '', title = '', tagId = '', rest = ''] = m;
+    if (id !== tagId) throw new Error('unit row id mismatch: ' + raw.trim());
+    const fields = parseUnitFields(rest);
+    if (fields.scope.length === 0) {
+      throw new Error('unit ' + id + ' has no scope=');
+    }
+    units.push({ id, title: title.trim(), ...fields });
+  }
+  const ids = new Set(units.map((u) => u.id));
+  for (const u of units) {
+    for (const dep of u.after) {
+      if (!ids.has(dep)) {
+        throw new Error('unit ' + u.id + ' depends on unknown ' + dep);
+      }
+    }
+  }
+  return units;
+}
+
+export = { parsePlanUnits };

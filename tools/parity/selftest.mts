@@ -28,9 +28,10 @@ export const MUTATIONS: readonly Mutation[] = [
   {
     // (d) one value written to progress.json
     name: 'progress.json field',
-    file: 'hooks/progress.cjs',
-    find: '    blocks: 0,\n',
-    replace: '    blocks: 1,\n',
+    // (the initial state moved to lib/progress-model in stage 2)
+    file: 'lib/progress-model.cjs',
+    find: '        blocks: 0,\n',
+    replace: '        blocks: 1,\n',
   },
 ];
 
