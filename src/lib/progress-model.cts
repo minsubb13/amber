@@ -299,8 +299,13 @@ function applyEvent(
 }
 
 function unitByAgent(p: Progress, agentId: string): string | null {
+  // Each unit is read as the original read `p.units[id].agent_id`: a null
+  // unit in a hand-edited file throws the engine's TypeError (the hook then
+  // fails open), where `?.` would have skipped it.
   return (
-    Object.keys(p.units).find((id) => p.units[id]?.agent_id === agentId) || null
+    Object.keys(p.units).find(
+      (id) => guards.readField(p.units[id], 'agent_id') === agentId,
+    ) || null
   );
 }
 
