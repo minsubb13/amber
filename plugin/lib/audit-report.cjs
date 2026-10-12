@@ -2,8 +2,11 @@
 "use strict";
 // The audit's counts and report lines without I/O, computed from ledger rows
 // the caller loaded. Rows are read as found, through guards.readField and
-// guards.toText: a missing field takes the original's default, and a row the
-// original could not print stops the report with the same TypeError.
+// guards.toText: a broken or null row and a missing field take the
+// original's outcome. A field of a non-string type, which no writer produces,
+// is read as its text where the original sometimes failed calling a string
+// method on it or compared mixed types (coverage document, known
+// differences).
 const guards = require("./guards.cjs");
 const { readField: field, toText } = guards;
 function excludedText(ctx) {
@@ -24,16 +27,37 @@ function fieldOf(rows, ctx) {
     const excluded = new Set(ctx.exclude);
     return rows.filter((r) => !isMalformed(r) && !excluded.has(field(r, 'project')));
 }
-/** "key=n" pairs in key order, keys as property names. */
+/**
+ * `(value || 0) + 1` with JavaScript's own outcome: a counter that starts as
+ * an inherited member of Object.prototype (a key such as `constructor` or
+ * `toString`) turns into that member's text with digits appended.
+ */
+function increment(value) {
+    if (!value)
+        return 1;
+    if (typeof value === 'number')
+        return value + 1;
+    if (typeof value === 'string')
+        return value + '1';
+    if (typeof value === 'function') {
+        return Function.prototype.toString.call(value) + '1';
+    }
+    return toText(value) + '1';
+}
+/**
+ * "key=n" pairs in key order. The counts live in a plain object, as in the
+ * original: keys are property names, a key named after an Object.prototype
+ * member starts from that member, and `__proto__` is never an own key.
+ */
 function count(list, key) {
-    const c = new Map();
+    const c = {};
     for (const x of list) {
         const k = toText(key(x));
-        c.set(k, (c.get(k) ?? 0) + 1);
+        c[k] = increment(c[k]);
     }
-    return [...c.keys()]
+    return Object.keys(c)
         .sort()
-        .map((k) => k + '=' + String(c.get(k)))
+        .map((k) => k + '=' + toText(c[k]))
         .join(' ');
 }
 function summaryOf(r) {

@@ -5,6 +5,16 @@ import audit = require('./audit-report.cjs');
 import guards = require('./guards.cjs');
 import type { AuditEvent, AuditTranscript } from './types.cjs';
 
+/** What the comparison found for an event. */
+type MatchStatus =
+  | 'MISSING'
+  | 'matched'
+  | 'matched-unattributed (row says session "shell")'
+  | 'unobservable (command outcome absent or ambiguous)'
+  | 'not an invocation (command text only mentions record.cjs)'
+  | 'refused by the command (no row by design)'
+  | 'n/a (no row by design)';
+
 const { readField: field, toText } = guards;
 
 const MATCH_WINDOW_MS = 15 * 60 * 1000;
@@ -13,7 +23,7 @@ const TYPED_ROW = / \(typed\)$/;
 /** A transcript event and what the comparison found for it. */
 interface EventResult {
   readonly ev: AuditEvent;
-  status: string;
+  status: MatchStatus;
   row?: unknown;
   gapS?: number;
   nearest?: unknown;
@@ -28,7 +38,9 @@ interface SessionComparison {
 
 /**
  * `value.slice(start, end)` for a field that should hold text: a missing
- * value fails with the engine's TypeError, as the original's report did.
+ * value fails with the engine's TypeError, as the original's report did. A
+ * non-string value, which no writer produces, is read as its text where the
+ * original failed calling slice on it (coverage document, known differences).
  */
 function sliceText(value: unknown, start: number, end: number): string {
   if (value === null || value === undefined) guards.readField(value, 'slice');
@@ -42,7 +54,7 @@ function gapOf(row: unknown, ev: AuditEvent): number {
   );
 }
 
-function initialStatus(ev: AuditEvent): string {
+function initialStatus(ev: AuditEvent): MatchStatus {
   if (ev.result === 'unobserved') {
     return 'unobservable (command outcome absent or ambiguous)';
   }
@@ -65,7 +77,7 @@ function assign(
   candidates: readonly EventResult[],
   list: readonly unknown[],
   used: Set<number>,
-  status: string,
+  status: MatchStatus,
 ): void {
   const pairs: { r: EventResult; i: number; gap: number }[] = [];
   for (const r of candidates) {

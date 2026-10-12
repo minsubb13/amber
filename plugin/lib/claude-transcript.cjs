@@ -5,8 +5,10 @@
 // kind and the amber skill or command name.
 //
 // The transcript format belongs to Claude Code, so every line is read as
-// unknown through guards.readField and guards.toText: a malformed line fails
-// or passes exactly as it did before the port.
+// unknown through guards.readField and guards.toText. The original converted
+// every field it read with String(), as toText does, so a malformed line -
+// a null line or block, a missing or non-string field - fails or passes
+// exactly as it did before the port.
 const guards = require("./guards.cjs");
 const { readField, toText } = guards;
 const REENTRY_LINE = /still open\. Re-entry \d+\/\d+|Re-entry \d+\/10 on U\d+/;
@@ -24,6 +26,18 @@ const MARKER = /^\s*(AMBER_SKIP|AMBER_DONE|AMBER_GOAL|AMBER_REVIEW)\b/gm;
 function fieldIf(value, key) {
     return value ? readField(value, key) : value;
 }
+function markKindOf(args) {
+    switch (MARK_KIND.exec(args.trim())?.[1] ?? '') {
+        case 'skip':
+            return 'skip';
+        case 'finding':
+            return 'finding';
+        case 'hold':
+            return 'hold';
+        default:
+            return 'malformed';
+    }
+}
 function markExpect(kind) {
     switch (kind) {
         case 'skip':
@@ -32,8 +46,32 @@ function markExpect(kind) {
             return 'finding';
         case 'hold':
             return 'unit-hold';
-        default:
+        case 'malformed':
             return 'skill-invocation';
+    }
+}
+function unitCallOf(name) {
+    switch (name) {
+        case 'init':
+        case 'start':
+        case 'verified':
+        case 'failed':
+        case 'hold':
+        case 'claim':
+            return name;
+        default:
+            return null;
+    }
+}
+function markerOf(name) {
+    switch (name) {
+        case 'AMBER_SKIP':
+        case 'AMBER_DONE':
+        case 'AMBER_GOAL':
+        case 'AMBER_REVIEW':
+            return name;
+        default:
+            return null;
     }
 }
 function markerExpect(marker) {
@@ -42,9 +80,17 @@ function markerExpect(marker) {
             return 'skip';
         case 'AMBER_DONE':
             return 'done-declaration';
-        default:
+        case 'AMBER_GOAL':
+        case 'AMBER_REVIEW':
             return null;
     }
+}
+function resultOf(body) {
+    if (ACCEPTED.test(body))
+        return 'accepted';
+    if (REFUSED.test(body))
+        return 'refused';
+    return 'mention';
 }
 /** Classifies the tool results of record.cjs calls made earlier. */
 function readToolResults(content, events) {
@@ -59,11 +105,7 @@ function readToolResults(content, events) {
         const body = typeof bodyValue === 'string'
             ? bodyValue
             : JSON.stringify(bodyValue || '');
-        const result = ACCEPTED.test(body)
-            ? 'accepted'
-            : REFUSED.test(body)
-                ? 'refused'
-                : 'mention';
+        const result = resultOf(body);
         for (const ev of evs)
             ev.result = result;
     }
@@ -79,15 +121,14 @@ function readAssistantBlocks(content, ln, ts, events) {
                 continue;
             const args = toText(fieldIf(input, 'args') || '');
             if (skill === 'amber:mark') {
-                const m = MARK_KIND.exec(args.trim());
-                const kind = m ? (m[1] ?? 'malformed') : 'malformed';
-                events.push({ ln, ts, kind: 'mark ' + kind, expect: markExpect(kind) });
+                const kind = markKindOf(args);
+                events.push({ ln, ts, kind: `mark ${kind}`, expect: markExpect(kind) });
             }
             else {
                 events.push({
                     ln,
                     ts,
-                    kind: 'skill ' + skill,
+                    kind: `skill amber:${skill.slice('amber:'.length)}`,
                     expect: 'skill-invocation',
                     name: skill,
                 });
@@ -96,7 +137,7 @@ function readAssistantBlocks(content, ln, ts, events) {
         else if (type === 'tool_use' && name === 'Bash') {
             const cmd = toText(fieldIf(readField(b, 'input'), 'command') || '');
             const done = DONE_CALL.test(cmd);
-            const unit = UNIT_CALL.exec(cmd);
+            const unit = unitCallOf(UNIT_CALL.exec(cmd)?.[1] ?? '');
             const toolId = readField(b, 'id');
             if (done) {
                 events.push({
@@ -108,12 +149,11 @@ function readAssistantBlocks(content, ln, ts, events) {
                 });
             }
             if (unit) {
-                const command = unit[1] ?? '';
                 events.push({
                     ln,
                     ts,
-                    kind: 'cmd unit ' + command,
-                    expect: command === 'claim' ? null : 'unit-' + command,
+                    kind: `cmd unit ${unit}`,
+                    expect: unit === 'claim' ? null : `unit-${unit}`,
                     toolId,
                 });
             }
@@ -123,10 +163,13 @@ function readAssistantBlocks(content, ln, ts, events) {
             // An older declaration form was up to three marker lines in one message
             // (AMBER_REVIEW / AMBER_GOAL / AMBER_DONE); every kind counts.
             const kinds = new Set();
-            for (const mk of t.matchAll(MARKER))
-                kinds.add(mk[1] ?? '');
+            for (const mk of t.matchAll(MARKER)) {
+                const marker = markerOf(mk[1] ?? '');
+                if (marker)
+                    kinds.add(marker);
+            }
             for (const k of kinds) {
-                events.push({ ln, ts, kind: 'marker ' + k, expect: markerExpect(k) });
+                events.push({ ln, ts, kind: `marker ${k}`, expect: markerExpect(k) });
             }
             if (!kinds.size && /opening verdict|declined opening/.test(t)) {
                 events.push({ ln, ts, kind: 'verdict-text', expect: 'skip' });

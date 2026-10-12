@@ -9,7 +9,9 @@ const MATCH_WINDOW_MS = 15 * 60 * 1000;
 const TYPED_ROW = / \(typed\)$/;
 /**
  * `value.slice(start, end)` for a field that should hold text: a missing
- * value fails with the engine's TypeError, as the original's report did.
+ * value fails with the engine's TypeError, as the original's report did. A
+ * non-string value, which no writer produces, is read as its text where the
+ * original failed calling slice on it (coverage document, known differences).
  */
 function sliceText(value, start, end) {
     if (value === null || value === undefined)

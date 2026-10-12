@@ -362,3 +362,13 @@ test('check-summary compares a block that holds only its first line', () => {
   const r = audit(['check-summary', report], { home });
   assert.deepEqual([r.status, r.out], [1, 'check-summary: 16 line(s) differ\n']);
 });
+
+test('summary counts keys named like Object.prototype members the way a plain object does', () => {
+  const home = path.join(dir(), 'home');
+  ledger(home, ['constructor', 'constructor', '__proto__', 'toString', 'p'].map((project, i) =>
+    ({ ts: '2026-01-01T00:00:0' + i + '.000Z', project, trigger: 'skip' })));
+  const r = audit(['summary', ...PERIOD], { home });
+  assert.equal(r.status, 0, r.err);
+  assert.equal(r.out.split('\n')[3],
+    'by_project: constructor=function Object() { [native code] }11 p=1 toString=function toString() { [native code] }1');
+});
