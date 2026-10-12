@@ -1,4 +1,5 @@
 # Compiled from src/ by `npm run build`; edit the .cts source instead.
+plugin/hooks/amber-hook.cjs linguist-generated=true
 plugin/hooks/patch-paths.cjs linguist-generated=true
 plugin/hooks/progress.cjs linguist-generated=true
 plugin/hooks/scope-check.cjs linguist-generated=true

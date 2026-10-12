@@ -1,0 +1,158 @@
+// Where a run lives: the zone root a working directory belongs to, the
+// linked worktrees of its repository, and zone-relative write targets. Every
+// git query is read-only, has a 2-second limit, and reads a failure or an
+// empty answer as null.
+
+import childProcess = require('node:child_process');
+import fs = require('node:fs');
+import path = require('node:path');
+
+/**
+ * `git -C <cwd> <args>`, trimmed. An absent cwd reaches git as the text
+ * "undefined" (or "null"), as it always has.
+ */
+function gitQuery(
+  cwd: string | null | undefined,
+  args: readonly string[],
+): string | null {
+  try {
+    const out = childProcess
+      .execFileSync('git', ['-C', String(cwd), ...args], {
+        timeout: 2000,
+        stdio: ['ignore', 'pipe', 'ignore'],
+      })
+      .toString()
+      .trim();
+    return out || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Whether `dir` lies strictly inside the zone directory `root`. Unit
+ * worktrees of a run live under <zone>/.claude/worktrees/ and belong to that
+ * run; a linked worktree elsewhere - a sibling path the operator created for
+ * parallel work - is a zone of its own. zoneRoot and extraWorktrees share
+ * this one test, so no worktree is bound to a contract whose completion
+ * check ignores it.
+ */
+function insideZone(root: string, dir: string): boolean {
+  const base = path.resolve(root);
+  const d = path.resolve(dir);
+  return d !== base && d.startsWith(base + path.sep);
+}
+
+/**
+ * Zone root. A tree that carries its own .amber/active.json is its own zone -
+ * a parallel run on its own branch. Otherwise the main checkout (the parent
+ * of the common git dir) is the zone for itself and for the unit worktrees
+ * inside it: from <zone>/.claude/worktrees/<name>/ the run's pointer and
+ * progress file - both gitignored, hence absent from the worktree - are
+ * found there. A linked worktree outside the zone directory is its own zone
+ * even without a pointer: it starts without a contract and gets one of its
+ * own through planning, set, and approval run there.
+ */
+function zoneRoot(cwd: string | null | undefined): string {
+  const top = gitQuery(cwd, ['rev-parse', '--show-toplevel']);
+  if (top && fs.existsSync(path.join(top, '.amber', 'active.json'))) return top;
+  const common = gitQuery(cwd, [
+    'rev-parse',
+    '--path-format=absolute',
+    '--git-common-dir',
+  ]);
+  if (common && path.basename(common) === '.git') {
+    const main = path.dirname(common);
+    if (
+      !top ||
+      path.resolve(top) === path.resolve(main) ||
+      insideZone(main, top)
+    ) {
+      return main;
+    }
+    return top;
+  }
+  if (top) return top;
+  return path.resolve(cwd || '.');
+}
+
+function worktreeTop(cwd: string | null | undefined): string | null {
+  return gitQuery(cwd, ['rev-parse', '--show-toplevel']);
+}
+
+/**
+ * Zone-relative path of a write target. A target inside a linked worktree of
+ * the zone maps to the same relative path in the zone, so contract and unit
+ * scopes apply unchanged wherever the write physically lands.
+ */
+function zoneRelative(
+  root: string,
+  cwd: string | null | undefined,
+  abs: string,
+): string {
+  const top = worktreeTop(cwd);
+  let base = top && top !== root && abs.startsWith(top + path.sep) ? top : root;
+  // Codex children inherit the session cwd. A shell tool can override its
+  // workdir, but apply_patch still reports the inherited cwd and absolute
+  // worktree targets. Map only git-registered worktrees of this repository,
+  // never an arbitrary directory that happens to contain the same filename.
+  const worktrees = gitQuery(root, ['worktree', 'list', '--porcelain', '-z']);
+  for (const row of (worktrees || '').split('\0')) {
+    if (!row.startsWith('worktree ')) continue;
+    const candidate = row.slice('worktree '.length);
+    if (
+      abs.startsWith(candidate + path.sep) &&
+      (base === root || candidate.length > base.length)
+    ) {
+      base = candidate;
+    }
+  }
+  return path.relative(base, abs).split(path.sep).join('/');
+}
+
+/**
+ * Linked worktrees that belong to this zone's run: those created inside the
+ * zone (subagent worktrees live under <zone>/.claude/worktrees/). A sibling
+ * worktree elsewhere is a zone of its own and never blocks this one.
+ */
+function extraWorktrees(root: string): string[] {
+  const out = gitQuery(root, ['worktree', 'list', '--porcelain']);
+  if (!out) return [];
+  return out
+    .split('\n')
+    .filter((l) => l.startsWith('worktree '))
+    .map((l) => l.slice('worktree '.length).trim())
+    .filter((w) => insideZone(root, w));
+}
+
+/**
+ * When cwd is a linked worktree outside the zone directory of its
+ * repository, the main checkout it belongs to; otherwise null.
+ */
+function linkedWorktreeMain(cwd: string | null | undefined): string | null {
+  const top = worktreeTop(cwd);
+  const common = gitQuery(cwd, [
+    'rev-parse',
+    '--path-format=absolute',
+    '--git-common-dir',
+  ]);
+  if (!top || !common || path.basename(common) !== '.git') return null;
+  const main = path.dirname(common);
+  if (path.resolve(top) === path.resolve(main) || insideZone(main, top)) {
+    return null;
+  }
+  return main;
+}
+
+function projectKey(cwd: string | null | undefined): string {
+  return path.basename(zoneRoot(cwd));
+}
+
+export = {
+  zoneRoot,
+  worktreeTop,
+  zoneRelative,
+  extraWorktrees,
+  linkedWorktreeMain,
+  projectKey,
+};
