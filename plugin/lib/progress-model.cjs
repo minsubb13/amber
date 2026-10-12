@@ -10,7 +10,23 @@
 // stands until the held unit's next transition or a newer hold.
 const REENTRY_LIMIT = 10;
 const HISTORY_LIMIT = 50;
-const OPEN = new Set(['pending', 'running', 'failed']);
+// Every status is classified once, so a new status does not compile until
+// it is: whether it is open, and whether the summary line lists it (in this
+// order).
+const OPEN = {
+    pending: true,
+    running: true,
+    verified: false,
+    failed: true,
+    limit: false,
+};
+const LISTED = {
+    verified: true,
+    running: true,
+    failed: true,
+    limit: true,
+    pending: false,
+};
 // "waiting on an external job" hold: the one place both recording paths
 // (mark via S3, record.cjs unit hold) classify a reason.
 const EXTERNAL_HOLD = /^\s*external:/i;
@@ -60,7 +76,8 @@ function newProgress(units, contract, plan, preexisting, now) {
     return p;
 }
 function isOpen(unit) {
-    return OPEN.has(unit.status);
+    // A status outside the union (a hand-edited file) is not open, as before.
+    return Object.hasOwn(OPEN, unit.status) && OPEN[unit.status];
 }
 function openUnits(p) {
     return Object.keys(p.units).filter((id) => {
@@ -214,14 +231,11 @@ function summary(p) {
         String(open.length) +
         ' of ' +
         String(ids.length) +
-        ' unit(s) open - verified: ' +
-        by('verified') +
-        '; running: ' +
-        by('running') +
-        '; failed: ' +
-        by('failed') +
-        '; limit: ' +
-        by('limit') +
+        ' unit(s) open - ' +
+        Object.entries(LISTED)
+            .filter(([, listed]) => listed)
+            .map(([status]) => status + ': ' + by(status))
+            .join('; ') +
         '.');
     const u = focus ? p.units[focus] : undefined;
     if (focus && u) {

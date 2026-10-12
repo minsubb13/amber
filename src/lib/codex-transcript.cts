@@ -26,6 +26,26 @@ type UnitCommand = 'init' | 'start' | 'verified' | 'failed' | 'hold' | 'claim';
 type Marker = 'AMBER_SKIP' | 'AMBER_DONE' | 'AMBER_GOAL' | 'AMBER_REVIEW';
 type TypedSkill = 'planning' | 'init' | 'audit';
 
+/** What an event is; built from the closed sets above. */
+type EventKind =
+  | `skill amber:${Skill}`
+  | `mark ${MarkKind}`
+  | `cmd unit ${UnitCommand}`
+  | 'cmd done'
+  | `typed amber:${TypedSkill}`
+  | `marker ${Marker}`
+  | 'verdict-text';
+
+/** The ledger row an event should have produced, matched by audit.cjs. */
+type Expectation =
+  | 'skill-invocation'
+  | 'planning-invocation'
+  | 'unit-hold'
+  | 'skip'
+  | 'finding'
+  | `unit-${Exclude<UnitCommand, 'claim'>}`
+  | 'done-declaration';
+
 /** How a recorder call fared in the output the transcript kept. */
 type CallResult = 'accepted' | 'refused' | 'mention' | 'unobserved';
 
@@ -36,9 +56,9 @@ interface Meta {
 }
 
 interface TranscriptEvent extends Meta {
-  readonly kind: string;
-  readonly expect: string | null;
-  readonly name?: string;
+  readonly kind: EventKind;
+  readonly expect: Expectation | null;
+  readonly name?: `amber:${Skill | TypedSkill}`;
   readonly typed?: boolean;
   readonly result?: CallResult;
 }
@@ -181,9 +201,9 @@ function describeCall(
     case 'invoke':
       return {
         event: {
-          kind: 'skill amber:' + call.skill,
+          kind: `skill amber:${call.skill}`,
           expect: 'skill-invocation',
-          name: 'amber:' + call.skill,
+          name: `amber:${call.skill}`,
           typed: false,
         },
         accepted: new RegExp(
@@ -194,7 +214,7 @@ function describeCall(
     case 'mark':
       return {
         event: {
-          kind: 'mark ' + call.mark,
+          kind: `mark ${call.mark}`,
           expect: call.mark === 'hold' ? 'unit-hold' : call.mark,
         },
         accepted: new RegExp(
@@ -205,8 +225,8 @@ function describeCall(
     case 'unit':
       return {
         event: {
-          kind: 'cmd unit ' + call.command,
-          expect: call.command === 'claim' ? null : 'unit-' + call.command,
+          kind: `cmd unit ${call.command}`,
+          expect: call.command === 'claim' ? null : `unit-${call.command}`,
         },
         accepted: unitAccepted(call.command, body),
       };
@@ -252,7 +272,7 @@ function commandEvents(
   });
 }
 
-function markerExpect(marker: Marker): string | null {
+function markerExpect(marker: Marker): Expectation | null {
   switch (marker) {
     case 'AMBER_SKIP':
       return 'skip';
@@ -341,12 +361,12 @@ function parseCodexTranscript(text: string, file: string): CodexTranscript {
             events.push({
               ln,
               ts,
-              kind: 'typed amber:' + typed,
+              kind: `typed amber:${typed}`,
               expect:
                 typed === 'planning'
                   ? 'planning-invocation'
                   : 'skill-invocation',
-              name: 'amber:' + typed,
+              name: `amber:${typed}`,
               typed: true,
             });
           }
@@ -365,7 +385,7 @@ function parseCodexTranscript(text: string, file: string): CodexTranscript {
             events.push({
               ln,
               ts,
-              kind: 'marker ' + k,
+              kind: `marker ${k}`,
               expect: markerExpect(k),
             });
           }

@@ -429,3 +429,49 @@ test('a user message without a typed skill counts only as a user turn', () => {
     stopsKnown: false, malformed: 0,
   });
 });
+
+test('the clock is read once for every timestamp, in this order', () => {
+  const RealDate = Date;
+  let reads = 0;
+  global.Date = class extends RealDate {
+    toISOString() {
+      reads += 1;
+      return 'T' + reads;
+    }
+  };
+  try {
+    const root = dir();
+    fs.writeFileSync(path.join(root, 'plan.md'), '- [ ] U1 t [unit: U1 scope=a]\n');
+    const p = progress.initProgress(root, 'plan.md', 'c.md', false, []);
+    assert.deepEqual([p.created_at, p.updated_at], ['T1', 'T2']);
+    progress.applyEvent(p, 'hold', 'U1', { reason: 'r' });
+    progress.applyEvent(p, 'start', 'U1', {});
+    progress.saveProgress(root, p);
+    assert.deepEqual(p.hold, { unit: 'U1', reason: 'r', by: 'shell', ts: 'T3' });
+    assert.deepEqual(p.units.U1.history, [
+      { ts: 'T4', event: 'hold', by: 'shell', note: 'r' },
+      { ts: 'T5', event: 'start', by: 'shell' },
+    ]);
+    assert.equal(p.updated_at, 'T6');
+    assert.equal(reads, 6);
+    assert.equal(fs.readFileSync(progress.progressPath(root), 'utf8'), JSON.stringify(p, null, 1) + '\n');
+  } finally {
+    global.Date = RealDate;
+  }
+});
+
+test('a transition on a unit that is not an object is refused with a TypeError', () => {
+  // The message differs since the port: the original ran in sloppy mode and
+  // failed one statement later (reading history), compiled TypeScript is
+  // strict and fails at the status write. Both refuse; claim and the summary
+  // read such a unit the same way.
+  for (const unit of [1, 'verified', true]) {
+    for (const event of ['start', 'verified', 'failed', 'limit']) {
+      assert.throws(() => progress.applyEvent({ units: { U1: unit }, hold: null, current: null }, event, 'U1', {}),
+        TypeError);
+    }
+    assert.throws(() => progress.applyEvent({ units: { U1: unit }, hold: null }, 'claim', 'U1', { agent_id: 'a' }),
+      { message: 'unit U1 is undefined, not open' });
+    assert.match(progress.summary({ units: { U1: unit }, hold: null }), /^amber progress \(progress\.json\): 0 of 1 unit\(s\) open/);
+  }
+});

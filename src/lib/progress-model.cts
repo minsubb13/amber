@@ -22,7 +22,23 @@ import type {
 
 const REENTRY_LIMIT = 10;
 const HISTORY_LIMIT = 50;
-const OPEN: ReadonlySet<UnitStatus> = new Set(['pending', 'running', 'failed']);
+// Every status is classified once, so a new status does not compile until
+// it is: whether it is open, and whether the summary line lists it (in this
+// order).
+const OPEN: Readonly<Record<UnitStatus, boolean>> = {
+  pending: true,
+  running: true,
+  verified: false,
+  failed: true,
+  limit: false,
+};
+const LISTED: Readonly<Record<UnitStatus, boolean>> = {
+  verified: true,
+  running: true,
+  failed: true,
+  limit: true,
+  pending: false,
+};
 // "waiting on an external job" hold: the one place both recording paths
 // (mark via S3, record.cjs unit hold) classify a reason.
 const EXTERNAL_HOLD = /^\s*external:/i;
@@ -85,7 +101,8 @@ function newProgress(
 }
 
 function isOpen(unit: Unit): boolean {
-  return OPEN.has(unit.status);
+  // A status outside the union (a hand-edited file) is not open, as before.
+  return Object.hasOwn(OPEN, unit.status) && OPEN[unit.status];
 }
 
 function openUnits(p: Progress): string[] {
@@ -280,7 +297,7 @@ function unitByAgent(p: Progress, agentId: string): string | null {
 /** The progress lines the briefings and the send-back directive print. */
 function summary(p: Progress): string {
   const ids = Object.keys(p.units);
-  const by = (status: UnitStatus): string =>
+  const by = (status: string): string =>
     ids.filter((id) => p.units[id]?.status === status).join(', ') || 'none';
   const open = openUnits(p);
   const focus = focusUnit(p);
@@ -292,14 +309,11 @@ function summary(p: Progress): string {
       String(open.length) +
       ' of ' +
       String(ids.length) +
-      ' unit(s) open - verified: ' +
-      by('verified') +
-      '; running: ' +
-      by('running') +
-      '; failed: ' +
-      by('failed') +
-      '; limit: ' +
-      by('limit') +
+      ' unit(s) open - ' +
+      Object.entries(LISTED)
+        .filter(([, listed]) => listed)
+        .map(([status]) => status + ': ' + by(status))
+        .join('; ') +
       '.',
   );
   const u = focus ? p.units[focus] : undefined;

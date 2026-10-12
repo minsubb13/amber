@@ -125,9 +125,9 @@ function describeCall(call, body) {
         case 'invoke':
             return {
                 event: {
-                    kind: 'skill amber:' + call.skill,
+                    kind: `skill amber:${call.skill}`,
                     expect: 'skill-invocation',
-                    name: 'amber:' + call.skill,
+                    name: `amber:${call.skill}`,
                     typed: false,
                 },
                 accepted: new RegExp('^amber: recorded invoke ' + call.skill + '\\s*$', 'm').test(body),
@@ -135,7 +135,7 @@ function describeCall(call, body) {
         case 'mark':
             return {
                 event: {
-                    kind: 'mark ' + call.mark,
+                    kind: `mark ${call.mark}`,
                     expect: call.mark === 'hold' ? 'unit-hold' : call.mark,
                 },
                 accepted: new RegExp('^amber: recorded mark ' + call.mark + '\\s*$', 'm').test(body),
@@ -143,8 +143,8 @@ function describeCall(call, body) {
         case 'unit':
             return {
                 event: {
-                    kind: 'cmd unit ' + call.command,
-                    expect: call.command === 'claim' ? null : 'unit-' + call.command,
+                    kind: `cmd unit ${call.command}`,
+                    expect: call.command === 'claim' ? null : `unit-${call.command}`,
                 },
                 accepted: unitAccepted(call.command, body),
             };
@@ -259,11 +259,11 @@ function parseCodexTranscript(text, file) {
                         events.push({
                             ln,
                             ts,
-                            kind: 'typed amber:' + typed,
+                            kind: `typed amber:${typed}`,
                             expect: typed === 'planning'
                                 ? 'planning-invocation'
                                 : 'skill-invocation',
-                            name: 'amber:' + typed,
+                            name: `amber:${typed}`,
                             typed: true,
                         });
                     }
@@ -281,7 +281,7 @@ function parseCodexTranscript(text, file) {
                         events.push({
                             ln,
                             ts,
-                            kind: 'marker ' + k,
+                            kind: `marker ${k}`,
                             expect: markerExpect(k),
                         });
                     }
