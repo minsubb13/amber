@@ -67,6 +67,7 @@ test('record refuses an unknown unit command, a missing plan, a missing or malfo
   const z = zone();
   const usage = record(z, ['--help']).stdout;
   assert.equal(refusal(record(z, ['unit', 'bogus'])), 'amber: invalid unit command\n' + usage);
+  assert.equal(refusal(record(z, ['unit'])), 'amber: invalid unit command\n' + usage);
   assert.equal(refusal(record(z, ['unit', 'init', '--force'])), 'amber: unit init needs the plan path\n' + usage);
   assert.equal(refusal(record(z, ['unit', 'start'])), 'amber: unit start needs a unit id like U1\n' + usage);
   assert.equal(refusal(record(z, ['unit', 'start', 'X1'])), 'amber: unit start needs a unit id like U1\n' + usage);
