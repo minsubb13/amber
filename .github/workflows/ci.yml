@@ -1,0 +1,49 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: node ${{ matrix.node }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['20', '22', '24']
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The parity step extracts the base branch as the reference build.
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - name: git identity for the suites' scratch repositories
+        run: |
+          git config --global user.name ci
+          git config --global user.email ci@example.invalid
+      - run: npm ci
+      - name: typecheck
+        run: npm run typecheck
+      - name: lint
+        run: npm run lint
+      - name: format:check
+        run: npm run format:check
+      - name: build matches the committed output
+        run: npm run build && git diff --exit-code
+      - name: npm test
+        run: npm test
+      - name: parity against the base branch, or the previous main commit
+        env:
+          BASE_REF: ${{ github.base_ref }}
+          BEFORE: ${{ github.event.before }}
+        run: |
+          if [ -n "$BASE_REF" ]; then ref="origin/$BASE_REF"; else ref="$BEFORE"; fi
+          npm run parity -- --ref "$ref"
