@@ -48,7 +48,7 @@ import {
 import {
   LEGACY_RUNNER,
   legacyNodeTestFiles,
-  portedTestFiles,
+  testFiles,
 } from '../shared/suites.mjs';
 import { runnerTestNames, tapTestNames } from '../shared/tap.mjs';
 
@@ -118,15 +118,12 @@ function tests(workdir: string, commit: string): number {
   const legacy = runSide(legacyPlugin, join(workdir, 'legacy-run'), {
     legacy: true,
   });
-  // Suites added after the port have no legacy counterpart.
-  const ported = portedTestFiles();
   const current = runSide(
     copyCandidate(REPO, join(workdir, 'current')),
     join(workdir, 'current-run'),
-    { files: ported },
   );
   const before = testNames(legacy, legacyNodeTestFiles(legacyPlugin));
-  const after = testNames(current, ported);
+  const after = testNames(current, testFiles());
   const missing = surplus(before, after);
   const extra = surplus(after, before);
   for (const name of missing) log(`only in the legacy suites: ${name}`);

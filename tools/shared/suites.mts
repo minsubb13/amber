@@ -25,19 +25,6 @@ export function testFiles(): string[] {
   return [FIRST_SUITE, ...rest].map((name) => join(TEST_DIR, name));
 }
 
-/**
- * Suites written after the move to TypeScript rather than ported from a
- * legacy suite: parity:tests compares the legacy suites with their ports only.
- */
-const ADDED_AFTER_PORT = new Set(['characterization-final.test.mjs']);
-
-/** The compiled suites that port a legacy suite, in run order. */
-export function portedTestFiles(): string[] {
-  return testFiles().filter(
-    (file) => !ADDED_AFTER_PORT.has(file.slice(TEST_DIR.length + 1)),
-  );
-}
-
 export const LEGACY_RUNNER = 'tests/run-tests.cjs';
 
 /** The legacy node:test files of a plugin directory, relative to it. */
@@ -62,8 +49,6 @@ export interface SuiteOptions {
   readonly inherit?: boolean;
   /** Report node:test results as TAP, whose test lines name each test. */
   readonly tap?: boolean;
-  /** The compiled suites to run; every suite when absent. */
-  readonly files?: readonly string[];
 }
 
 function spawnNode(
@@ -106,7 +91,7 @@ export function runSuites(
   options: SuiteOptions = {},
 ): SuiteRun[] {
   const run = spawnNode(
-    [...nodeTestArgs(options), ...(options.files ?? testFiles())],
+    [...nodeTestArgs(options), ...testFiles()],
     pluginDir,
     options,
   );
