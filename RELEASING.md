@@ -22,7 +22,7 @@ Amber is 0.x. Feature and fix pull requests leave both manifests (`plugin/.claud
 
 - **minor** - the intended behavior an operator or a model sees changes or grows: skills, hook messages, the run protocol, commands and their output.
 - **patch** - the intended behavior stays the same and a defect that departed from it is fixed, even when the fix changes what is shown.
-- **none** - internal changes (refactoring, tests, development tooling, README) ship with the next release.
+- **none** - internal changes (refactoring, tests, development tooling, README) ship with the next release. An internal change that replaces the shipped code wholesale, such as a language port, is released on its own as a minor version, so a regression can be traced to it.
 
 There is no changelog file. The GitHub release notes, generated from the merged pull request titles, are the change record.
 
