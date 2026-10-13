@@ -7,7 +7,8 @@ export const MUTATIONS: readonly Mutation[] = [
   {
     // (a) one character of a user-visible S0 briefing sentence
     name: 'S0 briefing text',
-    file: 'hooks/amber-hook.cjs',
+    // (the briefing texts moved to lib/hook-text in stage 3)
+    file: 'lib/hook-text.cjs',
     find: "'amber: an active contract governs this zone - '",
     replace: "'amber: an active contract governs this zone , '",
   },
@@ -21,7 +22,8 @@ export const MUTATIONS: readonly Mutation[] = [
   {
     // (c) one E1 allow/deny decision: bash-deny stops matching
     name: 'E1 bash-deny decision',
-    file: 'hooks/amber-hook.cjs',
+    // (E1 moved to lib/enforcer in stage 3)
+    file: 'lib/enforcer.cjs',
     find: 'if (re.test(command)) {',
     replace: 'if (re.test(command) && false) {',
   },

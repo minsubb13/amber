@@ -125,3 +125,109 @@ export interface ScopeCheckOptions {
   readonly preexisting?: unknown[] | null;
   readonly declarations?: Declaration[];
 }
+
+/** The hook events hooks.json passes to the entry. */
+export type HookEvent = 'S0' | 'S1' | 'S2' | 'S3' | 'E1';
+
+/**
+ * The fields of a hook input Amber reads, after the boundary check. The host
+ * protocols send session_id, cwd and model as strings; a value of another
+ * type is read as absent. Fields the original converted with String() stay
+ * as found (`prompt`, `tool_input` members) and are converted where read.
+ */
+export interface HookInput {
+  readonly session_id?: string;
+  readonly cwd?: string;
+  readonly model?: string;
+  readonly prompt?: unknown;
+  readonly tool_name?: unknown;
+  /** The tool's own input; an absent or non-object value reads as {}. */
+  readonly tool_input: Readonly<Record<string, unknown>>;
+  readonly agent_id?: unknown;
+  readonly stop_hook_active?: unknown;
+}
+
+/** The two identities a ledger row and the state files are keyed by. */
+export interface RecordSource {
+  readonly session_id?: string | null | undefined;
+  readonly cwd?: string | null | undefined;
+}
+
+/** A hook's JSON answer on stdout; null means no output. */
+export type HookOutput =
+  | {
+      readonly hookSpecificOutput: {
+        readonly hookEventName: 'SessionStart' | 'UserPromptSubmit';
+        readonly additionalContext: string;
+      };
+    }
+  | {
+      readonly hookSpecificOutput: {
+        readonly hookEventName: 'PreToolUse';
+        readonly permissionDecision: 'deny';
+        readonly permissionDecisionReason: string;
+      };
+    }
+  | { readonly decision: 'block'; readonly reason: string }
+  | null;
+
+/** The contract the zone's pointer names, read and found sound. */
+export interface ActiveContract {
+  readonly root: string;
+  readonly pointerPath: string;
+  readonly boundaryPath: string;
+  readonly boundaryFile: string;
+  /** As the pointer wrote it; 'unknown' when absent. */
+  readonly ratifiedBy: unknown;
+  readonly ratifiedAt: unknown;
+  readonly text: string;
+  readonly broken: false;
+}
+
+/** A pointer whose target cannot be used; enforcement fails closed. */
+export interface BrokenContract {
+  readonly root: string;
+  readonly pointerPath: string;
+  readonly boundaryPath: null;
+  readonly boundaryFile: null;
+  readonly text: '';
+  readonly broken: true;
+  readonly error: string;
+}
+
+export type Contract = ActiveContract | BrokenContract;
+
+/** The machine-enforced rows of a boundary document. */
+export interface MachineRules {
+  readonly writeScopes: string[];
+  readonly bashDeny: string[];
+}
+
+/** A session's state file under <AMBER_HOME>/state/, as written. */
+export interface SessionState {
+  model?: unknown;
+  started_at?: unknown;
+  /** The boundary file this session was briefed about, or 'broken'. */
+  briefed?: unknown;
+  /** The boundary file of the run this session drives. */
+  run?: unknown;
+}
+
+/** The completion signal `record.cjs done` writes to <zone>/.amber/done.json. */
+export interface DoneSignal {
+  readonly v?: unknown;
+  readonly ts?: unknown;
+  readonly target?: unknown;
+  readonly summary: string;
+  readonly review: string;
+  readonly goal?: unknown;
+  readonly out_of_scope?: unknown;
+  readonly out_of_scope_count?: unknown;
+}
+
+/** The newest session registered to a run (record.cjs reads it back). */
+export interface RunDriver {
+  readonly sessionId: string;
+  readonly model: unknown;
+  readonly mtime: number;
+}

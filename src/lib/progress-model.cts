@@ -9,6 +9,7 @@
 
 import guards = require('./guards.cjs');
 import type {
+  BrokenProgress,
   Clock,
   EventExtra,
   HistoryEntry,
@@ -370,7 +371,17 @@ function summary(p: Progress): string {
   return lines.join('\n');
 }
 
+/**
+ * Whether loadProgress reported the file as unusable. Like the original, any
+ * truthy `broken` field counts, so a hand-edited file with one reads as
+ * broken too.
+ */
+function isBroken(p: Progress | BrokenProgress): p is BrokenProgress {
+  return Boolean(guards.readField(p, 'broken'));
+}
+
 export = {
+  isBroken,
   REENTRY_LIMIT,
   holdKind,
   newProgress,

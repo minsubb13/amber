@@ -44,4 +44,27 @@ function toText(value: unknown): string {
   return '[object Object]';
 }
 
-export = { isObject, readField, toText };
+/**
+ * `target[key] = value` on a value parsed from JSON, as non-strict JavaScript
+ * did it: an object gets the field, a string, number or boolean silently
+ * keeps none, and null fails with the engine's TypeError. The state files the
+ * hand-written hook rewrote are written through this.
+ */
+function writeField(target: unknown, key: string, value: unknown): void {
+  if (target === null || target === undefined) {
+    throw new TypeError(
+      `Cannot set properties of ${String(target)} (setting '${key}')`,
+    );
+  }
+  if (isObject(target)) target[key] = value;
+}
+
+/** `delete target[key]` on a value parsed from JSON, with the same outcomes. */
+function deleteField(target: unknown, key: string): void {
+  if (target === null || target === undefined) {
+    throw new TypeError('Cannot convert undefined or null to object');
+  }
+  if (isObject(target)) Reflect.deleteProperty(target, key);
+}
+
+export = { isObject, readField, toText, writeField, deleteField };

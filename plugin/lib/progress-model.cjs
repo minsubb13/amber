@@ -279,7 +279,16 @@ function summary(p) {
         (sessions.length ? sessions.join(', ') : 'none registered yet'));
     return lines.join('\n');
 }
+/**
+ * Whether loadProgress reported the file as unusable. Like the original, any
+ * truthy `broken` field counts, so a hand-edited file with one reads as
+ * broken too.
+ */
+function isBroken(p) {
+    return Boolean(guards.readField(p, 'broken'));
+}
 module.exports = {
+    isBroken,
     REENTRY_LIMIT,
     holdKind,
     newProgress,
