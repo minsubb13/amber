@@ -20,14 +20,14 @@ Requires Node.js 20+, git, and Claude Code 2.1+ or Codex CLI 0.155+.
 **Claude Code**
 
 ```sh
-claude plugin marketplace add minsubb13/amber
+claude plugin marketplace add minsubb13/amber#release
 claude plugin install amber@amber
 ```
 
 **Codex**
 
 ```sh
-codex plugin marketplace add minsubb13/amber
+codex plugin marketplace add minsubb13/amber@release
 codex plugin add amber@amber
 ```
 
@@ -39,6 +39,8 @@ enabled = true
 ```
 
 Review and trust Amber's hooks in Codex. Start a new session after installation.
+
+Both hosts install from the `release` branch; [RELEASING.md](RELEASING.md) describes how releases are cut.
 
 ## Start
 
