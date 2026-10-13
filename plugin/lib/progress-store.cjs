@@ -14,7 +14,10 @@ function progressPath(root) {
  * The read check is deliberately the original's: the file must hold an
  * object whose `units` is an object (null passes, as it always has), and the
  * rest is trusted as the plugin wrote it. A stricter check would turn files
- * the plugin accepts today into broken ones.
+ * the plugin accepts today into broken ones. So a unit value is typed as a
+ * Unit although a hand-edited file can hold null or a non-object there; the
+ * model reads such a value the original's way where it meets it (isOpen and
+ * unitByAgent throw on null, a non-object reads as having no fields).
  */
 function isProgress(value) {
     return guards.isObject(value) && typeof value['units'] === 'object';

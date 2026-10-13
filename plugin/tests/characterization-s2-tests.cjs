@@ -488,3 +488,40 @@ test('a unit status that is not a string is never open, even when it prints like
   assert.throws(() => progress.applyEvent(p, 'claim', 'U1', { agent_id: 'a' }),
     { message: 'unit U1 is pending, not open' });
 });
+
+// ---- progress: a unit that is null in a hand-edited file ----
+
+test('E1 fails open on a null unit while looking up a subagent claim', () => {
+  // The hook reads every unit while looking for the subagent's claim; the
+  // original throws on a null one and the hook fails open with a breadcrumb.
+  const zone = dir();
+  const home = dir();
+  git(zone, ['init', '-q']);
+  fs.mkdirSync(path.join(zone, '.amber'));
+  fs.writeFileSync(path.join(zone, 'boundary.md'), '# fixture\n- code [machine: write-scope src/**]\n');
+  fs.writeFileSync(path.join(zone, '.amber', 'active.json'),
+    JSON.stringify({ v: 1, boundary: 'boundary.md', ratified_by: 'fixture-user', ratified_at: '2026-10-12' }));
+  fs.writeFileSync(path.join(zone, '.amber', 'progress.json'), JSON.stringify({ v: 1, units: { U1: null } }));
+  const res = spawnSync('node', [path.join(__dirname, '..', 'hooks', 'amber-hook.cjs'), 'E1'], {
+    input: JSON.stringify({
+      session_id: 'main', agent_id: 'sub-1', cwd: zone, hook_event_name: 'PreToolUse',
+      tool_name: 'Write', tool_input: { file_path: path.join(zone, 'src', 'x.txt') },
+    }),
+    env: { ...process.env, AMBER_HOME: home },
+    encoding: 'utf8',
+    timeout: 10000,
+  });
+  assert.equal(res.status, 0);
+  assert.equal(res.stdout, '');
+  assert.match(fs.readFileSync(path.join(home, 'state', 'sensor-failures.log'), 'utf8'),
+    /hook-crash event=E1 Cannot read properties of null \(reading 'agent_id'\)/);
+});
+
+test('unitByAgent reads each unit as an object, throwing on a null one', () => {
+  assert.throws(() => progress.unitByAgent({ units: { U1: null } }, 'sub-1'),
+    { name: 'TypeError', message: "Cannot read properties of null (reading 'agent_id')" });
+  // A non-object unit has no agent_id; a claimed unit before a null one is
+  // found first, as Array#find stops there.
+  assert.equal(progress.unitByAgent({ units: { U1: 1 } }, 'sub-1'), null);
+  assert.equal(progress.unitByAgent({ units: { U1: { agent_id: 'sub-1' }, U2: null } }, 'sub-1'), 'U1');
+});
