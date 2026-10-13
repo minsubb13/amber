@@ -2,8 +2,9 @@
 // NODE_OPTIONS=--require. The suites name their temporary directories with
 // fs.mkdtempSync, whose random suffix would make two runs of the same build
 // look different. While $AMBER_PARITY_DETERMINISTIC is set, mkdtempSync gets a
-// suffix derived from the running script's file name and a per-process
-// counter instead, so the same suite creates the same names on both sides.
+// suffix derived from the running script's suite name (its file name without
+// the test suffix) and a per-process counter instead, so the same suite
+// creates the same names on both sides.
 // Each side runs with its own TMPDIR, so the names never collide; if one does
 // exist, the original random behavior is used.
 
@@ -13,7 +14,12 @@ import path = require('node:path');
 
 function install(): void {
   const original = fs.mkdtempSync.bind(fs);
-  const script = path.basename(process.argv[1] ?? 'node');
+  // A suite keeps its name across the move to TypeScript (audit-tests.cjs is
+  // now audit.test.mjs), so both files name their directories alike and
+  // parity:tests can compare the legacy suites with their successors.
+  const script = path
+    .basename(process.argv[1] ?? 'node')
+    .replace(/(-tests\.cjs|\.test\.mjs)$/, '');
   const tag = crypto
     .createHash('sha1')
     .update(script)

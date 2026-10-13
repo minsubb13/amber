@@ -38,30 +38,27 @@ export function copyCandidate(repo: string, dest: string): string {
 
 /**
  * Paths the reference build takes from the working tree instead of `commit`:
- * the test suites, so both builds run the same tests, and the two manifests,
- * whose version field is the one outside-visible change every release makes
- * on purpose (it reaches each ledger row as plugin_version).
+ * the two manifests, whose version field is the one outside-visible change
+ * every release makes on purpose (it reaches each ledger row as
+ * plugin_version). Both builds run the working tree's suites, which live
+ * outside plugin/.
  */
 export const SHARED_WITH_CANDIDATE = [
-  'tests',
   '.claude-plugin/plugin.json',
   '.codex-plugin/plugin.json',
 ];
 
-/**
- * The reference build: plugin/ of `commit` (code, run.sh, hooks.json, skills,
- * references) with the SHARED_WITH_CANDIDATE paths taken from the working
- * tree.
- */
-export function extractReference(
+/** Extracts `path` of `commit` under dest, keeping its path. */
+function extractTree(
   repo: string,
   commit: string,
+  path: string,
   dest: string,
-): string {
+): void {
   mkdirSync(dest, { recursive: true });
   const archive = spawnSync(
     'git',
-    ['-C', repo, 'archive', '--format=tar', commit, 'plugin'],
+    ['-C', repo, 'archive', '--format=tar', commit, path],
     { maxBuffer: 512 * 1024 * 1024 },
   );
   if (archive.status !== 0) {
@@ -73,12 +70,45 @@ export function extractReference(
   if (tar.status !== 0) {
     throw new Error(`tar failed: ${tar.stderr.toString()}`);
   }
+}
+
+/**
+ * The reference build: plugin/ of `commit` (code, run.sh, hooks.json, skills,
+ * references) with the SHARED_WITH_CANDIDATE paths taken from the working
+ * tree.
+ */
+export function extractReference(
+  repo: string,
+  commit: string,
+  dest: string,
+): string {
+  extractTree(repo, commit, 'plugin', dest);
   const target = join(dest, 'plugin');
   for (const rel of SHARED_WITH_CANDIDATE) {
     rmSync(join(target, rel), { recursive: true, force: true });
     mkdirSync(dirname(join(target, rel)), { recursive: true });
     cpSync(join(repo, 'plugin', rel), join(target, rel), { recursive: true });
   }
+  return target;
+}
+
+/**
+ * The working tree's plugin/ with the legacy suites of `commit` (its
+ * plugin/tests) as its tests directory, so those suites run against the
+ * current build.
+ */
+export function withLegacySuites(
+  repo: string,
+  commit: string,
+  dest: string,
+): string {
+  const target = copyCandidate(repo, dest);
+  const legacy = join(dest, 'legacy');
+  extractTree(repo, commit, 'plugin/tests', legacy);
+  rmSync(join(target, 'tests'), { recursive: true, force: true });
+  cpSync(join(legacy, 'plugin', 'tests'), join(target, 'tests'), {
+    recursive: true,
+  });
   return target;
 }
 

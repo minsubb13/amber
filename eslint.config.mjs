@@ -1,6 +1,6 @@
-// Lint for the TypeScript sources (src/) and the development tools (tools/).
-// plugin/ holds generated output and the legacy CommonJS tests, so it is
-// not linted here.
+// Lint for the TypeScript sources (src/), the development tools (tools/) and
+// the test suites (test/). plugin/ holds generated output, so it is not
+// linted here.
 import js from '@eslint/js';
 import { defineConfig } from 'eslint/config';
 import tseslint from 'typescript-eslint';
@@ -22,7 +22,7 @@ const names = (list) => `/^(${list.join('|')})$/`;
 export default defineConfig(
   { ignores: ['build/', 'node_modules/', 'plugin/', 'eslint.config.mjs'] },
   {
-    files: ['src/**/*.ts', 'src/**/*.cts', 'src/**/*.mts', 'tools/**/*.mts', 'tools/**/*.cts'],
+    files: ['src/**/*.ts', 'src/**/*.cts', 'src/**/*.mts', 'tools/**/*.mts', 'tools/**/*.cts', 'test/**/*.mts'],
     extends: [js.configs.recommended, tseslint.configs.strictTypeChecked],
     languageOptions: {
       parserOptions: { projectService: true, tsconfigRootDir: import.meta.dirname },
@@ -120,6 +120,22 @@ export default defineConfig(
           selector:
             "CallExpression[callee.object.name='process'][callee.property.name=/^(on|once|addListener|prependListener|prependOnceListener)$/][arguments.0.type!='Literal']",
           message: 'Name process events with a string literal.',
+        },
+      ],
+    },
+  },
+  {
+    // node:test runs a registered test whether or not anyone awaits the
+    // promise test() returns; the suites register their tests at the top
+    // level, as node:test intends.
+    files: ['test/**/*.mts'],
+    rules: {
+      '@typescript-eslint/no-floating-promises': [
+        'error',
+        {
+          allowForKnownSafeCalls: [
+            { from: 'package', package: 'node:test', name: ['test', 'describe', 'it', 'suite'] },
+          ],
         },
       ],
     },

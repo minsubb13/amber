@@ -3,6 +3,13 @@
 //   selftest [--ref <rev>]  every mutation in selftest.mts must be detected,
 //                           and the E1 mutation also by the real-record replay
 //   real     [--ref <rev>]  comparison over the real ledger and transcripts
+//   tests    [--ref <rev>]  the legacy suites of <rev> (its plugin/tests) and
+//                           the suites of test/, both against the working
+//                           tree's plugin: the same test names, both passing,
+//                           the same product invocations
+//   legacy   [--ref <rev>]  the legacy suites of <rev> against <rev>'s build
+//                           and against the working tree's: both passing,
+//                           the same product invocations
 // The last line of each command is the machine-readable verdict; progress and
 // difference reports go to stderr.
 
@@ -28,7 +35,7 @@ import {
   type Tally,
 } from './real/run.mjs';
 import { CONTROLS, MUTATIONS, PROBES } from './selftest.mjs';
-import { runSide } from './side.mjs';
+import { runSide, type SideResult } from './side.mjs';
 import { compareSides, report, runReference } from './suites-parity.mjs';
 import {
   applyMutation,
@@ -36,7 +43,14 @@ import {
   extractReference,
   makeWorkdir,
   resolveRev,
+  withLegacySuites,
 } from './workspace.mjs';
+import {
+  LEGACY_RUNNER,
+  legacyNodeTestFiles,
+  testFiles,
+} from '../shared/suites.mjs';
+import { runnerTestNames, tapTestNames } from '../shared/tap.mjs';
 
 const REPO = resolve(import.meta.dirname, '..', '..', '..');
 /** Real tool calls replayed per zone in `real`, and in the self-test. */
@@ -70,6 +84,97 @@ function suites(workdir: string, commit: string): number {
   for (const line of report(parity, Number(values.limit))) log(line);
   console.log(
     `PARITY invocations=${String(parity.comparison.invocations)} ` +
+      `differences=${String(parity.differences)}`,
+  );
+  return parity.differences === 0 ? 0 : 1;
+}
+
+function testNames(side: SideResult, files: readonly string[]): string[] {
+  return side.suites
+    .flatMap((run) =>
+      run.suite === LEGACY_RUNNER
+        ? runnerTestNames(run.stdout)
+        : tapTestNames(run.stdout, files),
+    )
+    .sort();
+}
+
+/** Names in `from` more often than in `other`. */
+function surplus(from: readonly string[], other: readonly string[]): string[] {
+  const left = new Map<string, number>();
+  for (const name of other) left.set(name, (left.get(name) ?? 0) + 1);
+  return from.filter((name) => {
+    const n = left.get(name) ?? 0;
+    left.set(name, n - 1);
+    return n <= 0;
+  });
+}
+
+function tests(workdir: string, commit: string): number {
+  log(
+    `tests: legacy suites of ${commit} and test/, on ${join(REPO, 'plugin')}`,
+  );
+  const legacyPlugin = withLegacySuites(REPO, commit, join(workdir, 'legacy'));
+  const legacy = runSide(legacyPlugin, join(workdir, 'legacy-run'), {
+    legacy: true,
+  });
+  const current = runSide(
+    copyCandidate(REPO, join(workdir, 'current')),
+    join(workdir, 'current-run'),
+  );
+  const before = testNames(legacy, legacyNodeTestFiles(legacyPlugin));
+  const after = testNames(current, testFiles());
+  const missing = surplus(before, after);
+  const extra = surplus(after, before);
+  for (const name of missing) log(`only in the legacy suites: ${name}`);
+  for (const name of extra) log(`only in test/: ${name}`);
+  // Each side's suites name their fixtures by where they keep them.
+  // Both sides run one build, so what the product read is an input here.
+  const parity = compareSides(
+    legacy,
+    current,
+    [
+      { text: join(legacyPlugin, 'tests'), label: 'TESTS' },
+      { text: join(REPO, 'test'), label: 'TESTS' },
+    ],
+    { reads: true },
+  );
+  for (const line of report(parity, Number(values.limit))) log(line);
+  const sameNames = missing.length === 0 && extra.length === 0;
+  console.log(
+    `TESTS names=${String(before.length)}/${String(after.length)} ` +
+      `same-names=${sameNames ? 'yes' : 'no'} ` +
+      `failed-suites=${String(parity.failedSuites.length)} ` +
+      `invocations=${String(legacy.records.length)}/` +
+      `${String(current.records.length)} ` +
+      `differences=${String(parity.comparison.differences)}`,
+  );
+  return sameNames && parity.differences === 0 ? 0 : 1;
+}
+
+function legacy(workdir: string, commit: string): number {
+  log(
+    `legacy: suites of ${commit} on ${commit} and on ${join(REPO, 'plugin')}`,
+  );
+  // The reference keeps plugin/tests of its own revision.
+  const reference = runSide(
+    extractReference(REPO, commit, join(workdir, 'reference')),
+    join(workdir, 'reference-run'),
+    { legacy: true },
+  );
+  const candidate = runSide(
+    withLegacySuites(REPO, commit, join(workdir, 'candidate')),
+    join(workdir, 'candidate-run'),
+    { legacy: true },
+  );
+  const parity = compareSides(reference, candidate);
+  for (const line of report(parity, Number(values.limit))) log(line);
+  const names = (side: SideResult): number =>
+    testNames(side, legacyNodeTestFiles(side.pluginDir)).length;
+  console.log(
+    `LEGACY tests=${String(names(reference))}/${String(names(candidate))} ` +
+      `invocations=${String(parity.comparison.invocations)} ` +
+      `failed-suites=${String(parity.failedSuites.length)} ` +
       `differences=${String(parity.differences)}`,
   );
   return parity.differences === 0 ? 0 : 1;
@@ -269,9 +374,15 @@ async function main(): Promise<number> {
         return await selftest(workdir, commit);
       case 'real':
         return await real(workdir, commit);
+      case 'tests':
+        return tests(workdir, commit);
+      case 'legacy':
+        return legacy(workdir, commit);
       case undefined:
       default:
-        log('usage: main.mjs suites|selftest|real [--ref <rev>] [--keep]');
+        log(
+          'usage: main.mjs suites|selftest|real|tests|legacy [--ref <rev>] [--keep]',
+        );
         return 2;
     }
   } finally {

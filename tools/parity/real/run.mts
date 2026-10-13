@@ -145,6 +145,10 @@ function record(
     entry,
     args,
     cwd,
+    // Both builds run with the same environment and scratch state, built
+    // here for the case; the record compares what they do with them.
+    env: {},
+    reads: [],
     stdin: input,
     stdout: result.stdout,
     stderr: result.stderr,

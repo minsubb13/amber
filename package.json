@@ -2,15 +2,17 @@
   "private": true,
   "scripts": {
     "build": "tsc -p . && npm run --silent build:tools && node build/tools/header/main.mjs",
-    "build:tools": "tsc -p tools",
-    "typecheck": "tsc -p . --noEmit && tsc -p tools --noEmit",
+    "build:tools": "tsc -p tools && tsc -p test",
+    "typecheck": "tsc -p . --noEmit && tsc -p tools --noEmit && tsc -p test --noEmit",
     "lint": "eslint --max-warnings 0 .",
-    "format": "prettier --write src tools",
-    "format:check": "prettier --check src tools",
+    "format": "prettier --write src tools test",
+    "format:check": "prettier --check src tools test",
     "test": "npm run --silent build:tools && node build/tools/test/main.mjs",
     "parity": "npm run --silent build:tools && node build/tools/parity/main.mjs suites",
     "parity:real": "npm run --silent build:tools && node build/tools/parity/main.mjs real",
     "parity:selftest": "npm run --silent build:tools && node build/tools/parity/main.mjs selftest",
+    "parity:tests": "npm run --silent build:tools && node build/tools/parity/main.mjs tests",
+    "parity:legacy": "npm run --silent build:tools && node build/tools/parity/main.mjs legacy",
     "coverage": "npm run --silent build:tools && node build/tools/coverage/main.mjs"
   },
   "devDependencies": {
