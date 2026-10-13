@@ -1,7 +1,7 @@
 {
   "private": true,
   "scripts": {
-    "build": "tsc -p .",
+    "build": "tsc -p . && npm run --silent build:tools && node build/tools/header/main.mjs",
     "build:tools": "tsc -p tools",
     "typecheck": "tsc -p . --noEmit && tsc -p tools --noEmit",
     "lint": "eslint --max-warnings 0 .",

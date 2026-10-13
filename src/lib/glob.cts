@@ -1,0 +1,40 @@
+// Write-scope globs: `**` (any depth), `*` (within one segment) and `?` (one
+// character), matched against a /-separated path relative to the zone root.
+// No external packages by design.
+
+/** The anchored regular expression a glob stands for. */
+function globToRegExp(glob: string): RegExp {
+  let re = '';
+  let i = 0;
+  while (i < glob.length) {
+    const c = glob.charAt(i);
+    if (c === '*') {
+      if (glob.charAt(i + 1) === '*') {
+        if (glob.charAt(i + 2) === '/') {
+          re += '(?:.*/)?';
+          i += 3;
+        } else {
+          re += '.*';
+          i += 2;
+        }
+      } else {
+        re += '[^/]*';
+        i += 1;
+      }
+    } else if (c === '?') {
+      re += '[^/]';
+      i += 1;
+    } else {
+      re += c.replace(/[.+^${}()|[\]\\]/g, '\\$&');
+      i += 1;
+    }
+  }
+  return new RegExp('^' + re + '$');
+}
+
+/** Whether a zone-relative path matches any of the globs. */
+function inScopes(rel: string, scopes: readonly string[]): boolean {
+  return scopes.some((scope) => globToRegExp(scope).test(rel));
+}
+
+export = { globToRegExp, inScopes };
