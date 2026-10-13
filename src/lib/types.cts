@@ -231,3 +231,95 @@ export interface RunDriver {
   readonly model: unknown;
   readonly mtime: number;
 }
+
+/** A `record.cjs unit` command as a transcript shows it. */
+export type UnitCall =
+  'init' | 'start' | 'verified' | 'failed' | 'hold' | 'claim';
+
+/** The cycle-event kinds of amber:mark. */
+export type MarkKind = 'skip' | 'finding' | 'hold';
+
+/** The marker lines of the older declaration form. */
+export type Marker =
+  'AMBER_SKIP' | 'AMBER_DONE' | 'AMBER_GOAL' | 'AMBER_REVIEW';
+
+/** The skills an operator can type that the ledger records. */
+export type TypedSkill = 'planning' | 'init' | 'audit';
+
+/** How a recorder call fared in the output a transcript kept. */
+export type CallResult = 'accepted' | 'refused' | 'mention' | 'unobserved';
+
+/** The ledger trigger an event should have produced. */
+export type Expectation =
+  | 'skill-invocation'
+  | 'planning-invocation'
+  | 'unit-hold'
+  | 'skip'
+  | 'finding'
+  | `unit-${Exclude<UnitCall, 'claim'>}`
+  | 'done-declaration';
+
+/**
+ * What a transcript event is, from either host's adapter. Every kind is a
+ * closed set except the skill name after `skill amber:`, which stays open:
+ * the Claude adapter records any amber: skill a transcript shows, as the
+ * original did, so a skill added later is still counted.
+ */
+export type AuditEventKind =
+  | `skill amber:${string}`
+  | `typed amber:${TypedSkill}`
+  | `mark ${MarkKind | 'malformed'}`
+  | `cmd unit ${UnitCall}`
+  | 'cmd done'
+  | `marker ${Marker}`
+  | 'verdict-text';
+
+/**
+ * An event a transcript shows that the ledger is supposed to mirror, from
+ * either host's adapter. ts is the line's timestamp as the host wrote it.
+ */
+export interface AuditEvent {
+  readonly ln: number;
+  readonly ts: unknown;
+  readonly kind: AuditEventKind;
+  readonly expect: Expectation | null;
+  readonly name?: string;
+  readonly typed?: boolean;
+  /** How the tool result showed a record.cjs call; set after the call. */
+  result?: CallResult;
+  readonly toolId?: unknown;
+}
+
+export interface ClaudeTranscript {
+  readonly events: AuditEvent[];
+  readonly users: number;
+  readonly assistants: number;
+  readonly lines: number;
+  readonly cwd: unknown;
+  readonly stops: {
+    readonly ln: number;
+    readonly ts: unknown;
+    readonly cat: string;
+  }[];
+  readonly reentries: { readonly ln: number; readonly ts: unknown }[];
+}
+
+/** What the audit reads from a transcript of either host. */
+export interface AuditTranscript {
+  readonly events: readonly AuditEvent[];
+  readonly users: number;
+  readonly assistants: number;
+  readonly lines: number;
+  readonly cwd: unknown;
+  readonly stops: readonly { readonly cat: string }[];
+  readonly reentries: readonly { readonly ln: number }[];
+  /** false for Codex rollouts, which keep no stop-hook summaries. */
+  readonly stopsKnown?: boolean;
+  readonly malformed?: number;
+}
+
+/** The period and exclusions every audit count is bounded by. */
+export interface AuditContext {
+  readonly periodEnd: string;
+  readonly exclude: readonly string[];
+}

@@ -5,3 +5,5 @@ plugin/hooks/progress.cjs linguist-generated=true
 plugin/hooks/scope-check.cjs linguist-generated=true
 plugin/lib/*.cjs linguist-generated=true
 plugin/scripts/audit-codex.cjs linguist-generated=true
+plugin/scripts/record.cjs linguist-generated=true
+plugin/scripts/audit.cjs linguist-generated=true

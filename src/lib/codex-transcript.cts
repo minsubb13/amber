@@ -10,6 +10,14 @@
 // with the engine's TypeError, a non-string field is converted to text).
 
 import guards = require('./guards.cjs');
+import type {
+  CallResult,
+  Expectation,
+  Marker,
+  MarkKind,
+  TypedSkill,
+  UnitCall,
+} from './types.cjs';
 
 const { readField, toText } = guards;
 
@@ -17,37 +25,20 @@ const { readField, toText } = guards;
 type RecorderCall =
   | { readonly kind: 'invoke'; readonly skill: Skill }
   | { readonly kind: 'mark'; readonly mark: MarkKind }
-  | { readonly kind: 'unit'; readonly command: UnitCommand }
+  | { readonly kind: 'unit'; readonly command: UnitCall }
   | { readonly kind: 'done' };
 
 type Skill = 'planning' | 'set' | 'init' | 'status' | 'audit';
-type MarkKind = 'skip' | 'finding' | 'hold';
-type UnitCommand = 'init' | 'start' | 'verified' | 'failed' | 'hold' | 'claim';
-type Marker = 'AMBER_SKIP' | 'AMBER_DONE' | 'AMBER_GOAL' | 'AMBER_REVIEW';
-type TypedSkill = 'planning' | 'init' | 'audit';
 
 /** What an event is; built from the closed sets above. */
 type EventKind =
   | `skill amber:${Skill}`
   | `mark ${MarkKind}`
-  | `cmd unit ${UnitCommand}`
+  | `cmd unit ${UnitCall}`
   | 'cmd done'
   | `typed amber:${TypedSkill}`
   | `marker ${Marker}`
   | 'verdict-text';
-
-/** The ledger row an event should have produced, matched by audit.cjs. */
-type Expectation =
-  | 'skill-invocation'
-  | 'planning-invocation'
-  | 'unit-hold'
-  | 'skip'
-  | 'finding'
-  | `unit-${Exclude<UnitCommand, 'claim'>}`
-  | 'done-declaration';
-
-/** How a recorder call fared in the output the transcript kept. */
-type CallResult = 'accepted' | 'refused' | 'mention' | 'unobserved';
 
 /** Where an event was found; ts is the row's timestamp as Codex wrote it. */
 interface Meta {
@@ -112,7 +103,7 @@ function markOf(name: string): MarkKind | null {
   }
 }
 
-function unitCommandOf(name: string): UnitCommand | null {
+function unitCommandOf(name: string): UnitCall | null {
   switch (name) {
     case 'init':
     case 'start':
@@ -174,7 +165,7 @@ function textOf(content: unknown): string {
 }
 
 /** Whether the output shows the recorder's success line for a unit command. */
-function unitAccepted(command: UnitCommand, body: string): boolean {
+function unitAccepted(command: UnitCall, body: string): boolean {
   const transition = (state: string): boolean =>
     new RegExp('^amber: unit U\\d+ -> ' + state, 'm').test(body);
   switch (command) {

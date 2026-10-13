@@ -1,0 +1,431 @@
+// The audit's counts and report lines without I/O, computed from ledger rows
+// the caller loaded. Rows are read as found, through guards.readField and
+// guards.toText: a broken or null row and a missing field take the
+// original's outcome. A field of a non-string type, which no writer produces,
+// is read as its text where the original sometimes failed calling a string
+// method on it or compared mixed types (coverage document, known
+// differences).
+
+import guards = require('./guards.cjs');
+import type { AuditContext } from './types.cjs';
+
+const { readField: field, toText } = guards;
+
+/** A ledger row as parsed, or the marker a malformed line becomes. */
+type Row = unknown;
+
+function excludedText(ctx: AuditContext): string {
+  return ctx.exclude.length ? ctx.exclude.join(',') : 'none';
+}
+
+function canonicalExclude(list: readonly string[]): string[] {
+  return [...new Set(list.map((s) => s.trim()).filter(Boolean))].sort();
+}
+
+function isMalformed(r: Row): boolean {
+  return Boolean(field(r, 'malformed'));
+}
+
+/** Rows up to the period end; a row without ts counts as the earliest. */
+function inPeriod(rows: readonly Row[], periodEnd: string): Row[] {
+  return rows.filter(
+    (r) => isMalformed(r) || toText(field(r, 'ts') || '') <= periodEnd,
+  );
+}
+
+/** Well-formed rows of projects not excluded. */
+function fieldOf(rows: readonly Row[], ctx: AuditContext): Row[] {
+  const excluded = new Set<unknown>(ctx.exclude);
+  return rows.filter(
+    (r) => !isMalformed(r) && !excluded.has(field(r, 'project')),
+  );
+}
+
+/**
+ * `(value || 0) + 1` with JavaScript's own outcome: a counter that starts as
+ * an inherited member of Object.prototype (a key such as `constructor` or
+ * `toString`) turns into that member's text with digits appended.
+ */
+function increment(value: unknown): number | string {
+  if (!value) return 1;
+  if (typeof value === 'number') return value + 1;
+  if (typeof value === 'string') return value + '1';
+  if (typeof value === 'function') {
+    return Function.prototype.toString.call(value) + '1';
+  }
+  return toText(value) + '1';
+}
+
+/**
+ * "key=n" pairs in key order. The counts live in a plain object, as in the
+ * original: keys are property names, a key named after an Object.prototype
+ * member starts from that member, and `__proto__` is never an own key.
+ */
+function count(list: readonly Row[], key: (r: Row) => unknown): string {
+  const c: Record<string, unknown> = {};
+  for (const x of list) {
+    const k = toText(key(x));
+    c[k] = increment(c[k]);
+  }
+  return Object.keys(c)
+    .sort()
+    .map((k) => k + '=' + toText(c[k]))
+    .join(' ');
+}
+
+function summaryOf(r: Row): string {
+  return toText(field(r, 'summary') || '');
+}
+
+function triggerIs(r: Row, trigger: string): boolean {
+  return field(r, 'trigger') === trigger;
+}
+
+function isUnitRow(r: Row): boolean {
+  return /^unit-/.test(toText(field(r, 'trigger')));
+}
+
+/** The report's ledger-counts block. */
+function summaryLines(rows: readonly Row[], ctx: AuditContext): string[] {
+  const rowsInField = fieldOf(rows, ctx);
+  const done = rowsInField.filter((r) => triggerIs(r, 'done-declaration'));
+  const passed = done.filter(
+    (r) => field(r, 'gate') === 'passed' && field(r, 'contract'),
+  );
+  const contracts = [
+    ...new Set(passed.map((r) => toText(field(r, 'contract')))),
+  ].sort();
+  const skips = rowsInField.filter((r) => triggerIs(r, 'skip'));
+  const skill = rowsInField.filter((r) => triggerIs(r, 'skill-invocation'));
+  const units = rowsInField.filter(isUnitRow);
+  return [
+    'period_end=' + ctx.periodEnd,
+    'excluded_projects=' + excludedText(ctx),
+    'ledger_rows=' +
+      String(rows.length) +
+      ' malformed=' +
+      String(rows.filter(isMalformed).length) +
+      ' field_rows=' +
+      String(rowsInField.length),
+    'by_project: ' + count(rowsInField, (r) => field(r, 'project')),
+    'by_trigger: ' + count(rowsInField, (r) => field(r, 'trigger')),
+    'by_model: ' + count(rowsInField, (r) => field(r, 'model') || 'unknown'),
+    'model_unknown_by_trigger: ' +
+      count(
+        rowsInField.filter((r) => {
+          const model = field(r, 'model');
+          return !model || model === 'unknown';
+        }),
+        (r) => field(r, 'trigger'),
+      ),
+    'by_plugin_version: ' +
+      count(rowsInField, (r) => field(r, 'plugin_version') || 'unknown'),
+    'skill_invocations: ' + count(skill, (r) => summaryOf(r).split(/\s/)[0]),
+    'skips: ' +
+      count(
+        skips,
+        (r) =>
+          (/^(opening verdict|declined opening)/.exec(summaryOf(r)) ?? [
+            null,
+            'other',
+          ])[1],
+      ),
+    'done: with_contract=' +
+      String(done.filter((r) => field(r, 'contract')).length) +
+      ' without_contract=' +
+      String(done.filter((r) => !field(r, 'contract')).length) +
+      ' with_review=' +
+      String(done.filter((r) => field(r, 'review')).length) +
+      ' with_goal=' +
+      String(done.filter((r) => field(r, 'goal')).length),
+    'gate: ' + count(done, (r) => field(r, 'gate') || 'none'),
+    'completions_distinct_contracts=' + String(contracts.length),
+    'completions: ' + contracts.join(' '),
+    'unit_events: ' + count(units, (r) => toText(field(r, 'trigger')).slice(5)),
+    'unit_rows_attributed: session=' +
+      String(units.filter((r) => field(r, 'session_id') !== 'shell').length) +
+      ' shell=' +
+      String(units.filter((r) => field(r, 'session_id') === 'shell').length),
+    'out_of_scope_declarations=' +
+      String(rowsInField.filter((r) => field(r, 'out_of_scope')).length),
+    'sessions_distinct=' +
+      String(new Set(rowsInField.map((r) => field(r, 'session_id'))).size),
+  ];
+}
+
+/** A mechanism, its field count (or 'file present'), and why it has none. */
+type Mechanism = readonly [string, number | string | null, string?];
+
+/**
+ * Declared mechanisms against field firings. Source of the list: hooks.json
+ * (S0/S1/S2/S3/E1), the plugin's skills directory (one row per skill, so a
+ * new skill appears by itself), record.cjs subcommands, mark kinds, contract
+ * machine rows, loop-body events, out-of-scope declarations, typed init/audit
+ * rows. Mechanisms that leave no ledger row by design are listed as
+ * unrecorded. Nothing here is marked as fixed.
+ */
+function mechanisms(
+  rowsInField: readonly Row[],
+  skillNames: readonly string[],
+  failuresFilePresent: boolean,
+): Mechanism[] {
+  const n = (fn: (r: Row) => unknown): number =>
+    rowsInField.filter((r) => Boolean(fn(r))).length;
+  const typedRow = / \(typed\)$/;
+  const sk = (name: string): number =>
+    n(
+      (r) =>
+        triggerIs(r, 'skill-invocation') &&
+        summaryOf(r).startsWith(name) &&
+        !typedRow.test(summaryOf(r)),
+    );
+  const trigger = (r: Row): unknown => field(r, 'trigger');
+  const rows: Mechanism[] = [
+    [
+      'S1 typed /amber:planning (planning-invocation)',
+      n((r) => triggerIs(r, 'planning-invocation')),
+    ],
+  ];
+  for (const name of skillNames) {
+    const full = 'amber:' + name;
+    if (name === 'mark') {
+      // A well-formed mark is recorded as its event (skip, finding, hold);
+      // only malformed arguments fall back to a plain skill-invocation row.
+      rows.push([
+        full + ' (Skill tool: skip, finding and hold rows)',
+        n((r) => {
+          const t = trigger(r);
+          return t === 'skip' || t === 'finding' || t === 'unit-hold';
+        }) + sk(full),
+      ]);
+    } else {
+      rows.push([full + ' (Skill tool)', sk(full)]);
+    }
+  }
+  rows.push(
+    [
+      'amber:set research route (args mention research)',
+      n(
+        (r) =>
+          triggerIs(r, 'skill-invocation') &&
+          /^amber:set/.test(summaryOf(r)) &&
+          /research/.test(summaryOf(r)),
+      ),
+    ],
+    [
+      'S1 typed /amber:init (skill-invocation "amber:init (typed)")',
+      n(
+        (r) =>
+          triggerIs(r, 'skill-invocation') &&
+          summaryOf(r) === 'amber:init (typed)',
+      ),
+    ],
+    [
+      'S1 typed /amber:audit (skill-invocation "amber:audit (typed)")',
+      n(
+        (r) =>
+          triggerIs(r, 'skill-invocation') &&
+          summaryOf(r) === 'amber:audit (typed)',
+      ),
+    ],
+    [
+      'mark skip: opening verdict - no contract',
+      n((r) => triggerIs(r, 'skip') && /^opening verdict/.test(summaryOf(r))),
+    ],
+    [
+      'mark skip: declined opening',
+      n((r) => triggerIs(r, 'skip') && /^declined opening/.test(summaryOf(r))),
+    ],
+    [
+      'mark skip: other subjects',
+      n(
+        (r) =>
+          triggerIs(r, 'skip') &&
+          !/^(opening verdict|declined opening)/.test(summaryOf(r)),
+      ),
+    ],
+    ['mark finding', n((r) => triggerIs(r, 'finding'))],
+    ['mark hold (unit-hold)', n((r) => triggerIs(r, 'unit-hold'))],
+    [
+      'hold plain (unit-hold without kind; one stop passes)',
+      n((r) => triggerIs(r, 'unit-hold') && field(r, 'kind') !== 'external'),
+    ],
+    [
+      'hold external (unit-hold kind=external; every stop passes until the next transition)',
+      n((r) => triggerIs(r, 'unit-hold') && field(r, 'kind') === 'external'),
+    ],
+    [
+      'done with contract (contract run completed)',
+      n((r) => triggerIs(r, 'done-declaration') && field(r, 'contract')),
+    ],
+    [
+      'done without contract (no-contract unit completed)',
+      n((r) => triggerIs(r, 'done-declaration') && !field(r, 'contract')),
+    ],
+    [
+      'done with semantic review attestation (review field)',
+      n((r) => triggerIs(r, 'done-declaration') && field(r, 'review')),
+    ],
+    ['gate passed', n((r) => field(r, 'gate') === 'passed')],
+    [
+      'gate exhausted (send-back retries used up)',
+      n((r) => field(r, 'gate') === 'exhausted'),
+    ],
+    ['unit init', n((r) => triggerIs(r, 'unit-init'))],
+    ['unit start', n((r) => triggerIs(r, 'unit-start'))],
+    ['unit verified', n((r) => triggerIs(r, 'unit-verified'))],
+    ['unit failed', n((r) => triggerIs(r, 'unit-failed'))],
+    [
+      'unit limit (ten re-entries on one unit)',
+      n((r) => triggerIs(r, 'unit-limit')),
+    ],
+    [
+      'unit claim (subagent claim observed by E1, unit-claim)',
+      n((r) => triggerIs(r, 'unit-claim')),
+    ],
+    [
+      'out-of-scope declaration at verified/done',
+      n((r) => Boolean(field(r, 'out_of_scope'))),
+    ],
+    [
+      'E1 deny (write-scope / bash-deny refusal)',
+      null,
+      'by design: the refusal reaches the model as the denial text; no ledger row',
+    ],
+    [
+      'S2 continuation send-back (re-entry)',
+      null,
+      'by design: only the tenth re-entry writes unit-limit; the session command counts the re-entry directives in the transcript',
+    ],
+    [
+      'hold consumed by S2 (one stop let through)',
+      null,
+      'by design: no row on consumption',
+    ],
+    [
+      'operator-typed /amber:status',
+      null,
+      'by design: S1 records typed init and audit only; a typed status leaves no row',
+    ],
+    [
+      'S0 briefing (session opening: contract awareness, waiting signal, non-driving session)',
+      null,
+      'by design: context injection only; no row',
+    ],
+    [
+      'sensor failure breadcrumb (state/sensor-failures.log)',
+      failuresFilePresent ? 'file present' : 0,
+    ],
+  );
+  return rows;
+}
+
+function deadLines(
+  ctx: AuditContext,
+  rowsInField: readonly Row[],
+  skillNames: readonly string[],
+  failuresFilePresent: boolean,
+): string[] {
+  const out = [
+    'period_end=' + ctx.periodEnd,
+    'excluded_projects=' + excludedText(ctx),
+    'mechanism | field_count | status',
+  ];
+  for (const [name, c, note] of mechanisms(
+    rowsInField,
+    skillNames,
+    failuresFilePresent,
+  )) {
+    const status =
+      c === null
+        ? 'unrecorded (' + String(note) + ')'
+        : c === 0
+          ? 'DEAD (0 in field)'
+          : 'live';
+    out.push(name + ' | ' + (c === null ? '-' : String(c)) + ' | ' + status);
+  }
+  return out;
+}
+
+/** One sampled session: its rows, first and last time, and completions. */
+interface SessionSample {
+  readonly id: string;
+  project: unknown;
+  first: string;
+  last: string;
+  rows: number;
+  readonly passed: Set<unknown>;
+}
+
+/** Sessions newest first (by last row), shell and anonymous rows left out. */
+function sessionSamples(
+  rowsInField: readonly Row[],
+  limit: number,
+): SessionSample[] {
+  const by = new Map<string, SessionSample>();
+  for (const r of rowsInField) {
+    const id = toText(field(r, 'session_id') || '');
+    if (!id || id === 'shell') continue;
+    const ts = toText(field(r, 'ts') || '');
+    let s = by.get(id);
+    if (!s) {
+      s = {
+        id,
+        project: field(r, 'project'),
+        first: ts,
+        last: ts,
+        rows: 0,
+        passed: new Set(),
+      };
+      by.set(id, s);
+    }
+    s.rows += 1;
+    if (ts < s.first) s.first = ts;
+    if (ts >= s.last) {
+      s.last = ts;
+      s.project = field(r, 'project');
+    }
+    if (
+      triggerIs(r, 'done-declaration') &&
+      field(r, 'gate') === 'passed' &&
+      field(r, 'contract')
+    ) {
+      s.passed.add(field(r, 'contract'));
+    }
+  }
+  return [...by.values()]
+    .sort((a, b) => (a.last < b.last ? 1 : a.last > b.last ? -1 : 0))
+    .slice(0, limit);
+}
+
+function sessionSampleLine(s: SessionSample, hasTranscript: boolean): string {
+  return (
+    'session=' +
+    s.id +
+    ' project=' +
+    toText(s.project || 'unknown') +
+    ' first=' +
+    s.first +
+    ' last=' +
+    s.last +
+    ' rows=' +
+    String(s.rows) +
+    ' completions=' +
+    String(s.passed.size) +
+    ' transcript=' +
+    (hasTranscript ? 'yes' : 'no')
+  );
+}
+
+export = {
+  excludedText,
+  canonicalExclude,
+  isMalformed,
+  inPeriod,
+  fieldOf,
+  count,
+  summaryLines,
+  deadLines,
+  sessionSamples,
+  sessionSampleLine,
+};
