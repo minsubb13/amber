@@ -20,8 +20,8 @@ So the tracked branch is the release: `release` only ever points at a release co
 
 Amber is 0.x. Feature and fix pull requests leave both manifests (`plugin/.claude-plugin/plugin.json`, `plugin/.codex-plugin/plugin.json`) unchanged; only a release pull request sets the version.
 
-- **minor** - behavior an operator or a model sees changes: skills, hook messages, the run protocol, commands and their output.
-- **patch** - a defect is fixed and no behavior is added.
+- **minor** - the intended behavior an operator or a model sees changes or grows: skills, hook messages, the run protocol, commands and their output.
+- **patch** - the intended behavior stays the same and a defect that departed from it is fixed, even when the fix changes what is shown.
 - **none** - internal changes (refactoring, tests, development tooling, README) ship with the next release.
 
 There is no changelog file. The GitHub release notes, generated from the merged pull request titles, are the change record.
