@@ -14,7 +14,9 @@ applies on top of the rules below.
 - **What** - the work itself, in one or two plain sentences, as a change the
   operator would notice, not as a list of files. Someone who has not seen the
   project should understand what the work is from this part alone. No jargon
-  here: no tool, library, or file names unless the operator needs them.
+  here: no tool, library, or file names unless the operator needs them. In
+  the stop and completion reports this is the whole work, not the last step
+  taken.
 - **Why** - the problem or need behind the work, with one piece of evidence.
 - **How** - the key steps only, each with who does it and how it is checked.
   A long list hides what matters; keep the steps that carry the work.
@@ -101,18 +103,21 @@ Written as the run ends, before the completion signal.
 ## Stop report
 
 Written when work stops to bring the operator a question, a blocker, or a
-decision outside the scope.
+decision outside the scope. It answers the four questions for the whole
+work, then says where things stand now.
 
-1. **What I was doing** - the work in plain words and where the whole job
-   stands (for example, "the research is done; I stopped before the first
-   code change").
-2. **Why I stopped** - what happened, with its evidence, and what must be
-   decided. Define here any rule or term the operator may not know; a stop
-   caused by a rule the operator never heard of must say what the rule is
-   for.
-3. **How it can go** - the options, the recommended one first, each with
-   what it leads to and what it costs.
-4. **Current state** - what was left half-done and in what state, or
-   "none".
-5. **Question** - one question the operator can answer with yes, no, or one
+1. **What this work is** - the whole work in plain words, not the step that
+   was just taken.
+2. **Why** - the problem or need behind the work, in one or two sentences.
+3. **How** - the key steps, each marked done, in progress, or not started.
+4. **When it is done** - the end state from the operator's side and the
+   completion conditions.
+5. **Where things stand now** - which step the work is on, what is done,
+   what was left half-done and in what state, and what happened that made
+   the work stop here, with its evidence. Define here any rule or term the
+   operator may not know; a stop caused by a rule the operator never heard
+   of must say what the rule is for.
+6. **For you to decide** - what must be decided, with the options, the
+   recommended one first, each with what it leads to and what it costs.
+7. **Question** - one question the operator can answer with yes, no, or one
    option.
