@@ -153,8 +153,9 @@ protocol, "Approval"), and only then creates the pointer itself.
    Exit: both documents are committed and no pointer exists.
 5. **Report your understanding, then wait for approval.** Report in
    conversation what you understood, in the approval report shape of
-   [reports](../../references/reports.md): why this run exists, what it
-   will do, what it will not touch, what the operator still decides. Write
+   [reports](../../references/reports.md): what this run is, why it
+   exists, how it will be done, and what will be true when it ends, then
+   what it will not touch and what the operator still decides. Write
    it so a person with no context on this run would understand it - if the
    operator, who has the context, finds it hard to follow, the report
    failed. The operator must be able to judge approval from this report
