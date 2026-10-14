@@ -3,11 +3,13 @@
 Read this reference before writing any of the three reports addressed to the
 operator: the approval report (set, step 5), the completion report (run
 protocol, "Completion"), and the stop report (a contract's "Question
-handling", or any stop that brings the operator a decision). Every report
-answers the same four questions, in this order: what the work is, why it is
-done, how it is done, and what the result is. The parts after those four
-appear only when they have content. The run protocol's operator-facing voice
-applies on top of the rules below.
+handling", or any stop that brings the operator a decision). The approval
+and completion reports answer the same four questions, in this order: what
+the work is, why it is done, how it is done, and what the result is. The
+stop report names the work in a sentence and goes straight to the decision.
+Parts beyond those appear only when they have content. Every report is
+short: the reader's attention is limited. The run protocol's operator-facing
+voice applies on top of the rules below.
 
 ## The four questions
 
@@ -45,9 +47,7 @@ the question it answers (for example "What this work is", "Why", "How",
   that only serve the worker's own record - rule wording quoted in full,
   commit message text, line numbers, counts of self-checks. Put them in the
   run's files and point to the file in one line when the operator may want
-  it. Shortening
-  never drops a completion condition, a point where the run stops to ask, or
-  a fact the operator must act on.
+  it.
 - **Short paragraphs.** Keep a paragraph to about three sentences. Use a list
   only for parallel items, a table only for results that compare.
 - **Provenance.** Numbers and claims carry their provenance (verified /
@@ -56,10 +56,15 @@ the question it answers (for example "What this work is", "Why", "How",
 - **One question, last.** A report that needs an answer ends with exactly one
   question. Interpretations to confirm and defaults the operator may change
   are gathered in the part right above it, never scattered through the body.
-- **Length.** Aim for one screen. When the work is large, shorten each part
-  rather than drop a part. A completion reported "in full" means the four
-  questions are answered and the deliverable is shown, not that every detail
-  is repeated.
+- **Short.** An approval or stop report fits in about 20 lines and a
+  completion report in about 30; each part is one to three sentences or a
+  short list. When more is needed, it goes in the run's files with a
+  one-line pointer. Shortening compresses, it never drops: a completion
+  condition, a point where the run stops to ask, and a fact the operator
+  must act on are still there, named in a few words. A completion reported
+  "in full" means the four questions are answered and the deliverable is
+  shown (its essential part when it is long), not that every detail is
+  repeated.
 
 ## Approval report
 
@@ -72,8 +77,8 @@ judge the go-ahead from this report alone.
 3. **How** - numbered key steps, one line each: who does it (the model or
    the operator) and how that step is checked.
 4. **When it is done** - the end state from the operator's side, then every
-   completion condition in plain words; merge or shorten the wording, never
-   the list.
+   completion condition, grouped and named in a few words; the full wording
+   stays in the scope document.
 5. **What I will not do** (when there is any) - deliberate non-goals (things
    that could reasonably be expected but are left out) and what stays
    untouched. Skip obvious negatives.
@@ -109,21 +114,20 @@ Written as the run ends, before the completion signal.
 ## Stop report
 
 Written when work stops to bring the operator a question, a blocker, or a
-decision outside the scope. It answers the four questions for the whole
-work, then says where things stand now.
+decision outside the scope. It leads with the decision: the why, the steps,
+and the conditions of the whole work were given in the approval report and
+are not repeated here.
 
-1. **What this work is** - the whole work in plain words, not the step that
-   was just taken.
-2. **Why** - the problem or need behind the work, in one or two sentences.
-3. **How** - the key steps, each marked done, in progress, or not started.
-4. **When it is done** - the end state from the operator's side and the
-   completion conditions.
-5. **Where things stand now** - which step the work is on, what is done,
-   what was left half-done and in what state, and what happened that made
-   the work stop here, with its evidence. Define here any rule or term the
-   operator may not know; a stop caused by a rule the operator never heard
-   of must say what the rule is for.
-6. **For you to decide** - what must be decided, with the options, the
-   recommended one first, each with what it leads to and what it costs.
-7. **Question** - one question the operator can answer with yes, no, or one
+1. **What I was doing** - the whole work in one or two plain sentences and
+   where it stands (for example, "the research is done; I stopped before
+   the first code change").
+2. **Why I stopped** - what happened, with its evidence, and what must be
+   decided. Define here any rule or term the operator may not know; a stop
+   caused by a rule the operator never heard of must say what the rule is
+   for.
+3. **Options** - the recommended one first, each with what it leads to and
+   what it costs.
+4. **Current state** - what is done, what was left half-done and in what
+   state.
+5. **Question** - one question the operator can answer with yes, no, or one
    option.
