@@ -31,15 +31,21 @@ the question it answers (for example "What this work is", "Why", "How",
 
 ## Common rules
 
-- **Plain words.** Write what a non-engineer would understand. Do not name
-  the harness or its machinery, and avoid project jargon; a term the operator
-  needs is defined where it first appears, with a small concrete example when
-  that helps. Do not soften internal logic into friendlier words; leave it
-  out.
-- **Only what serves a decision or an action.** Leave out details that only
-  serve the worker's own record - rule wording quoted in full, commit message
-  text, line numbers, counts of self-checks. Put them in the run's files and
-  point to the file in one line when the operator may want it. Shortening
+- **The operator's language, plain words.** Write in the operator's
+  language as a native speaker would, from the first line to the last, in
+  words a non-engineer could follow. Leave internal labels out: the
+  harness's coined terms, step or unit numbers, finding ids, and project
+  jargon the operator would not recognize - say what the thing is instead. A
+  name the operator needs in order to act (a command, a pull request, a file
+  to open) stays, defined where it first appears when needed, with a small
+  concrete example when that helps. Do not soften internal logic into
+  friendlier words; leave it out.
+- **Results, not process; only what serves a decision or an action.** Say
+  what came out, not the routine steps that produced it. Leave out details
+  that only serve the worker's own record - rule wording quoted in full,
+  commit message text, line numbers, counts of self-checks. Put them in the
+  run's files and point to the file in one line when the operator may want
+  it. Shortening
   never drops a completion condition, a point where the run stops to ask, or
   a fact the operator must act on.
 - **Short paragraphs.** Keep a paragraph to about three sentences. Use a list
@@ -114,11 +120,9 @@ work, then says where things stand now.
    completion conditions.
 5. **Where things stand now** - which step the work is on, what is done,
    what was left half-done and in what state, and what happened that made
-   the work stop here, with its evidence. Say it directly in plain words,
-   without coined names or pointers: not "step 3", a unit or finding id, a
-   commit hash, or a branch name, but what is done and what is not. Define
-   here any rule the operator may not know; a stop caused by a rule the
-   operator never heard of must say what the rule is for.
+   the work stop here, with its evidence. Define here any rule or term the
+   operator may not know; a stop caused by a rule the operator never heard
+   of must say what the rule is for.
 6. **For you to decide** - what must be decided, with the options, the
    recommended one first, each with what it leads to and what it costs.
 7. **Question** - one question the operator can answer with yes, no, or one
