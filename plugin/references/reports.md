@@ -114,9 +114,11 @@ work, then says where things stand now.
    completion conditions.
 5. **Where things stand now** - which step the work is on, what is done,
    what was left half-done and in what state, and what happened that made
-   the work stop here, with its evidence. Define here any rule or term the
-   operator may not know; a stop caused by a rule the operator never heard
-   of must say what the rule is for.
+   the work stop here, with its evidence. Say it directly in plain words,
+   without coined names or pointers: not "step 3", a unit or finding id, a
+   commit hash, or a branch name, but what is done and what is not. Define
+   here any rule the operator may not know; a stop caused by a rule the
+   operator never heard of must say what the rule is for.
 6. **For you to decide** - what must be decided, with the options, the
    recommended one first, each with what it leads to and what it costs.
 7. **Question** - one question the operator can answer with yes, no, or one
