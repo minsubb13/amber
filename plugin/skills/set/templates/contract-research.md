@@ -47,6 +47,7 @@ All items required for a failed close - failure is a legitimate completion.
 - the same diagnosis twice = stop
 - three correctness failures on one hypothesis = abandon that hypothesis
 - <further stop signals>
+- every stop brings the operator a stop report in the shape of the plugin's `references/reports.md`
 
 ## Budget
 
@@ -60,7 +61,7 @@ Per claim: time, number of sources, citation depth. On reaching it, dispose that
 
 ## Standing rules
 
-- Before the completion signal, give the completion report: what was done and how, in full - show the verdict and its evidence, state which experiments and investigations ran and what verified them, and explain it for a reader with no context. The signal closes the report; it never replaces it [self-report]
+- Before the completion signal, give the completion report in the shape of the plugin's `references/reports.md`: what was done and how, in full - show the verdict and its evidence, state which experiments and investigations ran and what verified them, and explain it for a reader with no context. The signal closes the report; it never replaces it [self-report]
 - Before the completion signal, semantically re-check the original question, every required condition of this contract, the current verdict artifacts, and the oracle evidence. One condition without evidence, or with failed, unsuitable, or stale evidence, means the pass is not complete. After a change made during that re-check, refresh the affected validation and re-check again [self-report]
 - Incomplete, blocked, waiting, and status-only turns run no completion signal. The signal declares the contracted pass itself complete, never that an assessment, report, or attempt finished [self-report]
 - The re-check result goes into `record.cjs done --review "<evidence summary>" --goal "<verdict>" --summary "<summary>"` (the last tool call; no marker line in the message). S2 checks only the signal, the pointer, the current contract link, and leftover worktrees; semantic completion is the model's judgment. On a pass the hook removes the pointer and progress.json [hook: S2]

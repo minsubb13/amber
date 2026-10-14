@@ -20,7 +20,8 @@ before a row becomes a question.
 The operator approves a contract in conversation, after `set`'s report. The
 rule is the same on both hosts.
 
-- **The question.** The report ends with one plain go-ahead question in the
+- **The question.** The report, in the approval shape of
+  [reports](reports.md), ends with one plain go-ahead question in the
   operator's language ("Shall I go ahead with this scope?"). It is the only
   gate: no shell command, no popup, no second confirmation.
 - **What counts.** An unconditional yes to that question is approval,
@@ -113,8 +114,9 @@ commands").
   incomplete, blocked, waiting, and status-only turns run no signal: it
   declares the governed work unit itself complete, never merely a finished
   assessment or report.
-- **Report.** A completion is reported as it is signalled - report what was
-  done AND how, in full: show the actual deliverable (the real files, text,
-  or code shapes), state what was changed where and how it was verified, and
-  explain it plainly for a reader with no context; the signal closes that
-  report, it never replaces it.
+- **Report.** A completion is reported as it is signalled, in the
+  completion shape of [reports](reports.md) - report what was done AND how,
+  in full: show the actual deliverable (the real files, text, or code
+  shapes), state what was changed where and how it was verified, and explain
+  it plainly for a reader with no context; the signal closes that report, it
+  never replaces it.

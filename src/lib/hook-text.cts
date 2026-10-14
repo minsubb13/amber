@@ -16,6 +16,7 @@ import type {
 } from './types.cjs';
 
 const RECORD_CLI = path.join(__dirname, '..', 'scripts', 'record.cjs');
+const REPORTS_REF = path.join(__dirname, '..', 'references', 'reports.md');
 const MAX_GATE_ATTEMPTS = 3;
 
 function denyOutput(reason: string): HookOutput {
@@ -67,9 +68,11 @@ function completionGuidance(contract: ActiveContract | null): string {
       'change, or supported by an unsuitable oracle means the work is not complete. Then run, as ' +
       'your last tool call:',
     doneCommandText(contract),
-    'and end the turn with the completion report - what was done and how, in full: the real files, ' +
-      'text, or code shapes, what changed where, how it was verified, explained for a reader with no ' +
-      'context. No marker line goes in the message. Never run the command for incomplete, blocked, ' +
+    'and end the turn with the completion report in the shape of ' +
+      REPORTS_REF +
+      ' - what was done and how, in full: the real files, text, or code shapes, what changed ' +
+      'where, how it was verified, explained for a reader with no context. No marker line goes in ' +
+      'the message. Never run the command for incomplete, blocked, ' +
       'waiting, or status-only states: it declares the governed work unit itself complete, never that ' +
       'an assessment, report, or attempt finished. If work changes after the review, refresh the ' +
       'affected validation and review again before running it. The hook checks only the signal and ' +

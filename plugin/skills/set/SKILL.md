@@ -43,7 +43,8 @@ protocol, "Approval"), and only then creates the pointer itself.
      recorded for solo-decision rows that failed the load-bearing test,
      each with its value), `## Standing rules` (the S0 briefing hands this
      section to every session verbatim), `## Question handling` (default:
-     full stop plus a three-part report).
+     full stop plus a stop report in the shape of
+     [reports](../../references/reports.md)).
    - **Machine rows.** Machine-enforceable rows end with
      `[machine: write-scope <glob>]` (zone-root-relative, multiple rows
      union) or `[machine: bash-deny <regex>]`; everything else is
@@ -151,9 +152,10 @@ protocol, "Approval"), and only then creates the pointer itself.
 
    Exit: both documents are committed and no pointer exists.
 5. **Report your understanding, then wait for approval.** Report in
-   conversation what you understood: why this run exists, what it will do,
-   what it will not touch, what was settled and what stays open. Write it
-   so a person with no context on this run would understand it - if the
+   conversation what you understood, in the approval report shape of
+   [reports](../../references/reports.md): why this run exists, what it
+   will do, what it will not touch, what the operator still decides. Write
+   it so a person with no context on this run would understand it - if the
    operator, who has the context, finds it hard to follow, the report
    failed. The operator must be able to judge approval from this report
    alone, without opening the contract file. Speak in the run protocol's

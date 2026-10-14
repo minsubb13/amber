@@ -37,7 +37,7 @@ Not answered: <what this run does not cover>
 
 ## Standing rules
 
-- Before the completion signal, give the completion report: what was done and how, in full - show the actual deliverable, state what changed where and what verified it, and explain it for a reader with no context. The signal closes the report; it never replaces it [self-report]
+- Before the completion signal, give the completion report in the shape of the plugin's `references/reports.md`: what was done and how, in full - show the actual deliverable, state what changed where and what verified it, and explain it for a reader with no context. The signal closes the report; it never replaces it [self-report]
 - Before the completion signal, semantically re-check the original request, every required condition of this contract, the current artifacts, and the validation evidence. One condition without evidence, or with failed, unsuitable, or stale evidence, means the work is not complete. After a change made during that re-check, refresh the affected validation and re-check again [self-report]
 - Incomplete, blocked, waiting, and status-only turns run no completion signal. The signal declares the contracted work unit itself complete, never that an assessment, report, or attempt finished [self-report]
 - The re-check result goes into `record.cjs done --review "<evidence summary>" --goal "<goal-test result>" --summary "<summary>"` (the last tool call; no marker line in the message). S2 checks only the signal, the pointer, the current contract link, and leftover worktrees; semantic completion is the model's judgment. On a pass the hook removes the pointer and progress.json [hook: S2]
@@ -47,7 +47,7 @@ Not answered: <what this run does not cover>
 
 ## Question handling
 
-Default: on a discovery outside the contract, full stop plus report.
+Default: on a discovery outside the contract, full stop plus a stop report in the shape of the plugin's `references/reports.md`.
 
 ## Carry-over (filled at completion)
 
