@@ -20,7 +20,9 @@ operator-facing voice applies on top of them.
 - **Only what serves a decision or an action.** Leave out details that only
   serve the worker's own record - rule wording quoted in full, commit message
   text, line numbers, counts of self-checks. Put them in the run's files and
-  point to the file in one line when the operator may want it.
+  point to the file in one line when the operator may want it. Shortening
+  never drops a completion condition, a point where the run stops to ask, or
+  a fact the operator must act on.
 - **Separate weights.** Things of different weight go in different parts:
   what is settled, what the operator must do, what is out of scope, what went
   wrong. What the operator must do always has its own part.
@@ -30,7 +32,8 @@ operator-facing voice applies on top of them.
   defined where it first appears, with a small concrete example first when
   that helps. No metaphors in place of the definition.
 - **Provenance.** Numbers and claims carry their provenance (verified /
-  quoted / unverified).
+  quoted / unverified). Copy a number from the record that holds it; do not
+  recount or round it.
 - **One question, last.** A report that needs an answer ends with exactly one
   question. Interpretations to confirm and defaults the operator may change
   are gathered in the part right above it, never scattered through the body.
@@ -48,13 +51,15 @@ judge the go-ahead from this report alone.
 2. **Why** - the problem in one or two sentences, with one piece of evidence.
 3. **What I will do** - numbered steps, one line each: who does it (the
    model or the operator) and how that step is checked.
-4. **When it counts as done** - the completion conditions in plain words.
+4. **When it counts as done** - every completion condition in plain words;
+   merge or shorten the wording, never the list.
 5. **What I will not do** - deliberate non-goals (things that could
    reasonably be expected but are left out) and what stays untouched. Skip
    obvious negatives.
 6. **For you to decide** - defaults the model chose that the operator may
-   change, interpretations to confirm, and the points where the run will
-   wait for the operator.
+   change, interpretations to confirm, the points where the run will wait
+   for the operator, and what the run does when a foreseeable event happens
+   (a dependency merges first, a check fails, a review finds a must-fix).
 7. **Close** - the scope document's path in one line, then the go-ahead
    question ("Shall I go ahead with this scope?").
 
