@@ -24,6 +24,8 @@ claude plugin marketplace add minsubb13/amber#release
 claude plugin install amber@amber
 ```
 
+Claude Code leaves auto-update off for third-party marketplaces. To receive new releases automatically, run `/plugin`, open the **Marketplaces** tab, select `amber`, and choose **Enable auto-update**.
+
 **Codex**
 
 ```sh
