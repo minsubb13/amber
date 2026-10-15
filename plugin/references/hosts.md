@@ -176,7 +176,7 @@ registers the session as a driver of the run, so the Stop hook reads the
 signal in the same session. The Stop hook
 consumes the file, records the completion, and on a pass under a contract
 removes `.amber/active.json` and `.amber/progress.json` by itself. Then end
-the turn with the completion report.
+the turn with the completion report (shape in [reports](reports.md)).
 
 ## Project entry point and installation
 
