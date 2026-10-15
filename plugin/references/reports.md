@@ -92,7 +92,9 @@ judge the go-ahead from this report alone.
 
 ## Completion report
 
-Written as the run ends, before the completion signal.
+Written as the run ends: settle its content during the re-check before the
+completion signal, then give it once, as the message that ends the turn
+after the signal has run as the last tool call.
 
 1. **What was done** - the work in plain words and the verdict against the
    original request: met, or met with a stated caveat.
