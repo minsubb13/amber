@@ -69,6 +69,11 @@ export interface Progress {
   blocks: number;
   session_ids?: unknown;
   preexisting: unknown[];
+  /**
+   * The HEAD when the run began, when the tree had one: the scope-check
+   * baseline for a contract file that was never committed.
+   */
+  baseline_commit?: string;
   units: Record<string, Unit>;
   updated_at?: string;
 }
@@ -123,6 +128,8 @@ export interface ScopeCheckOptions {
   readonly writeScopes: string[];
   readonly boundaryRel?: string | null;
   readonly preexisting?: unknown[] | null;
+  /** progress.json's baseline_commit, the baseline when no commit added the contract file. */
+  readonly baselineCommit?: string | null;
   readonly declarations?: Declaration[];
 }
 

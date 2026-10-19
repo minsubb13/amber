@@ -23,6 +23,7 @@ function initProgress(
   contractFile: string | null | undefined,
   force: boolean,
   preexisting: unknown,
+  baselineCommit?: string | null,
 ): Progress {
   return store.initProgress(
     root,
@@ -31,6 +32,7 @@ function initProgress(
     force,
     preexisting,
     clock.isoNow,
+    baselineCommit,
   );
 }
 

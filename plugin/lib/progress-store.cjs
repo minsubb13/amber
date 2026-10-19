@@ -52,7 +52,7 @@ function saveProgress(root, p, now) {
     fs.renameSync(tmp, file);
 }
 /** Seeds the run state from the plan's unit rows and saves it. */
-function initProgress(root, planRel, contractFile, force, preexisting, now) {
+function initProgress(root, planRel, contractFile, force, preexisting, now, baselineCommit) {
     const file = progressPath(root);
     if (fs.existsSync(file) && !force) {
         throw new Error(file + ' already exists; pass --force to rebuild it from the plan');
@@ -62,7 +62,7 @@ function initProgress(root, planRel, contractFile, force, preexisting, now) {
     if (units.length === 0) {
         throw new Error('no [unit: ...] rows found in ' + planRel);
     }
-    const p = model.newProgress(units, contractFile || null, path.relative(root, planAbs).split(path.sep).join('/'), Array.isArray(preexisting) ? preexisting : [], now);
+    const p = model.newProgress(units, contractFile || null, path.relative(root, planAbs).split(path.sep).join('/'), Array.isArray(preexisting) ? preexisting : [], now, baselineCommit ?? null);
     saveProgress(root, p, now);
     return p;
 }

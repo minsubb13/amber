@@ -68,6 +68,7 @@ function unitCommand(name: string | undefined, rest: readonly string[]): void {
       rest.includes('--force'),
       preexisting,
       clock.isoNow,
+      scope.headCommit(cwd),
     );
     const ids = Object.keys(p.units);
     recordUnitEvent(
@@ -163,6 +164,8 @@ function unitCommand(name: string | undefined, rest: readonly string[]): void {
       writeScopes: info.writeScopes,
       boundaryRel: info.boundaryRel,
       preexisting: p.preexisting,
+      baselineCommit:
+        typeof p.baseline_commit === 'string' ? p.baseline_commit : null,
       declarations: scope.parseDeclarations(rest.slice(1)),
     };
     const result = scope.check(options);
@@ -277,6 +280,8 @@ function doneCommand(rest: readonly string[]): void {
         writeScopes: info.writeScopes,
         boundaryRel: info.boundaryRel,
         preexisting: p ? p.preexisting : [],
+        baselineCommit:
+          p && typeof p.baseline_commit === 'string' ? p.baseline_commit : null,
         declarations: scope.parseDeclarations(rest),
       };
       const result = scope.check(options);
