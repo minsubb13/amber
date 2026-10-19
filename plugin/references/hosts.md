@@ -19,10 +19,9 @@ Resolve the installed Amber package root as `amber_plugin_root` before running a
 package command, keeping the shell working directory in the project zone:
 - **Claude Code:** use `CLAUDE_PLUGIN_ROOT`.
 - **Codex:** use `PLUGIN_ROOT` if present in the shell and pointing to this
-  Amber package; otherwise resolve any catalog alias and take the directory two
-  levels above `<root>/skills/<name>/SKILL.md`. Do not guess an install-cache
-  path or use the project's checkout root. (Codex hooks also receive a
-  `CLAUDE_PLUGIN_ROOT` alias; that alias alone does not identify Claude Code.)
+  Amber package; otherwise resolve any catalog alias and take the directory that contains `skills/` (two levels above `<root>/skills/<name>/SKILL.md`). Do not
+  guess an install-cache path or use the project's checkout root. (Codex hooks
+  also receive a `CLAUDE_PLUGIN_ROOT` alias; that alias alone does not identify Claude Code.)
 
 ## Invocation and event records
 

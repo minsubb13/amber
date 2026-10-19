@@ -60,9 +60,9 @@ plan, and approval report, creating `.amber/active.json` on approval).
 2. **Elicit.**
    - **Tension list.** Track tensions between scanned facts and stated intent:
      `conflict` (fact vs statement), `gap` (unknown load-bearing matter), `unanswered` (open/vague reply), and `solo-decision` (choice the model would settle alone).
-     Self-answer from code/git history first; if answered (`verdict: "self-answered"`),
-     drop the question and keep the row with evidence. Offer options plus a
-     free-form escape. Keep unanswered/vague rows open until settled or deferred.
+      Self-answer from code/git history first; if answered (`verdict: "self-answered"`),
+      drop the question and keep the row with evidence. Offer options plus a
+      free-form escape. Keep unanswered/vague rows open until settled or explicitly deferred by the operator.
    - **Premise and proportionality check (senior pushback).** When code or git
      history shows the stated approach is disproportionate (over-engineered,
      premature abstraction, duplicating an existing mechanism) or rests on a
@@ -87,24 +87,15 @@ plan, and approval report, creating `.amber/active.json` on approval).
      - **Non-load-bearing rows (`load_bearing: false`, `verdict: "default"`)**:
        do not ask; keep the row in the tension list with its tunable default
        and reversibility evidence for `set`'s `## Discretion` section.
-   - **Work units.** For a single cohesive unit (1-2 completion conditions, no
-     parallel subagent units, no independent review unit), mark it for a
-     **plan-less (single-file) contract** (`set` writes only `-contract.md`
-     without a separate `-plan.md` or `unit init`). Otherwise settle work units
-     (`title`, zone-relative `scope` globs, `oracle`, `after`) and final
-     integration check in the main checkout (`protocol.md` "Loop body").
-   - **Independent review unit.** Ask once per multi-unit/reviewed contract
-     whether to place an independent review unit before integration. Recommend
-     when conditions rest on judgment/docs or changes are hard to reverse or
-     touch interfaces/security; omit when all oracles are mechanical and the
-     change is small. Record reviewer and choice in settled decisions (`hosts.md`).
+   - **Independent review unit.** Ask once per contract whether independent review is needed before integration. Recommend when conditions rest on judgment/docs or changes are hard to reverse or touch interfaces/security; omit when all oracles are mechanical and the change is small. Record reviewer and choice in settled decisions (`hosts.md`).
+   - **Work units.** For a single cohesive unit (1-2 completion conditions, no parallel subagent units, no independent review unit), mark it for a **plan-less (single-file) contract** (`set` writes only `-contract.md` without `-plan.md` or `unit init`; requires a clean working tree or `--out-of-scope "<path> - pre-existing"` on `done` since `progress.json` is absent). Otherwise settle work units (`title`, zone-relative `scope` globs, `oracle`, `after`) and final integration check in the main checkout (`protocol.md` "Loop body").
    - **Research route.** Also elicit in order: research question; candidate
      claims with promote / hold / reject criteria; the one kill-question
      (answered first); oracles with reproducibility fields (paper version,
      reference commit, data hash, KAT version); per-claim budgets/stop lines;
      learn-or-defer per claim; and whether a multi-session topic doc
      (`templates/mission.md`) is needed.
-   Exit: tension list exhausted (every row settled or deferred).
+   Exit: tension list exhausted (every row settled or explicitly deferred by the operator).
 3. **Hand off to set.** Invoke `amber:set` in this session to write the
    contract (and `-plan.md` unless plan-less). Never draft them or write
    `.amber/active.json` yourself. Exit: `amber:set` invoked.

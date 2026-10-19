@@ -47,9 +47,9 @@ Per claim: time, number of sources, citation depth. On reaching it, dispose that
 
 - Write scope: <target> [machine: write-scope <glob>]
 - Research-to-implementation boundary: this pass ends at the verdict - implementation is a separate development contract [self-report]
-- Do not force-push or push to main/release [machine: bash-deny (?:^|[;&|]\s*)(?:cd\s+\S+\s*(?:&&|;)\s*)?git(?:\s+-[Cc]\s+\S+|\s+--\S+)*\s+push\b[^\n;&|"']*(?:--force\b|--force-with-lease\b|-f\b|--mirror\b|--delete\b|\s\+[a-zA-Z0-9_/-]|\b(?:HEAD:)?(?:refs/heads/)?(?:main|release)\b)]
-- Do not rewrite history or hard-reset [machine: bash-deny (?:^|[;&|]\s*)(?:cd\s+\S+\s*(?:&&|;)\s*)?git(?:\s+-[Cc]\s+\S+|\s+--\S+)*\s+(?:commit\b[^\n;&|"']*--amend\b|rebase\b|filter-branch\b|filter-repo\b|reset\b[^\n;&|"']*--hard\b)]
-- Specify files explicitly when staging or committing [machine: bash-deny (?:^|[;&|]\s*)(?:cd\s+\S+\s*(?:&&|;)\s*)?git(?:\s+-[Cc]\s+\S+|\s+--\S+)*\s+(?:commit|add)\b[^\n;&|"']*\s(?:-[aA]\b|-am\b|--all\b)]
+- Do not force-push [machine: bash-deny (?:^|[\n;&|])\s*git(?:\s+-[Cc]\s+\S+|\s+--\S+)*\s+push\b(?:[^\n;&|"']|"[^"\n]*"|'[^'\n]*')*(?:--force\b|--force-with-lease\b|-f\b|--mirror\b|--delete\b|\s\+[a-zA-Z0-9_/-])]
+- Do not rewrite history or hard-reset [machine: bash-deny (?:^|[\n;&|])\s*git(?:\s+-[Cc]\s+\S+|\s+--\S+)*\s+(?:commit\b(?:[^\n;&|"']|"[^"\n]*"|'[^'\n]*')*--amend\b|rebase\b|filter-branch\b|filter-repo\b|reset\b(?:[^\n;&|"']|"[^"\n]*"|'[^'\n]*')*--hard\b)]
+- Specify files explicitly when staging or committing [machine: bash-deny (?:^|[\n;&|])\s*git(?:\s+-[Cc]\s+\S+|\s+--\S+)*\s+(?:commit|add)\b(?:[^\n;&|"']|"[^"\n]*"|'[^'\n]*')*\s(?:-[aA]\b|-am\b|--all\b|\.(?=\s|$)|:/(?=\s|$))]
 
 ## Standing rules
 

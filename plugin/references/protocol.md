@@ -63,8 +63,9 @@ When a run uses a plan file, every unit transition from `unit init` on goes thro
   its unit row, and its oracle; its first action is
   `node "<amber_plugin_root>/scripts/record.cjs" unit claim U<n>`.
 - **Verify and merge in main agent.** Whichever worker did the unit, the main
-  agent re-runs the oracle itself and records `unit verified --evidence` (non-empty
-  `--evidence` required), then merges verified worktrees into the main checkout,
+  agent re-runs the oracle itself in the tree where the work landed and records
+  `unit verified --evidence` (non-empty `--evidence` required), then merges
+  verified worktrees into the main checkout,
   removes them, and runs the integration unit there. The Stop hook rejects
   completion while any unit worktree (linked worktree inside the zone directory)
   remains; linked worktrees outside the zone directory are separate zones and not waited for.

@@ -54,7 +54,7 @@ generating or mapping the four fixed documents, and verifying live sensors.
    default (entry router, `status.md`, work-logs convention) or left for the
    first `planning` cycle. Questions from non-empty rows keep their own evidence.
    *Exit:* tension exhaustion (zero unresolved load-bearing decisions; every
-   `intent.md` slot filled or explicitly deferred) in one tension-list document.
+   `intent.md` slot filled or explicitly deferred by the operator) in one tension-list document.
 3. **Documents - generate or map.**
    - **Greenfield:** generate the four fixed documents (entry router `CLAUDE.md`
      on Claude Code or `AGENTS.md` on Codex, `intent.md`, `status.md`, and the

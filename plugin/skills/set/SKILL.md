@@ -19,12 +19,11 @@ understanding, waits for the operator's approval utterance (`protocol.md`
 
 ## Input and preconditions
 
-- If `hosts.md` and `protocol.md` were already read during `planning` in this
-  session, do not re-read them; otherwise read [host integration](../../references/hosts.md)
-  (`## Skill names and package root`, `## Invocation and event records`) and
-  [run protocol](../../references/protocol.md) (`## Approval`). On Codex, run
-  its `invoke set` command once; on Claude Code, use the automatic Skill tool
-  record only.
+- Read `## Skill names and package root` and `## Invocation and event records` in
+  [host integration](../../references/hosts.md), and `## Load-bearing test`,
+  `## Operator-facing voice`, and `## Approval` in [run protocol](../../references/protocol.md).
+  Skip only sections already read in this session. On Codex, run its `invoke set`
+  command once; on Claude Code, use the automatic Skill tool record only.
 - Read only the matching contract template (`templates/contract-dev.md` or
   `templates/contract-research.md`; plus `templates/mission.md` only for
   multi-session research, and `templates/review-verdict.md` only when planning
@@ -46,11 +45,13 @@ understanding, waits for the operator's approval utterance (`protocol.md`
      defaults and values from planning, `## Standing rules`, `## Question handling`).
    - **Machine rows.** Machine rows end with `[machine: write-scope <glob>]`
      (zone-root-relative, unioned) or `[machine: bash-deny <regex>]`; others
-     end with `[self-report]`. Every `bash-deny` regex must anchor the command
-     token to the start of a shell command segment (`(?:^|[;&|]\s*)`) and the
-     subcommand position, and avoid crossing quotes (`[^\n;&|"']*`) so prose in
-     `commit -m`, `--evidence`, PR bodies, or heredocs never triggers a
-     false-positive denial.
+     end with `[self-report]`. Anchor every `bash-deny` regex to a command
+     segment boundary (`(?:^|[\n;&|])\s*`) and subcommand position, and consume
+     quoted arguments as whole tokens (`(?:[^\n;&|"']|"[^"\n]*"|'[^'\n]*')*`) so
+     flags after `-m "..."` are caught while ordinary prose inside `commit -m`,
+     `--evidence`, or PR bodies is ignored (quoted `;`/`&&` and heredoc lines
+     starting with a command remain regex limits). When a run also forbids
+     normal pushes to `main|release`, add an optional row (`(?:^|[\n;&|])\s*git(?:\s+-[Cc]\s+\S+|\s+--\S+)*\s+push\b(?:[^\n;&|"']|"[^"\n]*"|'[^'\n]*')*\s(?:HEAD:)?(?:refs/heads/)?(?:main|release)(?=\s|$)`).
    - **Gray zone.** Use the load-bearing test. Goal-scope collision default: if
      a completion condition forces an edit outside the write scope, discretion
      plus immediate self-report applies - unless a forbidden row is touched
@@ -68,7 +69,9 @@ understanding, waits for the operator's approval utterance (`protocol.md`
 2. **Write the plan** - When `planning` marked a small single-unit task for a
    **plan-less (single-file) contract** (no multi-unit split, no parallel
    worktrees, no independent review unit), skip `-plan.md` and go to step 3
-   with the contract alone. Otherwise write `docs/YYYY-MM-DD-<slug>-plan.md`
+   with the contract alone (without `progress.json` `preexisting` snapshots,
+   start from a clean working tree or pass `--out-of-scope "<path> - pre-existing"`
+   to `record.cjs done`). Otherwise write `docs/YYYY-MM-DD-<slug>-plan.md`
    (revisable guidance; the frozen contract is authority), covered by a
    write-scope row.
    - **Work units.** Under `## Work units`, list one column-0 checkbox row per
@@ -83,9 +86,10 @@ understanding, waits for the operator's approval utterance (`protocol.md`
      review unit right before the integration unit with `after=` naming every
      deliverable unit. Calling the reviewer is the unit's work, not its oracle:
      the reviewer reads the pinned commit, contract, artifacts, and evidence
-     read-only and writes `docs/YYYY-MM-DD-<slug>-review.md`
-     (`templates/review-verdict.md`). Its oracle checks that the file exists,
-     carries `Verdict:`, disposes every `F<n>`, and leaves no open MUST-FIX.
+     read-only and returns the verdict (`templates/review-verdict.md`), which
+     the caller writes to `docs/YYYY-MM-DD-<slug>-review.md` (`hosts.md`). Its
+     oracle checks that the file exists, carries `Verdict:`, disposes every
+     `F<n>`, and leaves no open MUST-FIX.
      Record each disposition via `amber:mark` (`finding - F<n> <finding> - <disposition>`);
      re-run affected oracles and re-review after fixes; a disputed MUST-FIX on
      a required condition means not complete. Hold with `external: review by <host>`
