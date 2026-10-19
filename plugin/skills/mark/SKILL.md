@@ -5,34 +5,25 @@ description: Record one Amber cycle event in the ledger, from anywhere in a turn
 
 # mark - cycle event record
 
-mark records one cycle event in the ledger, from anywhere in a turn, and
-returns you to the work you were doing.
+Record one cycle event in the ledger and immediately resume work.
 
 ## Input and preconditions
 
-- Read [host integration](../../references/hosts.md) and use the current
-  host's recording path.
-- Arguments are `skip - <subject> - <reason>`,
-  `finding - <finding> - <disposition>`, or `hold - U<n> - <reason>` (the
-  unit you are on and why you must stop: waiting on the operator, budget
-  reached, an out-of-contract decision), including its external form
-  `hold - U<n> - external: <job>`. What a hold lets through, and how
-  briefings show an external hold, is in the run protocol's
-  ["Loop body"](../../references/protocol.md).
+- Read [host integration](../../references/hosts.md) (`## Skill names and package root`
+  and `## Invocation and event records`).
+- Arguments: `skip - <subject> - <reason>`, `finding - <finding> - <disposition>`,
+  or `hold - U<n> - <reason>` (waiting on the operator, budget reached, or
+  out-of-contract decision), including `hold - U<n> - external: <job>` (see
+  [run protocol](../../references/protocol.md) `## Loop body`).
 
 ## Procedure
 
 1. **Record on the current host.**
    - **Claude Code:** the S3 hook records the Skill tool invocation
-     automatically. Do not run the recorder CLI as well.
-   - **Codex:** actually execute the recorder's `mark skip`, `mark finding`,
-     or `mark hold` command once with the supplied event text, and check
-     that it succeeds. Do not run `invoke mark`. Loading this skill has not
-     written the record.
+     automatically; do not run `record.cjs`.
+   - **Codex:** run `record.cjs` (`mark skip`, `mark finding`, or `mark hold`)
+     once with the supplied event text and verify exit 0. Do not run
+     `invoke mark` (loading this skill does not write the record).
 
-   Exit: the event is recorded - by the hook on Claude Code, by a
-   successful recorder command on Codex.
-2. **Continue.** Do not repeat the event as a bare text marker. Continue the
-   work you were doing.
-
-   Exit: the work resumes with no bare text marker.
+   *Exit:* event recorded (by S3 hook on Claude Code or `record.cjs` on Codex).
+2. **Continue.** Resume work without repeating the event as a bare text marker.

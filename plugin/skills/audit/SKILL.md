@@ -7,133 +7,94 @@ allowed-tools: Read, Bash, Write, Skill
 
 # audit - self-correction audit
 
-The audit reads the operator's own records - the ledger
-`${AMBER_HOME:-$HOME/.amber}/runs.jsonl` and both hosts' transcripts (the default
-roots and the isolated `AMBER_TRANSCRIPTS` override are in host integration) - and produces one report of
-candidates: mechanisms that never fire, events the ledger lost, rows that
-match nothing, and anything else anomalous, each with evidence and a proposed
-disposition.
+Read the operator's ledger (`${AMBER_HOME:-$HOME/.amber}/runs.jsonl`) and host
+transcripts to produce a report of candidate mechanisms that never fire, lost
+ledger events, orphan rows, and other anomalies, each with evidence and a
+proposed disposition.
 
 ## Principles
 
-- The verdicts are the operator's. Every number comes from the read-only
-  helper (a missing ledger is zero rows).
-- Never quote transcript bodies: an event is its kind, time, and line number
-  only.
+- The verdicts are the operator's. Every number comes from the read-only helper
+  (a missing ledger is zero rows).
+- Never quote transcript bodies: cite only event kind, timestamp, and line number.
 
 ## Input and preconditions
 
-- Before anything else, read [host integration](../../references/hosts.md)
-  and the [run protocol](../../references/protocol.md), and resolve
-  `amber_plugin_root`. On Codex, execute its `invoke audit` recorder command
-  once for this invocation (the argument text goes after the skill name); on
-  Claude Code, the operator's typed `/amber:audit` call is recorded
-  automatically by S1. Load this explicit-only skill from the operator's
-  slash command rather than a model-selected Skill-tool call on Claude
-  Code.
-- The helper:
+- Read [host integration](../../references/hosts.md) (`## Skill names and package root`,
+  `## Invocation and event records`, and `### Audit transcripts`) and
+  [run protocol](../../references/protocol.md), and resolve `amber_plugin_root`.
+  On Codex, run `invoke audit` once (with any argument text after the skill
+  name); on Claude Code, S1 records typed `/amber:audit` automatically (never
+  call via a model-selected Skill-tool call).
+- Read-only helper:
 
   ```sh
   node "$amber_plugin_root/scripts/audit.cjs" <command> [--period-end <ISO>] [--exclude <project>]...
   ```
 
-  Commands: `summary` (the counts; line 1 `period_end=<ISO>`, line 2
-  `excluded_projects=<list|none>`), `dead` (`mechanism | field_count | status`
-  per declared mechanism), `sessions` (candidate sessions, newest first:
-  `session=<id> project=<p> first=<ISO> last=<ISO> rows=<n> completions=<k>
-  transcript=<yes|no>`), `session <id-prefix>` (transcript events against ledger
-  rows: matched / matched-unattributed / mention / refused / MISSING, orphan
-  rows, stop count, re-entry count, and a `summary:` line),
-  `check-summary <report.md>` (exit 0 iff the report's fenced block starting
-  with `period_end=` reproduces), `check-session <id-prefix>` (exit 0 iff an
-  opening-verdict text exists in the transcript with no skip row - a loss).
+  Commands: `summary` (counts; line 1 `period_end=<ISO>`, line 2
+  `excluded_projects=<list|none>`), `dead` (`mechanism | field_count | status`),
+  `sessions` (newest first: `session=<id> project=<p> first=<ISO> last=<ISO>
+  rows=<n> completions=<k> transcript=<yes|no>`), `session <id-prefix>`
+  (transcript events vs ledger rows: `matched` / `matched-unattributed` /
+  `mention` / `refused` / `MISSING`, orphan rows, stop count, re-entry count, and
+  `summary:`), `check-summary <report.md>` (exit 0 iff the report's fenced block
+  starting with `period_end=` reproduces), and `check-session <id-prefix>`
+  (exit 0 iff an opening-verdict text in the transcript lacks a skip row).
 
 ### Arguments (all optional)
 
-- `exclude=<project>[,<project>]` - projects left out of every count, for
-  example the zone where Amber itself is developed. Default: none.
-- `sessions=<id>[,<id>]` - the sessions to compare (id prefixes). Default:
-  chosen in step 4.
-- `period-end=<ISO>` - the end of the counted period. Default: now, as the
-  helper prints it.
+- `exclude=<project>[,<project>]` - projects excluded from every count (default: none).
+- `sessions=<id>[,<id>]` - session id prefixes to compare (default: chosen in step 4).
+- `period-end=<ISO>` - end of the counted period (default: helper's `now`).
 
 ## Procedure
 
-1. **Opening.** This is a read-only report on the operator's own records, so
-   it runs without a contract by default: invoke the amber:mark skill with
-   args `skip - opening verdict - no contract: read-only audit report on the
-   operator's own ledger and transcripts` and go on. If the operator asked for
-   a contract, invoke amber:planning instead and stop here.
-
-   Exit: the skip is recorded, or planning is invoked and the audit stops.
-2. **Summary first.** Run `summary` with one `--exclude` per project in
-   `exclude=` and `--period-end` from `period-end=` if given. Take the
-   `period_end=` value it prints and pass it as `--period-end` (with the same
-   `--exclude` flags) to every later command, so the numbers stay stable
-   while you work.
-
-   Exit: a fixed `period_end` value is in hand.
+1. **Opening.** Invoke `amber:mark` with
+   `skip - opening verdict - no contract: read-only audit report on the operator's own ledger and transcripts`
+   and proceed. If the operator asked for a contract, invoke `amber:planning`
+   instead and stop.
+2. **Summary first.** Run `summary` with `--exclude` per project in `exclude=`
+   and `--period-end` if given. Pin the printed `period_end=<ISO>` value and
+   pass `--period-end <ISO>` (with the same `--exclude` flags) to every later
+   command.
 3. **Dead mechanisms and sessions.** Run `dead` and `sessions`.
-
-   Exit: both outputs are in hand.
-4. **Samples.** Use the operator's `sessions=` list. Otherwise take up to
-   five of the newest `sessions` lines with `completions` of at least 1 and
-   `transcript=yes`, from either host. Run `session <id>` for each sample.
-   Report absent transcripts and unknown outcome/Stop counts as unavailable
-   evidence; never turn them into zero events or a successful comparison.
-
-   Exit: every sample has its `session` output or is reported as
-   unavailable.
-5. **Candidates.** Build the table from the evidence:
-   - every DEAD mechanism, classified as no opportunity / bypassed /
-     unnecessary / unrecorded;
-   - every MISSING event (in the transcript, no ledger row - a loss), every
-     orphan row (a row with no event - a false row), every unattributed row,
-     the re-entry counts, how holds were used, and anything else anomalous;
-   - one observation is a lesson, not a candidate (n=1 rule) - list it under
-     the table instead;
-   - core mechanisms are candidates like any other, and no disposition is
-     off-limits - a verdict that reverses Amber's own design is allowed;
-   - propose keep / remove / tune for each row with its evidence (a ledger
-     row or a transcript line number); the verdict column stays empty.
-
-   Exit: every row has evidence and a proposed disposition, and every
-   verdict cell is empty.
-6. **Report.** Zone root = `git rev-parse --show-toplevel` (falling back to
-   the current directory). Write `<zone>/docs/audits/<YYYY-MM-DD>-audit-<n>.md`
-   from [the template](templates/report.md), where n = the number of existing
-   `*-audit-*.md` files in that directory + 1 (create the directory if
-   needed). Paste the `summary` output verbatim into the fenced block of
-   `## Ledger counts` and the `dead` output into the block of `## Dead mechanisms`.
-
-   Exit: the report file exists with both blocks pasted verbatim.
-7. **Reproduce.** Run `check-summary <report>` with the same `--exclude`
-   flags. It must exit 0; otherwise fix the block and run it again.
-
-   Exit: `check-summary` exits 0.
-8. **Tell the operator**, in the message and in plain words for someone who
-   did not watch: the candidates table itself, then the ground rules - the
-   verdicts are theirs; an empty verdict means keep; any disposition is
-   allowed, including one that reverses Amber's design; the machine applies
-   nothing; applying verdicts is a separate cycle on their own installed copy;
-   the report holds no transcript bodies, so it may be shared with the
-   maintainer.
-
-   Exit: the table and the ground rules are in the message.
-9. **Signal.** If `.amber/active.json` exists at the zone root, report only -
-   the completion signal belongs to that run. Otherwise run, as the last tool
-   call, in the zone root:
+4. **Samples.** Use `sessions=` if given; otherwise take up to five newest
+   `sessions` rows with `completions>=1` and `transcript=yes`. Run
+   `session <id-prefix>` for each. Report absent transcripts and `unknown`
+   outcome/Stop counts as unavailable evidence, never as zero events or clean
+   comparisons.
+5. **Candidates.** Build the 5-column table
+   (`# | Item | Evidence | Proposed disposition | Verdict`) from the evidence:
+   - every `DEAD` mechanism (classified as `no opportunity` / `bypassed` /
+     `unnecessary` / `unrecorded`);
+   - every `MISSING` event, orphan row, unattributed row, re-entry count, hold
+     usage, or other anomaly;
+   - a single observation (`n=1` rule) is a lesson listed below the table, not
+     a candidate row;
+   - core mechanisms and design-reversing verdicts are allowed;
+   - propose `keep` / `remove` / `tune` with ledger or transcript line evidence,
+     leaving every `Verdict` cell empty.
+6. **Report.** At the zone root (`git rev-parse --show-toplevel`, fallback `.`),
+   write `<zone>/docs/audits/<YYYY-MM-DD>-audit-<n>.md` from
+   [the template](templates/report.md) (`n` = existing `*-audit-*.md` count + 1).
+   Paste `summary` output verbatim into `## Ledger counts` and `dead` output
+   into `## Dead mechanisms`.
+7. **Reproduce.** Run `check-summary <report>` with the same `--exclude` flags
+   until it exits 0.
+8. **Tell the operator** in plain words: show the candidates table and state the
+   ground rules (verdicts are theirs; empty verdict = keep; any disposition
+   including reversing Amber's design is allowed; nothing is applied
+   automatically; applying verdicts is a separate cycle on their installed copy;
+   no transcript bodies are included so the report is shareable).
+9. **Signal.** If `.amber/active.json` exists, report only. Otherwise run as the
+   last tool call in the zone root (no `--goal`):
 
    ```sh
    node "$amber_plugin_root/scripts/record.cjs" done --review "<what was compared and reproduced>" --summary "audit: <report path>"
    ```
 
-   No `--goal`: there is no contract.
-
-   Exit: the signal ran as the last tool call, or the report stands alone
-   under an active run.
-
 ## Completion
 
-The audit is done when the reproduced report is written, the operator has
-the table and the ground rules, and step 9 has run.
+Done when the reproduced report is written, the table and ground rules are
+presented to the operator, and step 9 has run.

@@ -1,86 +1,63 @@
 # hosts.md - Amber host integration
 
-Read this reference when using an Amber skill. The cycle and contract semantics
-are shared ([run protocol](protocol.md)); use the branch for the host running
-this session.
+Shared semantics live in [run protocol](protocol.md). Read the **Hot path**
+sections (`## Skill names and package root`, `## Invocation and event records`)
+on every skill entry; read the **On-demand sections** below only when the
+current step uses them.
 
 ## Skill names and package root
 
 - **Claude Code:** invoke `amber:planning`, `amber:set`, `amber:init`, or
-  `amber:mark` with the Skill tool. The operator's command spelling is
-  `/amber:<name>`. The explicit-only `status` and `audit` skills use the
-  operator's `/amber:status` or `/amber:audit` command. Do not depend on a
-  model-originated Skill-tool call: Claude Code can reject it because these
-  skills have `disable-model-invocation: true`.
-- **Codex:** select the installed `amber:<name>` skill (`planning`, `set`, `init`,
-  `status`, `mark`, `audit`) and follow its
-  `SKILL.md`; the operator can explicitly select it with `$amber:<name>`.
-  Reading a skill file is not an invocation sensor and does not write a record.
+  `amber:mark` with the Skill tool (operator command: `/amber:<name>`). Explicit-only
+  `/amber:status` and `/amber:audit` have `disable-model-invocation: true`;
+  never call them via a model-originated Skill-tool call.
+- **Codex:** select the installed `amber:<name>` skill (`planning`, `set`,
+  `init`, `status`, `mark`, `audit`) and follow its `SKILL.md` (operator
+  command: `$amber:<name>`). Reading a skill file does not write a ledger record.
 
-Resolve the installed Amber package root before using a package file or command.
-On Claude Code, use `CLAUDE_PLUGIN_ROOT`. On Codex, use `PLUGIN_ROOT` only if it
-points to this Amber package. That variable may be available to hooks without
-being present in the model's shell. Otherwise derive the root from the absolute
-path of the loaded skill: `<root>/skills/<name>/SKILL.md` has its package root two
-levels above the containing skill directory. Resolve any catalog path alias
-first. Do not guess an install-cache path or use the project's checkout root.
-Use the resolved absolute path as `amber_plugin_root` in the commands below.
-Keep the command's working directory in the project zone, not in the plugin.
-
-Codex hooks also receive a `CLAUDE_PLUGIN_ROOT` compatibility alias; that alias
-alone does not identify the current host as Claude Code.
+Resolve the installed Amber package root as `amber_plugin_root` before running a
+package command, keeping the shell working directory in the project zone:
+- **Claude Code:** use `CLAUDE_PLUGIN_ROOT`.
+- **Codex:** use `PLUGIN_ROOT` if present in the shell and pointing to this
+  Amber package; otherwise resolve any catalog alias and take the directory two
+  levels above `<root>/skills/<name>/SKILL.md`. Do not guess an install-cache
+  path or use the project's checkout root. (Codex hooks also receive a
+  `CLAUDE_PLUGIN_ROOT` alias; that alias alone does not identify Claude Code.)
 
 ## Invocation and event records
 
-**Claude Code:** the existing Skill tool hook records invocations and `mark`
-events automatically. Do not also run `record.cjs` on this host.
-Typed `/amber:audit` is recorded by S1; typed `/amber:status` intentionally
-adds no invocation row. Its execution is observable in the command transcript
-and the tools it runs, not a fabricated recorder call.
+- **Claude Code:** the S3 Skill hook records invocations and `mark` events
+  automatically; typed `/amber:audit` is recorded by S1, and typed
+  `/amber:status` intentionally adds no invocation row. Never run `record.cjs`
+  for these on Claude Code.
+- **Codex (`planning`, `set`, `init`, `status`, `audit`):** execute once at the
+  start of each use (pass original argument text quoted after the skill name if
+  present; uses `CODEX_THREAD_ID` and `${AMBER_HOME:-$HOME/.amber}` automatically):
+  ```sh
+  node "$amber_plugin_root/scripts/record.cjs" invoke <skill> ["<args>"]
+  ```
+- **Codex (`mark`):** execute only the matching event branch once per event
+  (never run `invoke mark` or emit a bare text marker; wait for exit 0 and
+  report any failure):
+  ```sh
+  node "$amber_plugin_root/scripts/record.cjs" mark skip '<subject> - <reason>'
+  node "$amber_plugin_root/scripts/record.cjs" mark finding '<finding> - <disposition>'
+  node "$amber_plugin_root/scripts/record.cjs" mark hold 'U<n> - <reason>'
+  ```
 
-**Codex:** actually execute the recorder once at the start of each use of
-`planning`, `set`, `init`, `status`, or `audit`, including model-selected uses:
+---
 
-```sh
-node "$amber_plugin_root/scripts/record.cjs" invoke planning
-```
-
-Replace `planning` with the skill being used (`invoke audit` for the audit
-skill). If the invocation supplied arguments,
-pass their original text as a quoted argument after the skill name. The recorder
-uses the current `CODEX_THREAD_ID` and `${AMBER_HOME:-$HOME/.amber}` automatically;
-do not invent a session ID or redirect a real invocation to a test ledger.
-
-For `mark`, execute only its event branch, once per event:
-
-```sh
-node "$amber_plugin_root/scripts/record.cjs" mark skip '<subject> - <reason>'
-node "$amber_plugin_root/scripts/record.cjs" mark finding '<finding> - <disposition>'
-```
-
-Choose the matching command and replace its placeholder with the actual event
-text. Existing skill arguments `skip - <text>` and `finding - <text>` become the
-separate kind and text arguments above. Shell-quote supplied text safely, keeping
-it literal. Do not also run `invoke mark`, and do not repeat an event as a bare
-text marker. Wait for the command to succeed before saying the record was
-written. If it fails, report the failure; reading this reference or the skill
-does not substitute for the record.
+*On-demand sections - read only when executing units, completing a run,
+initializing a zone, running an audit, or dispatching a review.*
 
 ## Loop-body unit commands (both hosts)
 
-Unit transitions are shell commands on either host, run in the zone (a unit
-worktree under the zone's `.claude/worktrees/` is fine - the recorder finds
-the main checkout; a linked worktree outside the zone directory is a zone of
-its own, with or without a pointer: it starts without a contract, and the
-cycle run there - planning, set, the operator's approval - creates its own
-`.amber/active.json`. No pointer travels with a checkout, because `.amber/`
-is gitignored; committed contract documents do travel, but govern nothing
-without a pointer). The first unit command a session runs itself (not
-a subagent) is observed by the PreToolUse enforcer and registers that session
-as a driver of the run: only driving sessions are sent back by the Stop hook
-while units are open, and only their completion signal is read. A sibling
-session in the same zone is briefed about the run and still bound by its
-write-scope and bash-deny rows, but never pulled into the loop.
+Run unit transitions in the zone (or in a unit worktree under
+`<zone>/.claude/worktrees/`; the recorder resolves the main checkout). The first
+unit command a main session (not a subagent) runs registers it as a driver of
+the run: only driving sessions are sent back by the Stop hook while units are
+open or have their completion signal read. Sibling sessions in the zone receive
+the briefing and obey `write-scope` and `bash-deny`, but are not pulled into the loop.
 
 ```sh
 node "$amber_plugin_root/scripts/record.cjs" unit init <plan-path>          # once, after approval
@@ -92,137 +69,93 @@ node "$amber_plugin_root/scripts/record.cjs" unit hold U1 --reason "external: <j
 node "$amber_plugin_root/scripts/record.cjs" unit claim U1                  # a subagent's first action
 ```
 
-`unit claim` is observed by the PreToolUse enforcer, which is the only party
-that sees the host-assigned subagent id; the command then reports whether the
-claim was recorded. On Claude Code, `hold` may also be recorded through the
-amber:mark skill (`hold - U1 - <reason>`; external form
-`hold - U1 - external: <job>`); on Codex, `mark hold` is the recorder's
-`node "$amber_plugin_root/scripts/record.cjs" mark hold 'U1 - <reason>'`
-(external form `mark hold 'U1 - external: <job>'`). What a plain and an
-external hold let through is in the run protocol, "Loop body".
+`unit claim` is observed by the PreToolUse enforcer (which sees the
+host-assigned subagent id) and reports whether the claim was recorded. Holds can
+also be recorded via `amber:mark` (`hold - U1 - <reason>` or
+`hold - U1 - external: <job>`; Codex `mark hold` above).
 
-Post-hoc scope check (both hosts): `unit verified` and `done` compare
-the files git reports as changed in the tree the command runs in - commits
-since the contract file was added (or, when no commit added it, since the
-HEAD that `unit init` recorded in progress.json as `baseline_commit`),
-working-tree changes, untracked files; the paths already dirty at `unit
-init` excepted - with the contract's write-scope rows. An undeclared file outside every write-scope refuses the
-command and prints the list; declare each legitimate one with
-`--out-of-scope <path>=<reason>` (repeatable, a glob is accepted) and the
-declaration is recorded in progress.json and the ledger (`out_of_scope`).
-Any git failure refuses - Amber zones live in git. E1 still refuses
-file-tool writes outside the scope before they happen; shell writes reach
-only this check.
+**Post-hoc scope check (both hosts):** `unit verified` and `done` compare
+git-reported changes in the target tree - commits since the contract file was
+added (or, when no commit added it, since the HEAD that `unit init` recorded in
+`progress.json` as `baseline_commit`), working-tree edits, and untracked files,
+except paths already dirty at `unit init` - against the contract's `write-scope`
+rows. Any undeclared file outside scope (or any git failure) refuses the
+command; declare legitimate exceptions with repeatable
+`--out-of-scope <path>=<reason>` (globs accepted, recorded in `progress.json`
+and the ledger as `out_of_scope`). E1 still blocks out-of-scope file-tool writes
+beforehand; shell writes are caught here.
 
 ### Parallel unit worktrees
 
-Both hosts use the same unit claims, per-unit scope, main-agent verification,
-merge, and worktree cleanup. On Claude Code use the Agent tool's worktree
-isolation. On Codex, the main agent creates one linked worktree and branch per
-independent unit under `<zone>/.claude/worktrees/<unit>` (the zone must ignore
-that directory), then starts child agents concurrently. Pass each child its
-absolute worktree path, unit row, oracle, and resolved recorder path. Its first
-tool action is `unit claim U<n>` with that worktree as the shell workdir; all
-later shell calls use the same workdir and file patches use absolute paths in
-that worktree. Children preserve others' work and do not write in the main
-checkout. A unit worktree has no separate active pointer: it inherits this run.
-
-Codex hooks supply the parent's `session_id` plus the child's `agent_id`;
-the child's shell `CODEX_THREAD_ID` is the child id. Claims use the authoritative
-hook `agent_id`, never a model-invented id. Codex file hooks can retain the
-parent cwd, so E1 maps absolute targets in git-registered linked worktrees
-before applying the contract and unit scopes. Do not work around a denied
-patch with a shell write. The main agent re-runs each oracle itself in the
-tree where the work landed, whichever worker did the unit's work (a subagent
-in its worktree, another session, a person), records `verified` there with
-what the oracle showed (the record command refuses an empty `--evidence` and
-any flag it does not read), and merges as the run protocol's "Loop body"
-describes.
-
-A worktree placed outside the zone directory is not a unit worktree: the
-hooks treat it as a zone of its own, and the run's completion check does not
-wait for it. It starts without a contract - its `.amber/` is gitignored and
-empty, while the committed contract documents it carries govern nothing
-there - and gets a contract of its own only through planning, set, and the
-operator's approval run in that worktree. Unit worktrees stay inside the
-zone so the run's contract, scopes, and merge apply to them.
+- **Claude Code:** use the Agent tool's worktree isolation.
+- **Codex:** create one linked worktree and branch per independent unit under
+  `<zone>/.claude/worktrees/<unit>` (gitignored by the zone) and start child
+  agents concurrently. Pass each child its absolute worktree path, unit row,
+  oracle, and resolved `record.cjs` path. Its first tool call is `unit claim U<n>`
+  with that worktree as shell workdir; all later shell calls use that workdir
+  and file patches use absolute paths inside it (never write in the main checkout
+  or bypass a denied patch with a shell write). Codex hooks supply parent
+  `session_id` + child `agent_id` (`CODEX_THREAD_ID`), and E1 maps absolute
+  targets in git-registered linked worktrees before checking contract/unit scopes.
+- **Worktree boundary:** unit worktrees live inside `<zone>/.claude/worktrees/`
+  and inherit the active run without a separate pointer. A linked worktree
+  outside the zone directory is a separate zone: `.amber/` is gitignored so no
+  pointer travels with a checkout, committed contracts govern nothing without a
+  pointer, and the run's completion check does not wait for external worktrees.
 
 ### Audit transcripts
 
-The read-only audit helper supports both Claude Code project transcripts and
-Codex rollouts. By default it searches `~/.claude/projects` and
-`${CODEX_HOME:-~/.codex}/{sessions,archived_sessions}`. `AMBER_TRANSCRIPTS`
-replaces these defaults with a single explicit root (including nested date
-directories), so fixture runs never fall back to the operator's transcripts.
-Codex code-mode recorder calls are read from actual CommandExecution events;
-direct shell function calls are also supported. Missing or ambiguous outcomes
-stay unknown. A final assistant response is not proof of a Stop hook: where
-the rollout lacks stop_hook_summary, report that count as unknown, not zero.
+`audit.cjs` reads Claude Code transcripts (`~/.claude/projects`) and Codex
+rollouts (`${CODEX_HOME:-~/.codex}/{sessions,archived_sessions}`). Setting
+`AMBER_TRANSCRIPTS` replaces both defaults with a single explicit root
+(including nested date directories) for isolated fixture runs. Codex recorder
+calls are read from `CommandExecution` events and direct shell calls. Missing or
+ambiguous outcomes and rollouts lacking `stop_hook_summary` are reported as
+`unknown`, never zero.
 
 ## Completion signal (both hosts)
 
-Completion is signalled with a shell command, never with a line in the
-message. After the fresh semantic review, run in the zone root as the last
-tool call:
-
+After the fresh semantic review ([protocol](protocol.md), "Completion"), run in
+the zone root as the last tool call (never put a marker line in the message):
 ```sh
 node "$amber_plugin_root/scripts/record.cjs" done --review '<evidence-based review result>' --goal '<goal-test result>' --summary '<one-line summary>' [--out-of-scope <path>=<reason> ...]
 ```
-
-Omit `--goal` without an active contract (the command refuses it there and
-requires it under one). The command writes `<zone>/.amber/done.json` and is
-refused while plan units are open, the pointer is broken, or an undeclared
-file outside the write-scope changed (see the scope check above). Running it also
-registers the session as a driver of the run, so the Stop hook reads the
-signal in the same session. The Stop hook
-consumes the file, records the completion, and on a pass under a contract
-removes `.amber/active.json` and `.amber/progress.json` by itself. Then end
-the turn with the completion report (shape in [reports](reports.md)).
+Include `--goal` iff an active contract governs the zone. The command writes
+`<zone>/.amber/done.json`, registers the session as a driver, and refuses if
+plan units are open, the pointer is broken, or undeclared out-of-scope files
+changed. The Stop hook consumes `done.json`, records completion, and on a pass
+removes `.amber/active.json` and `.amber/progress.json`. End with the completion
+report ([reports](reports.md)).
 
 ## Project entry point and installation
 
-- **Claude Code:** the zone's `.claude/settings.json` registers the Amber
-  marketplace and enables the plugin at project scope. The entry document is
-  `CLAUDE.md`; the package manifest is `.claude-plugin/plugin.json`.
-- **Codex:** run `codex plugin list --json` in the zone and confirm Amber is
-  installed and enabled. The entry document is `AGENTS.md`; the package manifest
-  is `.codex-plugin/plugin.json`. Check the current session's Amber S0 context
-  and sensor records separately: an enabled listing or readable skill alone
-  does not prove that hooks ran in this session.
+- **Claude Code:** `.claude/settings.json` registers the Amber marketplace and
+  enables the plugin at project scope; entry document `CLAUDE.md`, manifest
+  `.claude-plugin/plugin.json`.
+- **Codex:** `codex plugin list --json` in the zone confirms Amber is installed
+  and enabled; entry document `AGENTS.md`, manifest `.codex-plugin/plugin.json`.
+  Verify S0 context and ledger records separately (listing alone does not prove
+  hooks ran in this session).
 
-If installation is missing or disabled, report the observed state and the
-host's installation step before continuing project initialization. After a new
-install, use a fresh session to check the sensors. Where both entry documents
-exist, map their existing roles and update only the current host's entry point;
-keep shared intent, status, work logs, and contracts as single sources.
-
-## Approval (both hosts)
-
-Approval works the same on both hosts; the rule is the run protocol's
-"Approval", and `set`'s step 6 performs it.
+If installation is missing or disabled, report the observed state and host
+install step before continuing `init` (use a fresh session after installing to
+verify sensors). When both entry documents exist, map their roles, update only
+the current host's entry document, and share single-source intent, status, work
+logs, and contracts.
 
 ## Independent reviewer (both hosts)
 
-A review unit (set, "Review unit") calls a reviewer that reads the pinned
-commit, the contract, the artifacts, and the evidence itself, read-only, in
-a fresh context. The contract names the reviewer; these are the call shapes
-on each host. In an Orca pair the other host's live session is the usual
-reviewer: dispatch the request there and hold the unit with
-`external: review by <host>`. The headless calls below are the fallback and
-the shape of a scripted review.
-
+A review unit (`set`, "Review unit") calls a read-only reviewer in a fresh
+context to inspect the pinned commit, contract, artifacts, and evidence (never
+hand it the author's summary to review). In an Orca pair, dispatch to the other
+host's live session and hold the unit with `external: review by <host>`.
+Headless fallback / scripted calls:
 - **From Claude Code, Codex reviews:**
-  `codex exec --sandbox read-only "<review request>"`
-  (or `codex review --commit <sha>` for a plain diff review). The sandbox
-  refuses writes. Put the contract path, the verdict template path, and the
-  commit to review in the request.
+  `codex exec --sandbox read-only "<review request>"` (or
+  `codex review --commit <sha>` for a plain diff review). Include contract path,
+  verdict template path, and commit SHA.
 - **From Codex, Claude Code reviews:**
-  `claude -p "<review request>" --permission-mode dontAsk --tools "Read,Grep,Glob"`.
-  The request comes right after `-p`; `--tools` takes several names and
-  would swallow a request placed after it. The tool list carries no editor
-  and no shell, so the session can only read.
-
-The reviewer writes nothing into the zone: capture its output and save it as
-the verdict file yourself, or ask for the verdict in the template's shape.
-Neither call may run Amber's recorder or start another review. Do not hand
-the reviewer the author's summary as the thing to review; hand it the commit.
+  `claude -p "<review request>" --permission-mode dontAsk --tools "Read,Grep,Glob"`
+  (place the request immediately after `-p`, before `--tools`).
+The reviewer writes nothing in the zone and never runs `record.cjs` or starts
+another review; capture its output and save the verdict file yourself.
