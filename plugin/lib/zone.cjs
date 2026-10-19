@@ -75,18 +75,19 @@ function worktreeTop(cwd) {
     return gitQuery(cwd, ['rev-parse', '--show-toplevel']);
 }
 /**
- * Zone-relative path of a write target. A target inside a linked worktree of
- * the zone maps to the same relative path in the zone, so contract and unit
- * scopes apply unchanged wherever the write physically lands.
+ * Zone-relative path of a write target, given the two git answers the
+ * mapping depends on: the toplevel of cwd and the repository's worktree
+ * list (`git worktree list --porcelain -z`, or null). A target inside a
+ * linked worktree of the zone maps to the same relative path in the zone,
+ * so contract and unit scopes apply unchanged wherever the write physically
+ * lands.
  */
-function zoneRelative(root, cwd, abs) {
-    const top = worktreeTop(cwd);
+function relativeTo(root, abs, top, worktrees) {
     let base = top && top !== root && abs.startsWith(top + path.sep) ? top : root;
     // Codex children inherit the session cwd. A shell tool can override its
     // workdir, but apply_patch still reports the inherited cwd and absolute
     // worktree targets. Map only git-registered worktrees of this repository,
     // never an arbitrary directory that happens to contain the same filename.
-    const worktrees = gitQuery(root, ['worktree', 'list', '--porcelain', '-z']);
     for (const row of (worktrees || '').split('\0')) {
         if (!row.startsWith('worktree '))
             continue;
@@ -97,6 +98,29 @@ function zoneRelative(root, cwd, abs) {
         }
     }
     return path.relative(base, abs).split(path.sep).join('/');
+}
+function worktreeList(root) {
+    return gitQuery(root, ['worktree', 'list', '--porcelain', '-z']);
+}
+/** Zone-relative path of one write target: two git queries. */
+function zoneRelative(root, cwd, abs) {
+    return relativeTo(root, abs, worktreeTop(cwd), worktreeList(root));
+}
+/**
+ * Zone-relative paths of every write target of one tool call, each paired
+ * with its absolute path, from the two git queries made once instead of
+ * once per target: a patch touching n files costs two queries, not 2n. No
+ * target, no query.
+ */
+function zoneRelativeAll(root, cwd, absList) {
+    if (absList.length === 0)
+        return [];
+    const top = worktreeTop(cwd);
+    const worktrees = worktreeList(root);
+    return absList.map((abs) => ({
+        abs,
+        rel: relativeTo(root, abs, top, worktrees),
+    }));
 }
 /**
  * Linked worktrees that belong to this zone's run: those created inside the
@@ -139,6 +163,7 @@ module.exports = {
     zoneRoot,
     worktreeTop,
     zoneRelative,
+    zoneRelativeAll,
     extraWorktrees,
     linkedWorktreeMain,
     projectKey,

@@ -191,9 +191,12 @@ function runE1(input: HookInput): HookOutput {
     contract.root,
     contract.boundaryPath,
   );
-  for (const target of targets) {
-    const abs = path.resolve(input.cwd || contract.root, target);
-    const rel = zone.zoneRelative(contract.root, input.cwd, abs);
+  const resolved = zone.zoneRelativeAll(
+    contract.root,
+    input.cwd,
+    targets.map((target) => path.resolve(input.cwd || contract.root, target)),
+  );
+  for (const { abs, rel } of resolved) {
     if (
       abs === contract.pointerPath ||
       abs === contract.boundaryPath ||
