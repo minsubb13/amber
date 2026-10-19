@@ -379,6 +379,97 @@ const sessionState = (home: string, sessionId: string): unknown => {
       ),
     ),
   );
+  // Monitor runs a shell command like Bash: the bash-deny rows apply to it.
+  check(
+    'E1 Monitor command matching deny pattern denied',
+    isDeny(
+      e1(
+        zoneContract,
+        'Monitor',
+        { command: 'git merge feature', description: 'd', timeout_ms: 1000 },
+        home,
+      ),
+    ),
+  );
+  check(
+    'E1 Monitor command otherwise allowed',
+    e1(
+      zoneContract,
+      'Monitor',
+      { command: 'tail -f build.log', description: 'd', timeout_ms: 1000 },
+      home,
+    ) === null,
+  );
+  // A host may name the file under `path`; it is the write target too.
+  check(
+    'E1 path key read as the write target',
+    isDeny(
+      e1(
+        zoneContract,
+        'Write',
+        { path: path.join(zoneContract, 'secrets.txt') },
+        home,
+      ),
+    ),
+  );
+  check(
+    'E1 path key inside scope allowed',
+    e1(
+      zoneContract,
+      'Write',
+      { path: path.join(zoneContract, 'docs/b.md') },
+      home,
+    ) === null,
+  );
+}
+
+// ---- E1: the run's state under .amber/ is no file tool's to write ----
+{
+  const home = freshHome('e1s');
+  const zoneBroad = makeZone(
+    'broad',
+    '# boundary - broad\n- everything [machine: write-scope **]\n',
+    {
+      v: 1,
+      boundary: 'test-boundary.md',
+      ratified_by: 'operator',
+      ratified_at: '2026-10-19',
+    },
+  );
+  check(
+    'E1 broad scope: ordinary write allowed',
+    e1(
+      zoneBroad,
+      'Write',
+      { file_path: path.join(zoneBroad, 'anything.txt') },
+      home,
+    ) === null,
+  );
+  const stateDeny = e1(
+    zoneBroad,
+    'Edit',
+    { file_path: path.join(zoneBroad, '.amber/progress.json') },
+    home,
+  );
+  check(
+    'E1 broad scope: progress.json edit denied (tamper guard)',
+    isDeny(stateDeny) &&
+      /\.amber\//.test(
+        stringAt(stateDeny, 'hookSpecificOutput', 'permissionDecisionReason'),
+      ),
+    JSON.stringify(stateDeny),
+  );
+  check(
+    'E1 broad scope: done.json write denied (tamper guard)',
+    isDeny(
+      e1(
+        zoneBroad,
+        'Write',
+        { file_path: path.join(zoneBroad, '.amber/done.json') },
+        home,
+      ),
+    ),
+  );
 }
 
 // ---- E1: no contract, broken pointer, bad regex ----
