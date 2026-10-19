@@ -53,4 +53,18 @@ Check setup with `/amber:status` or `$amber:status`.
 Ask for work normally. Amber opens planning, decides whether a contract is useful,
 and waits for your approval when one is needed.
 
+### Example session
+
+1. **Operator:** "Add a `config` command with a custom INI/YAML parser layer."
+2. **Amber (`planning`):** Cites grounded evidence (`package.json`, `src/cli.cjs:12`), pushes back on unnecessary complexity with a simpler alternative, asks the load-bearing schema question, and defaults a reversible knob:
+   > `src/cli.cjs:12` already uses `node:util` `parseArgs` and `package.json` has zero runtime dependencies. Rather than a custom parser layer, reading `.rc.json` via `JSON.parse` keeps the CLI dependency-free in ~25 lines. Does `.rc.json` work (and which keys belong in the schema), or do you need INI/YAML? I'll default the file size limit to 64 KB.
+3. **Operator:** "`.rc.json` with `port` and `host` works."
+4. **Amber (`set`):** Commits the scope document and gives a short plain-language report:
+   > **Scope:** Add `config` command reading `port` and `host` from `.rc.json` in `src/cli.cjs` and `test/cli.test.cjs`.
+   > **Verification & boundaries:** Pass `npm test` (valid, missing, and >64 KB cases); no new dependencies or unrelated file edits.
+   >
+   > Shall I go ahead with this scope?
+5. **Operator:** "Yes, go ahead."
+6. **Amber (`approve → execute`):** Activates `.amber/active.json`, enforces write-scope and `bash-deny` hooks, verifies the oracle, runs `record.cjs done`, and closes with the completion report.
+
 [MIT License](LICENSE)
