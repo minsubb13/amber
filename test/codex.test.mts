@@ -827,6 +827,7 @@ test('hook configuration routes Codex apply_patch and resume to shared handlers'
     list(get(hooks, 'PreToolUse')).some(
       (group) =>
         regExpOf(get(group, 'matcher')).test('apply_patch') &&
+        regExpOf(get(group, 'matcher')).test('Monitor') &&
         list(get(group, 'hooks')).some((h) =>
           / E1$/.test(String(get(h, 'command'))),
         ),

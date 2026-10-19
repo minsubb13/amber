@@ -352,8 +352,11 @@ function parseCodexTranscript(text, file) {
         cwd,
         stops: [],
         reentries,
+        // Whether a rollout shows a hook's denial text is unverified.
+        denies: [],
         host: 'codex',
         stopsKnown: false,
+        deniesKnown: false,
         malformed,
     };
 }

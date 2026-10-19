@@ -15,8 +15,8 @@ const store = require("../lib/progress-store.cjs");
 function saveProgress(root, p) {
     store.saveProgress(root, p, clock.isoNow);
 }
-function initProgress(root, planRel, contractFile, force, preexisting) {
-    return store.initProgress(root, planRel, contractFile, force, preexisting, clock.isoNow);
+function initProgress(root, planRel, contractFile, force, preexisting, baselineCommit) {
+    return store.initProgress(root, planRel, contractFile, force, preexisting, clock.isoNow, baselineCommit);
 }
 function applyEvent(p, event, id, extra) {
     return model.applyEvent(p, event, id, extra, clock.isoNow);

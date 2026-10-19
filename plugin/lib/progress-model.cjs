@@ -48,7 +48,7 @@ function transitionOf(event) {
     }
 }
 /** A fresh state for the plan's units, before anything has run. */
-function newProgress(units, contract, plan, preexisting, now) {
+function newProgress(units, contract, plan, preexisting, now, baselineCommit) {
     const p = {
         v: 1,
         contract,
@@ -62,6 +62,10 @@ function newProgress(units, contract, plan, preexisting, now) {
         preexisting,
         units: {},
     };
+    // The HEAD when the run began, when the tree had one: the scope-check
+    // baseline for a contract file that was never committed.
+    if (baselineCommit)
+        p.baseline_commit = baselineCommit;
     for (const u of units) {
         p.units[u.id] = {
             title: u.title,

@@ -479,6 +479,7 @@ test('session reads every Claude transcript shape and matches rows by trigger an
       '  row 2026-01-01T00:20:00 finding late row',
       'stop hook summaries: 1 [stop=1]',
       'loop send-backs (re-entry directives injected as user lines): 0',
+      'E1 refusals (hook denials in tool results): 0',
       'summary: events=6 matched=2 matched_unattributed=0 refused=0 mentions=0 missing=3 orphan_rows=2',
     ].join('\n') + '\n',
   );
@@ -600,6 +601,7 @@ test('session handles events without a timestamp and results without content', (
       '  row 2026-01-01T00:00:01 unit-hold U1 - r',
       'stop hook summaries: 0 []',
       'loop send-backs (re-entry directives injected as user lines): 0',
+      'E1 refusals (hook denials in tool results): 0',
       'summary: events=2 matched=0 matched_unattributed=0 refused=0 mentions=1 missing=1 orphan_rows=1',
     ].join('\n') + '\n',
   );
@@ -675,6 +677,7 @@ test('session keeps typed and model-invoked skill rows apart for Codex rollouts'
       'ledger rows with no transcript event: 0',
       'stop hook summaries: unknown (Codex rollout does not expose stop_hook_summary; final messages are not hook evidence)',
       'loop send-backs (re-entry directives injected as user lines): 0',
+      'E1 refusals (hook denials in tool results): unknown (Codex rollout does not expose hook denials)',
       'summary: events=2 matched=2 matched_unattributed=0 refused=0 mentions=0 missing=0 orphan_rows=0',
     ].join('\n') + '\n',
   );

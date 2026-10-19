@@ -1,7 +1,9 @@
 // E1 (PreToolUse): deny tool calls that cross the active contract's machine
-// rules (write-scope globs, bash-deny). Shell writes escape it, so
-// scope-check compares git-changed files with the write-scope at unit
-// verified and done. A subagent writes only inside the unit it claimed; the
+// rules (write-scope globs, bash-deny). Monitor runs a shell command like
+// Bash and takes the same path. Shell writes escape it, so scope-check
+// compares git-changed files with the write-scope at unit verified and done.
+// The run's own state under .amber/ is written by record.cjs and the hooks,
+// never by a file tool. A subagent writes only inside the unit it claimed; the
 // claim and the driving session are registered here, the one party that sees
 // the host-assigned ids.
 
@@ -159,7 +161,7 @@ function runE1(input: HookInput): HookOutput {
   }
   const { writeScopes, bashDeny } = rules.machineRules(contract.text);
   const agentId = input.agent_id ? guards.toText(input.agent_id) : null;
-  if (input.tool_name === 'Bash') {
+  if (input.tool_name === 'Bash' || input.tool_name === 'Monitor') {
     return runBash(input, contract, bashDeny, agentId);
   }
   let targets: string[];
@@ -177,7 +179,10 @@ function runE1(input: HookInput): HookOutput {
     }
   } else {
     const target = guards.toText(
-      input.tool_input['file_path'] || input.tool_input['notebook_path'] || '',
+      input.tool_input['file_path'] ||
+        input.tool_input['notebook_path'] ||
+        input.tool_input['path'] ||
+        '',
     );
     targets = target ? [target] : [];
   }
@@ -191,9 +196,12 @@ function runE1(input: HookInput): HookOutput {
     contract.root,
     contract.boundaryPath,
   );
-  for (const target of targets) {
-    const abs = path.resolve(input.cwd || contract.root, target);
-    const rel = zone.zoneRelative(contract.root, input.cwd, abs);
+  const resolved = zone.zoneRelativeAll(
+    contract.root,
+    input.cwd,
+    targets.map((target) => path.resolve(input.cwd || contract.root, target)),
+  );
+  for (const { abs, rel } of resolved) {
     if (
       abs === contract.pointerPath ||
       abs === contract.boundaryPath ||
@@ -205,6 +213,17 @@ function runE1(input: HookInput): HookOutput {
           'Release the contract first (remove ' +
           contract.pointerPath +
           ').',
+      );
+    }
+    if (rel === '.amber' || rel.startsWith('.amber/')) {
+      return deny(
+        'blocked by contract ' +
+          contract.boundaryFile +
+          ': ' +
+          rel +
+          " is the run's state under .amber/, written only by `node " +
+          text.RECORD_CLI +
+          '` and the hooks',
       );
     }
     if (

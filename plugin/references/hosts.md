@@ -103,9 +103,10 @@ external hold let through is in the run protocol, "Loop body".
 
 Post-hoc scope check (both hosts): `unit verified` and `done` compare
 the files git reports as changed in the tree the command runs in - commits
-since the contract file was added, working-tree changes, untracked files;
-the paths already dirty at `unit init` excepted - with the contract's
-write-scope rows. An undeclared file outside every write-scope refuses the
+since the contract file was added (or, when no commit added it, since the
+HEAD that `unit init` recorded in progress.json as `baseline_commit`),
+working-tree changes, untracked files; the paths already dirty at `unit
+init` excepted - with the contract's write-scope rows. An undeclared file outside every write-scope refuses the
 command and prints the list; declare each legitimate one with
 `--out-of-scope <path>=<reason>` (repeatable, a glob is accepted) and the
 declaration is recorded in progress.json and the ledger (`out_of_scope`).

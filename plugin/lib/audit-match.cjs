@@ -179,6 +179,13 @@ function sessionLines(prefix, transcriptShown, c) {
         (c.t.reentries.length
             ? ' at L' + c.t.reentries.map((r) => r.ln).join(',L')
             : ''));
+    out.push(c.t.deniesKnown === false
+        ? 'E1 refusals (hook denials in tool results): unknown (Codex rollout does not expose hook denials)'
+        : 'E1 refusals (hook denials in tool results): ' +
+            String(c.t.denies.length) +
+            (c.t.denies.length
+                ? ' at L' + c.t.denies.map((d) => d.ln).join(',L')
+                : ''));
     const missing = c.results.filter((r) => r.status === 'MISSING').length;
     out.push('summary: events=' +
         String(c.results.length) +

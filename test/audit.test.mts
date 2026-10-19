@@ -562,6 +562,7 @@ const SESSION_A = [
   '  row 2026-09-10T10:22:00 finding exporter wrote CRLF on one row - fixed and re-verified',
   'stop hook summaries: 1 [stop=1]',
   'loop send-backs (re-entry directives injected as user lines): 1 at L13',
+  'E1 refusals (hook denials in tool results): 0',
   'summary: events=10 matched=5 matched_unattributed=1 refused=1 mentions=1 missing=1 orphan_rows=1',
 ];
 test('session: every planted event of the loss session is classified as expected', () => {
@@ -602,6 +603,13 @@ test('session: the recorded session matches both events and has nothing missing'
   assert.equal(
     out.at(-1),
     'summary: events=2 matched=2 matched_unattributed=0 refused=0 mentions=0 missing=0 orphan_rows=0',
+  );
+  // The two tool results the host handed back with E1's denial text (L8-L9)
+  // are the session's E1 refusals (denies); a result without the hook-error
+  // envelope never counts.
+  assert.equal(
+    out.at(-2),
+    'E1 refusals (hook denials in tool results): 2 at L8,L9',
   );
 });
 test('session: an earlier period end hides the later rows of the session', () => {

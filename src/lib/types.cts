@@ -69,6 +69,11 @@ export interface Progress {
   blocks: number;
   session_ids?: unknown;
   preexisting: unknown[];
+  /**
+   * The HEAD when the run began, when the tree had one: the scope-check
+   * baseline for a contract file that was never committed.
+   */
+  baseline_commit?: string;
   units: Record<string, Unit>;
   updated_at?: string;
 }
@@ -123,6 +128,8 @@ export interface ScopeCheckOptions {
   readonly writeScopes: string[];
   readonly boundaryRel?: string | null;
   readonly preexisting?: unknown[] | null;
+  /** progress.json's baseline_commit, the baseline when no commit added the contract file. */
+  readonly baselineCommit?: string | null;
   readonly declarations?: Declaration[];
 }
 
@@ -308,6 +315,8 @@ export interface ClaudeTranscript {
     readonly cat: string;
   }[];
   readonly reentries: { readonly ln: number; readonly ts: unknown }[];
+  /** E1 refusals: tool results carrying the host's hook-denial text. */
+  readonly denies: { readonly ln: number; readonly ts: unknown }[];
 }
 
 /** What the audit reads from a transcript of either host. */
@@ -319,8 +328,11 @@ export interface AuditTranscript {
   readonly cwd: unknown;
   readonly stops: readonly { readonly cat: string }[];
   readonly reentries: readonly { readonly ln: number }[];
+  readonly denies: readonly { readonly ln: number }[];
   /** false for Codex rollouts, which keep no stop-hook summaries. */
   readonly stopsKnown?: boolean;
+  /** false for Codex rollouts, which do not expose hook denials. */
+  readonly deniesKnown?: boolean;
   readonly malformed?: number;
 }
 

@@ -46,7 +46,7 @@ function unitCommand(name, rest) {
         if (!plan)
             throw new Error('unit init needs the plan path\n' + USAGE);
         const preexisting = scope.snapshot(cwd);
-        const p = store.initProgress(info.root, plan, info.boundaryFile, rest.includes('--force'), preexisting, clock.isoNow);
+        const p = store.initProgress(info.root, plan, info.boundaryFile, rest.includes('--force'), preexisting, clock.isoNow, scope.headCommit(cwd));
         const ids = Object.keys(p.units);
         recordUnitEvent(sessionId, cwd, 'init', String(ids.length) + ' unit(s) from ' + p.plan, { contract: info.boundaryFile, units: ids.length });
         process.stdout.write('amber: progress.json initialized with ' +
@@ -122,6 +122,7 @@ function unitCommand(name, rest) {
             writeScopes: info.writeScopes,
             boundaryRel: info.boundaryRel,
             preexisting: p.preexisting,
+            baselineCommit: typeof p.baseline_commit === 'string' ? p.baseline_commit : null,
             declarations: scope.parseDeclarations(rest.slice(1)),
         };
         const result = scope.check(options);
@@ -207,6 +208,7 @@ function doneCommand(rest) {
                 writeScopes: info.writeScopes,
                 boundaryRel: info.boundaryRel,
                 preexisting: p ? p.preexisting : [],
+                baselineCommit: p && typeof p.baseline_commit === 'string' ? p.baseline_commit : null,
                 declarations: scope.parseDeclarations(rest),
             };
             const result = scope.check(options);

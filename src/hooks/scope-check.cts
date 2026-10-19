@@ -9,9 +9,11 @@
 //
 // Changed set = (baseline..HEAD commits) ∪ ((working tree ∪ untracked) −
 // preexisting). The baseline is the commit that added the contract file (set
-// commits contract and plan before approval); preexisting is the dirty path
-// list `unit init` stored in progress.json. `.amber/` and the contract file
-// itself are never compared. Any git failure refuses (fail closed).
+// commits contract and plan before approval) or, when no commit added it,
+// the HEAD `unit init` recorded in progress.json as baseline_commit; without
+// either, only the working tree is compared. preexisting is the dirty path
+// list `unit init` stored there too. `.amber/` and the contract file itself
+// are never compared. Any git failure refuses (fail closed).
 //
 // This module runs git and keeps the interface scripts/record.cjs uses; the
 // rules live in lib/scope.
@@ -88,10 +90,25 @@ function snapshot(cwd: string): string[] {
   }
 }
 
+/**
+ * The HEAD `unit init` stores as progress.json `baseline_commit`, or null
+ * when the tree has no commit yet (or is no repository); best effort too.
+ */
+function headCommit(cwd: string): string | null {
+  try {
+    return (
+      git.git(toplevel(cwd), ['rev-parse', '--verify', 'HEAD']).trim() || null
+    );
+  } catch {
+    return null;
+  }
+}
+
 function check(opts: ScopeCheckOptions): ScopeResult {
   const { cwd, writeScopes, boundaryRel } = opts;
   const top = toplevel(cwd);
-  const baseline = baselineCommit(top, boundaryRel);
+  const baseline =
+    baselineCommit(top, boundaryRel) ?? opts.baselineCommit ?? null;
   const skip = new Set(opts.preexisting || []);
   const committed = committedPaths(top, baseline);
   const workingTree = dirtyPaths(top).filter((p) => !skip.has(p));
@@ -110,6 +127,7 @@ function check(opts: ScopeCheckOptions): ScopeResult {
 export = {
   OUT_OF_SCOPE_MAX: scope.OUT_OF_SCOPE_MAX,
   snapshot,
+  headCommit,
   parseDeclarations: scope.parseDeclarations,
   check,
   refusal: scope.refusal,

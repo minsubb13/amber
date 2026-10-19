@@ -63,6 +63,7 @@ function initProgress(
   force: boolean,
   preexisting: unknown,
   now: Clock,
+  baselineCommit?: string | null,
 ): Progress {
   const file = progressPath(root);
   if (fs.existsSync(file) && !force) {
@@ -81,6 +82,7 @@ function initProgress(
     path.relative(root, planAbs).split(path.sep).join('/'),
     Array.isArray(preexisting) ? preexisting : [],
     now,
+    baselineCommit ?? null,
   );
   saveProgress(root, p, now);
   return p;

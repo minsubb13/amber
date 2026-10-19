@@ -62,8 +62,10 @@ interface CodexTranscript {
   readonly cwd: unknown;
   readonly stops: never[];
   readonly reentries: Meta[];
+  readonly denies: never[];
   readonly host: 'codex';
   readonly stopsKnown: false;
+  readonly deniesKnown: false;
   readonly malformed: number;
 }
 
@@ -449,8 +451,11 @@ function parseCodexTranscript(text: string, file: string): CodexTranscript {
     cwd,
     stops: [],
     reentries,
+    // Whether a rollout shows a hook's denial text is unverified.
+    denies: [],
     host: 'codex',
     stopsKnown: false,
+    deniesKnown: false,
     malformed,
   };
 }

@@ -379,6 +379,97 @@ const sessionState = (home: string, sessionId: string): unknown => {
       ),
     ),
   );
+  // Monitor runs a shell command like Bash: the bash-deny rows apply to it.
+  check(
+    'E1 Monitor command matching deny pattern denied',
+    isDeny(
+      e1(
+        zoneContract,
+        'Monitor',
+        { command: 'git merge feature', description: 'd', timeout_ms: 1000 },
+        home,
+      ),
+    ),
+  );
+  check(
+    'E1 Monitor command otherwise allowed',
+    e1(
+      zoneContract,
+      'Monitor',
+      { command: 'tail -f build.log', description: 'd', timeout_ms: 1000 },
+      home,
+    ) === null,
+  );
+  // A host may name the file under `path`; it is the write target too.
+  check(
+    'E1 path key read as the write target',
+    isDeny(
+      e1(
+        zoneContract,
+        'Write',
+        { path: path.join(zoneContract, 'secrets.txt') },
+        home,
+      ),
+    ),
+  );
+  check(
+    'E1 path key inside scope allowed',
+    e1(
+      zoneContract,
+      'Write',
+      { path: path.join(zoneContract, 'docs/b.md') },
+      home,
+    ) === null,
+  );
+}
+
+// ---- E1: the run's state under .amber/ is no file tool's to write ----
+{
+  const home = freshHome('e1s');
+  const zoneBroad = makeZone(
+    'broad',
+    '# boundary - broad\n- everything [machine: write-scope **]\n',
+    {
+      v: 1,
+      boundary: 'test-boundary.md',
+      ratified_by: 'operator',
+      ratified_at: '2026-10-19',
+    },
+  );
+  check(
+    'E1 broad scope: ordinary write allowed',
+    e1(
+      zoneBroad,
+      'Write',
+      { file_path: path.join(zoneBroad, 'anything.txt') },
+      home,
+    ) === null,
+  );
+  const stateDeny = e1(
+    zoneBroad,
+    'Edit',
+    { file_path: path.join(zoneBroad, '.amber/progress.json') },
+    home,
+  );
+  check(
+    'E1 broad scope: progress.json edit denied (tamper guard)',
+    isDeny(stateDeny) &&
+      /\.amber\//.test(
+        stringAt(stateDeny, 'hookSpecificOutput', 'permissionDecisionReason'),
+      ),
+    JSON.stringify(stateDeny),
+  );
+  check(
+    'E1 broad scope: done.json write denied (tamper guard)',
+    isDeny(
+      e1(
+        zoneBroad,
+        'Write',
+        { file_path: path.join(zoneBroad, '.amber/done.json') },
+        home,
+      ),
+    ),
+  );
 }
 
 // ---- E1: no contract, broken pointer, bad regex ----
@@ -2642,6 +2733,123 @@ const sessionState = (home: string, sessionId: string): unknown => {
     'done refuses --out-of-scope without a contract',
     plainDecl.status !== 0 && /omit --out-of-scope/.test(plainDecl.stderr),
     plainDecl.stderr,
+  );
+}
+
+// ---- scope check baseline when no commit added the contract file ----
+{
+  const RECORD = path.join(PLUGIN, 'scripts', 'record.cjs');
+  const PLAN = [
+    '## Work units',
+    '- [ ] U1 code [unit: U1 scope=src/** oracle=true]',
+  ].join('\n');
+  const zone = makeZone(
+    'uncommitted',
+    [
+      '# boundary - uncommitted contract',
+      '- code [machine: write-scope src/**]',
+      '- docs [machine: write-scope docs/*.md]',
+    ].join('\n'),
+    {
+      v: 1,
+      boundary: 'test-boundary.md',
+      ratified_by: 'operator',
+      ratified_at: '2026-10-19',
+    },
+  );
+  fs.mkdirSync(path.join(zone, 'docs'), { recursive: true });
+  fs.mkdirSync(path.join(zone, 'src'), { recursive: true });
+  fs.writeFileSync(path.join(zone, '.gitignore'), '.amber/\n');
+  fs.writeFileSync(path.join(zone, 'README.md'), 'r\n');
+  fs.writeFileSync(path.join(zone, 'docs', 'plan.md'), PLAN);
+  const git = (...args: string[]): string =>
+    execFileSync('git', ['-C', zone, ...args], { encoding: 'utf8' }).trim();
+  git('config', 'user.email', 't@t');
+  git('config', 'user.name', 't');
+  // Only the README is committed: the contract file never was, so no commit
+  // added it and the old baseline query finds nothing.
+  git('add', 'README.md');
+  git('commit', '-q', '-m', 'init - the contract file stays uncommitted');
+  const head = git('rev-parse', 'HEAD');
+  const home = freshHome('uncommitted');
+  const progress = (): unknown =>
+    parseJson(
+      fs.readFileSync(path.join(zone, '.amber', 'progress.json'), 'utf8'),
+    );
+  const record = (args: readonly string[]): SpawnSyncReturns<string> =>
+    spawnSync('node', [RECORD, ...args], {
+      cwd: zone,
+      encoding: 'utf8',
+      timeout: 10000,
+      env: {
+        ...process.env,
+        AMBER_HOME: home,
+        AMBER_SESSION_ID: 'uncommitted-shell',
+      },
+    });
+  record(['unit', 'init', 'docs/plan.md']);
+  check(
+    'unit init records the HEAD as baseline_commit',
+    get(progress(), 'baseline_commit') === head,
+    JSON.stringify(get(progress(), 'baseline_commit')),
+  );
+  record(['unit', 'start', 'U1']);
+  fs.writeFileSync(
+    path.join(zone, 'outside.txt'),
+    'committed past the scope\n',
+  );
+  git('add', 'outside.txt');
+  git('commit', '-q', '-m', 'an out-of-scope file, committed');
+  const refused = record([
+    'unit',
+    'verified',
+    'U1',
+    '--evidence',
+    'oracle ran',
+  ]);
+  check(
+    'verified refuses an out-of-scope commit although no commit added the contract file',
+    refused.status !== 0 &&
+      /committed\s+outside\.txt/.test(refused.stderr) &&
+      get(progress(), 'units', 'U1', 'status') === 'running',
+    refused.stderr,
+  );
+  check(
+    'the refusal names the recorded baseline',
+    refused.stderr.includes('(baseline ' + head.slice(0, 7) + ')'),
+    refused.stderr,
+  );
+}
+
+// ---- a tree without a commit records no baseline ----
+{
+  const RECORD = path.join(PLUGIN, 'scripts', 'record.cjs');
+  const zone = makeZone('nocommit', BOUNDARY, {
+    v: 1,
+    boundary: 'test-boundary.md',
+    ratified_by: 'operator',
+    ratified_at: '2026-10-19',
+  });
+  fs.mkdirSync(path.join(zone, 'docs'), { recursive: true });
+  fs.writeFileSync(
+    path.join(zone, 'docs', 'plan.md'),
+    '## Work units\n- [ ] U1 one [unit: U1 scope=plugin/** oracle=true]\n',
+  );
+  const home = freshHome('nocommit');
+  spawnSync('node', [RECORD, 'unit', 'init', 'docs/plan.md'], {
+    cwd: zone,
+    encoding: 'utf8',
+    timeout: 10000,
+    env: { ...process.env, AMBER_HOME: home, AMBER_SESSION_ID: 'nocommit' },
+  });
+  check(
+    'unit init in a tree without a commit stores no baseline_commit key',
+    !has(
+      parseJson(
+        fs.readFileSync(path.join(zone, '.amber', 'progress.json'), 'utf8'),
+      ),
+      'baseline_commit',
+    ),
   );
 }
 

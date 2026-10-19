@@ -73,6 +73,7 @@ function newProgress(
   plan: string,
   preexisting: unknown[],
   now: Clock,
+  baselineCommit?: string | null,
 ): Progress {
   const p: Progress = {
     v: 1,
@@ -87,6 +88,9 @@ function newProgress(
     preexisting,
     units: {},
   };
+  // The HEAD when the run began, when the tree had one: the scope-check
+  // baseline for a contract file that was never committed.
+  if (baselineCommit) p.baseline_commit = baselineCommit;
   for (const u of units) {
     p.units[u.id] = {
       title: u.title,
