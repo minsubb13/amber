@@ -625,8 +625,10 @@ test('rows without payloads, ids, timestamps or cwd fall back', () => {
     cwd: '/zone',
     stops: [],
     reentries: [],
+    denies: [],
     host: 'codex',
     stopsKnown: false,
+    deniesKnown: false,
     malformed: 0,
   });
 });
@@ -725,8 +727,10 @@ test('messages and function calls cover typed planning, markers, and fallback co
     cwd: null,
     stops: [],
     reentries: [],
+    denies: [],
     host: 'codex',
     stopsKnown: false,
+    deniesKnown: false,
     malformed: 1,
   });
 });
@@ -858,8 +862,10 @@ test('non-string fields are converted the way the original converts them', () =>
     cwd: 7,
     stops: [],
     reentries: [],
+    denies: [],
     host: 'codex',
     stopsKnown: false,
+    deniesKnown: false,
     malformed: 0,
   });
 });
@@ -904,8 +910,10 @@ test('item_completed rows without an item are skipped; array fields join like St
     cwd: null,
     stops: [],
     reentries: [],
+    denies: [],
     host: 'codex',
     stopsKnown: false,
+    deniesKnown: false,
     malformed: 0,
   });
 });
@@ -930,8 +938,10 @@ test('a user message without a typed skill counts only as a user turn', () => {
     cwd: '/zone',
     stops: [],
     reentries: [],
+    denies: [],
     host: 'codex',
     stopsKnown: false,
+    deniesKnown: false,
     malformed: 0,
   });
 });

@@ -290,7 +290,7 @@ function mechanisms(
     [
       'E1 deny (write-scope / bash-deny refusal)',
       null,
-      'by design: the refusal reaches the model as the denial text; no ledger row',
+      'by design: the refusal reaches the model as the denial text; no ledger row - the session command counts the hook denials in the transcript',
     ],
     [
       'S2 continuation send-back (re-entry)',

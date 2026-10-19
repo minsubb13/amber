@@ -14,6 +14,10 @@
 const guards = require("./guards.cjs");
 const { readField, toText } = guards;
 const REENTRY_LINE = /still open\. Re-entry \d+\/\d+|Re-entry \d+\/10 on U\d+/;
+// An E1 refusal as the host hands it back: the tool result of the denied
+// call carries the hook's reason behind this envelope. Source text that
+// merely contains the reason (a file read, a grep) lacks the envelope.
+const DENY_RESULT = /\bPreToolUse:\w+ hook error: amber: blocked by (?:contract|unit)\b/;
 // record.cjs answers "amber: ..." on success and throws (Error text or
 // Usage) on refusal; any other result means the command text only mentioned
 // record.cjs (a grep, a heredoc writing a document).
@@ -95,6 +99,13 @@ function resultOf(body) {
     return 'mention';
 }
 /** Classifies the tool results of record.cjs calls made earlier. */
+/** Whether a content block is the tool result of a call E1 refused. */
+function isDenyResult(b) {
+    if (readField(b, 'type') !== 'tool_result')
+        return false;
+    const body = readField(b, 'content');
+    return DENY_RESULT.test(typeof body === 'string' ? body : JSON.stringify(body || ''));
+}
 function readToolResults(content, events) {
     for (const b of content) {
         if (readField(b, 'type') !== 'tool_result')
@@ -188,6 +199,7 @@ function parseClaudeTranscript(text) {
     let cwd = null;
     const stops = [];
     const reentries = [];
+    const denies = [];
     lines.forEach((line, i) => {
         if (!line.trim())
             return;
@@ -212,8 +224,12 @@ function parseClaudeTranscript(text) {
                 reentries.push({ ln, ts });
             // A record.cjs command's tool result tells refusal from acceptance;
             // only that classification is kept, never the text.
-            if (Array.isArray(content))
+            if (Array.isArray(content)) {
                 readToolResults(content, events);
+                for (const b of content)
+                    if (isDenyResult(b))
+                        denies.push({ ln, ts });
+            }
             return;
         }
         if (!cwd) {
@@ -241,6 +257,7 @@ function parseClaudeTranscript(text) {
         cwd,
         stops,
         reentries,
+        denies,
     };
 }
 module.exports = { parseClaudeTranscript };

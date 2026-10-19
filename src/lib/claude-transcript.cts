@@ -24,6 +24,11 @@ import type {
 const { readField, toText } = guards;
 
 const REENTRY_LINE = /still open\. Re-entry \d+\/\d+|Re-entry \d+\/10 on U\d+/;
+// An E1 refusal as the host hands it back: the tool result of the denied
+// call carries the hook's reason behind this envelope. Source text that
+// merely contains the reason (a file read, a grep) lacks the envelope.
+const DENY_RESULT =
+  /\bPreToolUse:\w+ hook error: amber: blocked by (?:contract|unit)\b/;
 // record.cjs answers "amber: ..." on success and throws (Error text or
 // Usage) on refusal; any other result means the command text only mentioned
 // record.cjs (a grep, a heredoc writing a document).
@@ -114,6 +119,15 @@ function resultOf(body: string): CallResult {
 }
 
 /** Classifies the tool results of record.cjs calls made earlier. */
+/** Whether a content block is the tool result of a call E1 refused. */
+function isDenyResult(b: unknown): boolean {
+  if (readField(b, 'type') !== 'tool_result') return false;
+  const body = readField(b, 'content');
+  return DENY_RESULT.test(
+    typeof body === 'string' ? body : JSON.stringify(body || ''),
+  );
+}
+
 function readToolResults(content: unknown[], events: AuditEvent[]): void {
   for (const b of content) {
     if (readField(b, 'type') !== 'tool_result') continue;
@@ -207,6 +221,7 @@ function parseClaudeTranscript(text: string): ClaudeTranscript {
   let cwd: unknown = null;
   const stops: { ln: number; ts: unknown; cat: string }[] = [];
   const reentries: { ln: number; ts: unknown }[] = [];
+  const denies: { ln: number; ts: unknown }[] = [];
   lines.forEach((line, i) => {
     if (!line.trim()) return;
     let o: unknown;
@@ -227,7 +242,10 @@ function parseClaudeTranscript(text: string): ClaudeTranscript {
       if (REENTRY_LINE.test(line)) reentries.push({ ln, ts });
       // A record.cjs command's tool result tells refusal from acceptance;
       // only that classification is kept, never the text.
-      if (Array.isArray(content)) readToolResults(content, events);
+      if (Array.isArray(content)) {
+        readToolResults(content, events);
+        for (const b of content) if (isDenyResult(b)) denies.push({ ln, ts });
+      }
       return;
     }
     if (!cwd) {
@@ -253,6 +271,7 @@ function parseClaudeTranscript(text: string): ClaudeTranscript {
     cwd,
     stops,
     reentries,
+    denies,
   };
 }
 

@@ -315,6 +315,8 @@ export interface ClaudeTranscript {
     readonly cat: string;
   }[];
   readonly reentries: { readonly ln: number; readonly ts: unknown }[];
+  /** E1 refusals: tool results carrying the host's hook-denial text. */
+  readonly denies: { readonly ln: number; readonly ts: unknown }[];
 }
 
 /** What the audit reads from a transcript of either host. */
@@ -326,8 +328,11 @@ export interface AuditTranscript {
   readonly cwd: unknown;
   readonly stops: readonly { readonly cat: string }[];
   readonly reentries: readonly { readonly ln: number }[];
+  readonly denies: readonly { readonly ln: number }[];
   /** false for Codex rollouts, which keep no stop-hook summaries. */
   readonly stopsKnown?: boolean;
+  /** false for Codex rollouts, which do not expose hook denials. */
+  readonly deniesKnown?: boolean;
   readonly malformed?: number;
 }
 
