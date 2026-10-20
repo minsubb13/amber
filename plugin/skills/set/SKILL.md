@@ -23,7 +23,7 @@ understanding, waits for the operator's approval utterance (`protocol.md`
   [host integration](../../references/hosts.md), and `## Load-bearing test`,
   `## Operator-facing voice`, and `## Approval` in [run protocol](../../references/protocol.md).
   Skip only sections already read in this session. On Codex, run its `invoke set`
-  command once; on Claude Code, use the automatic Skill tool record only.
+  command once; on Claude Code or pi, use the automatic skill record only.
 - Read only the matching contract template (`templates/contract-dev.md` or
   `templates/contract-research.md`; plus `templates/mission.md` only for
   multi-session research, and `templates/review-verdict.md` only when planning

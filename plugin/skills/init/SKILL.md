@@ -23,7 +23,7 @@ generating or mapping the four fixed documents, and verifying live sensors.
 - Read [host integration](../../references/hosts.md) (`## Skill names and package root`,
   `## Invocation and event records`, and `## Project entry point and installation`)
   and [run protocol](../../references/protocol.md). On Codex, run `invoke init`
-  once; on Claude Code, rely on the automatic Skill hook.
+  once; on Claude Code or pi, rely on the automatic skill record.
 - Run inside the target zone. Confirm Amber is installed and enabled for the
   current host and zone; if missing, give the host's install instructions and stop.
 
@@ -57,7 +57,7 @@ generating or mapping the four fixed documents, and verifying live sensors.
    `intent.md` slot filled or explicitly deferred by the operator) in one tension-list document.
 3. **Documents - generate or map.**
    - **Greenfield:** generate the four fixed documents (entry router `CLAUDE.md`
-     on Claude Code or `AGENTS.md` on Codex, `intent.md`, `status.md`, and the
+     on Claude Code or `AGENTS.md` on Codex and pi, `intent.md`, `status.md`, and the
      work-logs convention). Fill `intent.md` (`purpose`, `first oracle`, `forbidden set`)
      solely from the operator's answers.
    - **Brownfield:** map existing assets to those roles first and generate only

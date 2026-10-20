@@ -1,5 +1,16 @@
 {
   "private": true,
+  "keywords": [
+    "pi-package"
+  ],
+  "pi": {
+    "extensions": [
+      "./plugin/pi/index.ts"
+    ],
+    "skills": [
+      "./plugin/pi/skills"
+    ]
+  },
   "scripts": {
     "build": "tsc -p . && npm run --silent build:tools && node build/tools/header/main.mjs",
     "build:tools": "tsc -p tools && tsc -p test",

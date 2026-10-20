@@ -5,7 +5,7 @@
   </picture>
 </p>
 
-**A contract-checking harness for Claude Code and Codex.**
+**A contract-checking harness for Claude Code, Codex, and pi.**
 
 - Define scope and completion evidence before work begins.
 - Delegate inside an approved contract; stop and ask at its boundary.
@@ -15,7 +15,7 @@
 
 ## Install
 
-Requires Node.js 20+, git, and Claude Code 2.1+ or Codex CLI 0.155+.
+Requires Node.js 20+, git, and Claude Code 2.1+, Codex CLI 0.155+, or pi 1.3+.
 
 **Claude Code**
 
@@ -42,13 +42,21 @@ enabled = true
 
 Review and trust Amber's hooks in Codex. Start a new session after installation.
 
-Both hosts install from the `release` branch; [RELEASING.md](RELEASING.md) describes how releases are cut.
+**pi**
+
+```sh
+pi install git:github.com/minsubb13/amber@release
+```
+
+Add `-l` to install for the current project only. The package loads one extension (the hooks' events, enforcement, and the completion gate) and the skills as `amber-<name>`. Start a new session after installation.
+
+All hosts install from the `release` branch; [RELEASING.md](RELEASING.md) describes how releases are cut.
 
 ## Start
 
-In your git repository, run `/amber:init` (Claude Code) or `$amber:init` (Codex) once.
+In your git repository, run `/amber:init` (Claude Code and pi) or `$amber:init` (Codex) once.
 An empty repository works too: init then asks for the project's purpose, its first oracle, and what it will never do.
-Check setup with `/amber:status` or `$amber:status`.
+Check setup with `/amber:status` or `$amber:status`. On pi, `/amber:<name>` and `/skill:amber-<name>` are the same command.
 
 Ask for work normally. Amber opens planning, decides whether a contract is useful,
 and waits for your approval when one is needed.
