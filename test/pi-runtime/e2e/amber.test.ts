@@ -162,6 +162,15 @@ test('#27 a planning read opens the phase gate on pi; the refusal names the pi r
         },
         {
           tool: {
+            name: 'edit',
+            arguments: {
+              path: 'README.md',
+              edits: [{ oldText: '# fixture', newText: '# fixture edited' }],
+            },
+          },
+        },
+        {
+          tool: {
             name: 'write',
             arguments: { path: 'docs/x-contract.md', content: '# draft\n' },
           },
@@ -193,18 +202,24 @@ test('#27 a planning read opens the phase gate on pi; the refusal names the pi r
     const session = (await pi.command('get_state')).sessionId;
     await pi.prompt('open planning');
     const results = toolResults(pi);
-    assert.equal(results.length, 5);
+    assert.equal(results.length, 6);
     assert.equal(results[0].isError, false);
-    assert.equal(results[1].isError, true);
-    const refusal = JSON.stringify(results[1]);
-    assert.match(refusal, /planning phase open since/);
-    assert.match(refusal, /on Codex and pi `node \S+record\.cjs mark skip/);
+    for (const denied of [results[1], results[2]]) {
+      assert.equal(denied.isError, true);
+      const refusal = JSON.stringify(denied);
+      assert.match(refusal, /planning phase open since/);
+      assert.match(refusal, /on Codex and pi `node \S+record\.cjs mark skip/);
+    }
     assert.equal(existsSync(join(h.dir, 'src.txt')), false);
-    assert.equal(results[2].isError, false);
+    assert.equal(results[3].isError, false);
     assert.ok(existsSync(join(h.dir, 'docs/x-contract.md')));
-    assert.equal(results[3].isError, false, JSON.stringify(results[3]));
     assert.equal(results[4].isError, false, JSON.stringify(results[4]));
-    assert.match(readFileSync(join(h.dir, 'README.md'), 'utf8'), /edited/);
+    assert.equal(results[5].isError, false, JSON.stringify(results[5]));
+    // Applied once: the refused edit left the file as it was.
+    assert.equal(
+      readFileSync(join(h.dir, 'README.md'), 'utf8'),
+      '# fixture edited\n',
+    );
     assert.equal(sessionState(h, session).phase, undefined);
     const exits = ledger(h).filter((r) => r.trigger === 'phase-exit');
     assert.equal(exits.length, 1);
