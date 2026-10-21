@@ -868,12 +868,73 @@ const sessionState = (home: string, sessionId: string): unknown => {
   check('S1 skips sessions S0 already briefed', out4 === null);
 }
 
+// ---- S0: no-contract briefing by source ----
+{
+  const home = freshHome('s0src');
+  const brief = (id: string, source?: string): string => {
+    const input = {
+      session_id: id,
+      cwd: zoneEmpty,
+      model: 'm',
+      ...(source === undefined ? {} : { source }),
+    };
+    return stringOf(contextOf(runHook('S0', input, home).out));
+  };
+  const isFull = (ctx: string): boolean =>
+    /Completion signal:/.test(ctx) &&
+    /semantic review/.test(ctx) &&
+    /Never run the command for incomplete/.test(ctx);
+  const isIndex = (ctx: string): boolean =>
+    !/Completion signal:/.test(ctx) &&
+    !/semantic review/.test(ctx) &&
+    / done --review /.test(ctx) &&
+    !/--goal/.test(ctx) &&
+    /loads with the amber:planning skill/.test(ctx);
+  for (const source of ['startup', 'clear']) {
+    const ctx = brief('src-' + source, source);
+    check(
+      'S0 ' +
+        source +
+        ' without a contract briefs the arming note and the index only',
+      /^amber: no active contract in this zone\./.test(ctx) && isIndex(ctx),
+      ctx.slice(0, 400),
+    );
+  }
+  for (const source of ['compact', 'resume']) {
+    const ctx = brief('src-' + source, source);
+    check(
+      'S0 ' +
+        source +
+        ' without a contract briefs the full completion procedure',
+      /^amber: no active contract in this zone\./.test(ctx) && isFull(ctx),
+      ctx.slice(0, 400),
+    );
+  }
+  const first = brief('src-none');
+  check(
+    'S0 without a source and without prior state briefs the index only',
+    isIndex(first),
+    first.slice(0, 400),
+  );
+  const again = brief('src-none');
+  check(
+    "S0 without a source but with this session's state briefs the full procedure",
+    isFull(again),
+    again.slice(0, 400),
+  );
+}
+
 // ---- S0 regression ----
 {
   const home = freshHome('s0');
   const out = runHook(
     'S0',
-    { session_id: 'abc', cwd: zoneEmpty, model: 'claude-fable-5' },
+    {
+      session_id: 'abc',
+      cwd: zoneEmpty,
+      model: 'claude-fable-5',
+      source: 'startup',
+    },
     home,
   ).out;
   const armCtx = contextOf(out);
@@ -897,18 +958,38 @@ const sessionState = (home: string, sessionId: string): unknown => {
       /recorded/.test(stringOf(armCtx)),
   );
   check(
-    'S0 contract-less briefing names the done command without --goal',
+    'S0 contract-less startup briefing names the done command without --goal and only the index',
     !!armCtx &&
       / done --review /.test(stringOf(armCtx)) &&
       !/--goal/.test(stringOf(armCtx)) &&
-      /semantic review/.test(stringOf(armCtx)),
+      /loads with the amber:planning skill/.test(stringOf(armCtx)) &&
+      !/semantic review/.test(stringOf(armCtx)),
+  );
+  const resumeCtx = contextOf(
+    runHook(
+      'S0',
+      {
+        session_id: 'abc-resume',
+        cwd: zoneEmpty,
+        model: 'claude-fable-5',
+        source: 'resume',
+      },
+      home,
+    ).out,
   );
   check(
-    'S0 contract-less briefing forbids the signal for incomplete reports',
-    !!armCtx &&
-      /Never run the command for incomplete/.test(stringOf(armCtx)) &&
-      /governed work unit itself complete/.test(stringOf(armCtx)) &&
-      !/AMBER_/.test(stringOf(armCtx)),
+    'S0 contract-less resume briefing names the done command without --goal',
+    !!resumeCtx &&
+      / done --review /.test(stringOf(resumeCtx)) &&
+      !/--goal/.test(stringOf(resumeCtx)) &&
+      /semantic review/.test(stringOf(resumeCtx)),
+  );
+  check(
+    'S0 contract-less resume briefing forbids the signal for incomplete reports',
+    !!resumeCtx &&
+      /Never run the command for incomplete/.test(stringOf(resumeCtx)) &&
+      /governed work unit itself complete/.test(stringOf(resumeCtx)) &&
+      !/AMBER_/.test(stringOf(resumeCtx)),
   );
   check(
     'S0 wrote the session state file',
