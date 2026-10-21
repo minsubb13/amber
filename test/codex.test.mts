@@ -86,6 +86,7 @@ function activate(root: string, filename = 'boundary.md'): void {
 function env(f: Fixture, thread: string | null = f.session): NodeJS.ProcessEnv {
   const result: NodeJS.ProcessEnv = { ...process.env, AMBER_HOME: f.home };
   delete result['CODEX_THREAD_ID'];
+  delete result['PI_SESSION_ID'];
   if (thread !== null) result['CODEX_THREAD_ID'] = thread;
   return result;
 }

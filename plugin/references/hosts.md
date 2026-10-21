@@ -14,6 +14,11 @@ current step uses them.
 - **Codex:** select the installed `amber:<name>` skill (`planning`, `set`,
   `init`, `status`, `mark`, `audit`) and follow its `SKILL.md` (operator
   command: `$amber:<name>`). Reading a skill file does not write a ledger record.
+- **pi:** the skills are installed as `amber-<name>` (`amber-planning`,
+  `amber-set`, `amber-init`, `amber-mark`, explicit-only `amber-status` and
+  `amber-audit`); each is a short pointer to the shared `skills/<name>/SKILL.md`.
+  Load one by reading its `SKILL.md` (operator command: `/amber:<name>` or
+  `/skill:amber-<name>`). Read `amber:<name>` in any Amber text as `amber-<name>`.
 
 Resolve the installed Amber package root as `amber_plugin_root` before running a
 package command, keeping the shell working directory in the project zone:
@@ -22,6 +27,11 @@ package command, keeping the shell working directory in the project zone:
   Amber package; otherwise resolve any catalog alias and take the directory that contains `skills/` (two levels above `<root>/skills/<name>/SKILL.md`). Do not
   guess an install-cache path or use the project's checkout root. (Codex hooks
   also receive a `CLAUDE_PLUGIN_ROOT` alias; that alias alone does not identify Claude Code.)
+- **pi:** `AMBER_PLUGIN_ROOT` if present in the shell; otherwise the directory
+  that contains `skills/` and `scripts/` - two levels above the shared
+  `<root>/skills/<name>/SKILL.md`, three levels above the pointer skill
+  `<root>/pi/skills/amber-<name>/SKILL.md`. The briefings also print the
+  absolute `record.cjs` path.
 
 ## Invocation and event records
 
@@ -35,9 +45,13 @@ package command, keeping the shell working directory in the project zone:
   ```sh
   node "$amber_plugin_root/scripts/record.cjs" invoke <skill> ["<args>"]
   ```
-- **Codex (`mark`):** execute only the matching event branch once per event
+- **pi:** the Amber extension records invocations automatically - a model
+  read of an `amber-<name>/SKILL.md` and a typed `/amber:<name>` or
+  `/skill:amber-<name>` prompt, with the same rows as Claude Code (typed
+  `/amber:status` adds no row). Never run `record.cjs invoke` on pi.
+- **Codex and pi (`mark`):** execute only the matching event branch once per event
   (never run `invoke mark` or emit a bare text marker; wait for exit 0 and
-  report any failure):
+  report any failure; uses `CODEX_THREAD_ID` on Codex, `PI_SESSION_ID` on pi):
   ```sh
   node "$amber_plugin_root/scripts/record.cjs" mark skip '<subject> - <reason>'
   node "$amber_plugin_root/scripts/record.cjs" mark finding '<finding> - <disposition>'
@@ -96,6 +110,13 @@ beforehand; shell writes are caught here.
   or bypass a denied patch with a shell write). Codex hooks supply parent
   `session_id` + child `agent_id` (`CODEX_THREAD_ID`), and E1 maps absolute
   targets in git-registered linked worktrees before checking contract/unit scopes.
+- **pi:** pi has no built-in subagents; run units serially in the main
+  session, or start one child pi per unit worktree, passing the parent session
+  and a fresh agent id so the extension treats the child as that unit's
+  subagent (claim handshake, unit-scope checks, no Stop-hook loop):
+  `(cd <zone>/.claude/worktrees/<unit> && AMBER_AGENT_ID=<unit>-<n> AMBER_PARENT_SESSION_ID="$PI_SESSION_ID" pi -p "<brief>")`.
+  The brief carries the same items as on Codex; its first tool call is
+  `unit claim U<n>`.
 - **Worktree boundary:** unit worktrees live inside `<zone>/.claude/worktrees/`
   and inherit the active run without a separate pointer. A linked worktree
   outside the zone directory is a separate zone: `.amber/` is gitignored so no
@@ -110,7 +131,8 @@ rollouts (`${CODEX_HOME:-~/.codex}/{sessions,archived_sessions}`). Setting
 (including nested date directories) for isolated fixture runs. Codex recorder
 calls are read from `CommandExecution` events and direct shell calls. Missing or
 ambiguous outcomes and rollouts lacking `stop_hook_summary` are reported as
-`unknown`, never zero.
+`unknown`, never zero. pi sessions (`~/.pi/agent/sessions`) are not read yet:
+pi rows report `transcript=no`, which is unavailable evidence, not zero events.
 
 ## Completion signal (both hosts)
 
@@ -135,6 +157,11 @@ report ([reports](reports.md)).
   and enabled; entry document `AGENTS.md`, manifest `.codex-plugin/plugin.json`.
   Verify S0 context and ledger records separately (listing alone does not prove
   hooks ran in this session).
+- **pi:** `pi list` shows the installed Amber package (installed with
+  `pi install git:github.com/minsubb13/amber@release`); entry document
+  `AGENTS.md` (pi also loads `CLAUDE.md`), manifest `.claude-plugin/plugin.json`
+  (its version is the one the ledger records). The S0 briefing arrives as a
+  hidden `amber` message before the first prompt.
 
 If installation is missing or disabled, report the observed state and host
 install step before continuing `init` (use a fresh session after installing to
@@ -156,5 +183,9 @@ Headless fallback / scripted calls:
 - **From Codex, Claude Code reviews:**
   `claude -p "<review request>" --permission-mode dontAsk --tools "Read,Grep,Glob"`
   (place the request immediately after `-p`, before `--tools`).
+- **From pi:** use either command above (`codex exec ...` or `claude -p ...`).
+- **From Claude Code or Codex, pi reviews:**
+  `pi --print --no-session --tools read,grep,find,ls "<review request>"`.
+
 The reviewer writes nothing in the zone and never runs `record.cjs` or starts
 another review; capture its output and save the verdict file yourself.

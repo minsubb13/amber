@@ -1,5 +1,16 @@
 {
   "private": true,
+  "keywords": [
+    "pi-package"
+  ],
+  "pi": {
+    "extensions": [
+      "./plugin/pi/index.ts"
+    ],
+    "skills": [
+      "./plugin/pi/skills"
+    ]
+  },
   "scripts": {
     "build": "tsc -p . && npm run --silent build:tools && node build/tools/header/main.mjs",
     "build:tools": "tsc -p tools && tsc -p test",
@@ -8,6 +19,7 @@
     "format": "prettier --write src tools test",
     "format:check": "prettier --check src tools test",
     "test": "npm run --silent build:tools && node build/tools/test/main.mjs",
+    "test:pi-runtime": "node tools/test/pi-runtime-types.mjs && node --test test/pi-runtime/e2e/*.test.ts",
     "parity": "npm run --silent build:tools && node build/tools/parity/main.mjs suites",
     "parity:real": "npm run --silent build:tools && node build/tools/parity/main.mjs real",
     "parity:selftest": "npm run --silent build:tools && node build/tools/parity/main.mjs selftest",

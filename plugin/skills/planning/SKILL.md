@@ -33,7 +33,7 @@ plan, and approval report, creating `.amber/active.json` on approval).
 - Read `## Skill names and package root` and `## Invocation and event records`
   in [hosts.md](../../references/hosts.md), and `## Load-bearing test` and
   `## Operator-facing voice` in [protocol.md](../../references/protocol.md). On
-  Codex, run `invoke planning` once; on Claude Code, use the automatic Skill record.
+  Codex, run `invoke planning` once; on Claude Code or pi, use the automatic skill record.
 - Input: any work request that changes zone files or produces a deliverable.
 
 ## Procedure

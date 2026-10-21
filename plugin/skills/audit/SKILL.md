@@ -25,7 +25,8 @@ proposed disposition.
   [run protocol](../../references/protocol.md), and resolve `amber_plugin_root`.
   On Codex, run `invoke audit` once (with any argument text after the skill
   name); on Claude Code, S1 records typed `/amber:audit` automatically (never
-  call via a model-selected Skill-tool call).
+  call via a model-selected Skill-tool call); on pi, the extension records the
+  typed `/amber:audit` (or `/skill:amber-audit`) automatically.
 - Read-only helper:
 
   ```sh

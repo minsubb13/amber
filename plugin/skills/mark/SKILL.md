@@ -21,9 +21,9 @@ Record one cycle event in the ledger and immediately resume work.
 1. **Record on the current host.**
    - **Claude Code:** the S3 hook records the Skill tool invocation
      automatically; do not run `record.cjs`.
-   - **Codex:** run `record.cjs` (`mark skip`, `mark finding`, or `mark hold`)
+   - **Codex and pi:** run `record.cjs` (`mark skip`, `mark finding`, or `mark hold`)
      once with the supplied event text and verify exit 0. Do not run
      `invoke mark` (loading this skill does not write the record).
 
-   *Exit:* event recorded (by S3 hook on Claude Code or `record.cjs` on Codex).
+   *Exit:* event recorded (by S3 hook on Claude Code or `record.cjs` on Codex and pi).
 2. **Continue.** Resume work without repeating the event as a bare text marker.
