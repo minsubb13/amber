@@ -44,8 +44,3 @@ Not answered: <what this run does not cover>
 
 ## Question handling
 Default: on a discovery outside the contract, full stop plus a stop report (`references/reports.md`).
-
-## Carry-over (filled at completion)
-- Left behind:
-- Waiting (what waits on whose judgment):
-- Next action:

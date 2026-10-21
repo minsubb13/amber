@@ -1,6 +1,6 @@
 // The hook input's boundary check, without I/O. The host protocols send
-// session_id, cwd and model as strings; a value of another type is read as
-// absent. Every other field stays as found and is converted where it is
+// session_id, cwd, model and source as strings; a value of another type is
+// read as absent. Every other field stays as found and is converted where it is
 // read, as the hand-written hook did. A JSON null input fails with the
 // TypeError the original raised when its handler read the first field.
 
@@ -33,10 +33,12 @@ function hookInput(raw: unknown, event: HookEvent): HookInput {
   const sessionId = stringField(field('session_id'));
   const cwd = stringField(field('cwd'));
   const model = stringField(field('model'));
+  const source = stringField(field('source'));
   return {
     ...(sessionId === undefined ? {} : { session_id: sessionId }),
     ...(cwd === undefined ? {} : { cwd }),
     ...(model === undefined ? {} : { model }),
+    ...(source === undefined ? {} : { source }),
     prompt: field('prompt'),
     tool_name: field('tool_name'),
     tool_input: guards.isObject(toolInput) ? toolInput : {},

@@ -44,6 +44,7 @@ plan, and approval report, creating `.amber/active.json` on approval).
      state the verdict in one line, record
      `skip - opening verdict - no contract: <reason>` via `amber:mark` (fixed
      audit prefix), and proceed immediately.
+     Such work still closes by [protocol](../../references/protocol.md) `## Completion`: when the unit is genuinely complete, review it against the request and run `node "<amber_plugin_root>/scripts/record.cjs" done --review "<evidence-based review result>" --summary "<one-line summary>"` as the last tool call, then end the turn with the completion report; incomplete, Q&A, discussion, and status turns run no signal.
    - **Route.** Otherwise route before eliciting: **development** (code/doc
      change with stateable completion condition) or **research** (promote /
      hold / reject verdict with separate success/failure definitions); ask if

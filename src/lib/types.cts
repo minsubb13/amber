@@ -198,6 +198,11 @@ export interface HookInput {
   readonly session_id?: string;
   readonly cwd?: string;
   readonly model?: string;
+  /**
+   * SessionStart: why the session starts (startup, resume, clear, compact)
+   * when the host sends it.
+   */
+  readonly source?: string;
   readonly prompt?: unknown;
   readonly tool_name?: unknown;
   /** The tool's own input; an absent or non-object value reads as {}. */
