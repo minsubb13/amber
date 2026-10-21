@@ -11,8 +11,10 @@ import briefing = require('./briefing.cjs');
 import clock = require('./clock.cjs');
 import contracts = require('./contract.cjs');
 import guards = require('./guards.cjs');
+import phase = require('./phase.cjs');
 import state = require('./state-store.cjs');
 import text = require('./hook-text.cjs');
+import zone = require('./zone.cjs');
 import type { HookInput, HookOutput, SessionState } from './types.cjs';
 
 const STATE_TTL_MS = 48 * 60 * 60 * 1000;
@@ -76,12 +78,13 @@ function runS0(input: HookInput): HookOutput {
   // Briefed flag keyed to the boundary file: S1 re-briefs only when a
   // contract appears (or changes) after this session's opening.
   if (contract) sessionState.briefed = contract.boundaryFile || 'broken';
-  // A resumed or compacted session keeps driving its run.
-  const previousRun = guards.readField(
-    state.readSessionState(input.session_id),
-    'run',
-  );
+  // A resumed or compacted session keeps driving its run, and keeps the
+  // phase it opened: the gate outlives the context that opened it.
+  const previous = state.readSessionState(input.session_id);
+  const previousRun = guards.readField(previous, 'run');
   if (previousRun) sessionState.run = previousRun;
+  const previousPhase = guards.readField(previous, 'phase');
+  if (previousPhase) sessionState.phase = previousPhase;
   state.writeStateAtomic(statePath, sessionState);
   sweepIdleState();
   const failures = sensorFailureCount();
@@ -102,6 +105,10 @@ function runS0(input: HookInput): HookOutput {
     parts.push(text.NO_CONTRACT);
     const worktreeCtx = briefing.linkedWorktreeContextFor(input.cwd);
     if (worktreeCtx) parts.push(worktreeCtx);
+    const openPhase = phase.readPhase(previousPhase);
+    if (openPhase && openPhase.zone === zone.zoneRoot(input.cwd)) {
+      parts.push(phase.briefLine(openPhase));
+    }
     parts.push(
       briefsFullProcedure(input.source, hadState)
         ? text.noContractGuidance()

@@ -7,7 +7,10 @@
 // The run's own state under .amber/ is written by record.cjs and the hooks,
 // never by a file tool. A subagent writes only inside the unit it claimed; the
 // claim and the driving session are registered here, the one party that sees
-// the host-assigned ids.
+// the host-assigned ids. Without a contract, a session whose phase is open in
+// this zone (a planning or set record not yet closed by a skip record or an
+// approved contract) writes only planning artifacts with file tools (lib/phase);
+// the first tool call that finds the pointer closes the phase as an approval.
 const path = require("node:path");
 // The apply_patch parser keeps its stage 2 module at hooks/patch-paths.
 const patchPathsModule = require("../hooks/patch-paths.cjs");
@@ -18,6 +21,8 @@ const guards = require("./guards.cjs");
 const ledger = require("./ledger.cjs");
 const model = require("./progress-model.cjs");
 const ownership = require("./ownership.cjs");
+const phase = require("./phase.cjs");
+const phaseStore = require("./phase-store.cjs");
 const rules = require("./contract-rules.cjs");
 const store = require("./progress-store.cjs");
 const text = require("./hook-text.cjs");
@@ -139,10 +144,65 @@ function claimedUnit(contract, agentId) {
     }
     return { id, unit };
 }
+/** The write targets of a file-tool call; throws for a malformed apply_patch. */
+function targetsOf(input) {
+    if (input.tool_name === 'apply_patch') {
+        return patchPathsModule.patchPaths(input.tool_input['command']);
+    }
+    const target = guards.toText(input.tool_input['file_path'] ||
+        input.tool_input['notebook_path'] ||
+        input.tool_input['path'] ||
+        '');
+    return target ? [target] : [];
+}
+/**
+ * Without a contract: the session's phase, when open in this zone, gates
+ * file-tool writes to planning artifacts. Bash and Monitor pass (the exit
+ * row counts what they changed); a subagent follows its session's phase. A
+ * target outside the zone directory passes before any mapping: a sibling
+ * worktree is a zone of its own (the one planning says to open when another
+ * run holds this zone), and the mapper would otherwise fold its paths onto
+ * this zone's; a unit worktree under <zone>/.claude/worktrees/ lies inside
+ * and is judged by its zone-relative path.
+ */
+function runPhaseGate(input) {
+    if (input.tool_name === 'Bash' || input.tool_name === 'Monitor')
+        return null;
+    const current = phaseStore.phaseOf(input.session_id);
+    if (!current)
+        return null;
+    const root = zone.zoneRoot(input.cwd);
+    if (current.zone !== root)
+        return null;
+    let targets;
+    try {
+        targets = targetsOf(input);
+    }
+    catch (err) {
+        return deny('cannot inspect apply_patch while the ' +
+            current.state +
+            ' phase is open: ' +
+            messageOf(err) +
+            '. Correct the patch and retry.');
+    }
+    const inside = targets
+        .map((target) => path.resolve(input.cwd || root, target))
+        .filter((abs) => zone.insideZone(root, abs));
+    for (const { rel } of zone.zoneRelativeAll(root, input.cwd, inside)) {
+        const verdict = phase.verdict(rel);
+        if (verdict === 'state') {
+            return deny(phase.stateDenyText(current, rel, text.RECORD_CLI));
+        }
+        if (verdict === 'deny') {
+            return deny(phase.denyText(current, rel, text.RECORD_CLI));
+        }
+    }
+    return null;
+}
 function runE1(input) {
     const contract = contracts.loadContract(input.cwd);
     if (!contract)
-        return null;
+        return runPhaseGate(input);
     if (contract.broken) {
         return deny('active contract pointer ' +
             contract.pointerPath +
@@ -150,30 +210,23 @@ function runE1(input) {
             contract.error +
             '). Fix it, or remove the file to release the contract.');
     }
+    // The pointer is the approval: a phase still open here ends now.
+    phaseStore.exit(input, contract.root, 'approval');
     const { writeScopes, bashDeny } = rules.machineRules(contract.text);
     const agentId = input.agent_id ? guards.toText(input.agent_id) : null;
     if (input.tool_name === 'Bash' || input.tool_name === 'Monitor') {
         return runBash(input, contract, bashDeny, agentId);
     }
     let targets;
-    if (input.tool_name === 'apply_patch') {
-        try {
-            targets = patchPathsModule.patchPaths(input.tool_input['command']);
-        }
-        catch (err) {
-            return deny('cannot inspect apply_patch under contract ' +
-                contract.boundaryFile +
-                ': ' +
-                messageOf(err) +
-                '. Correct the patch and retry.');
-        }
+    try {
+        targets = targetsOf(input);
     }
-    else {
-        const target = guards.toText(input.tool_input['file_path'] ||
-            input.tool_input['notebook_path'] ||
-            input.tool_input['path'] ||
-            '');
-        targets = target ? [target] : [];
+    catch (err) {
+        return deny('cannot inspect apply_patch under contract ' +
+            contract.boundaryFile +
+            ': ' +
+            messageOf(err) +
+            '. Correct the patch and retry.');
     }
     let claimed = null;
     if (agentId) {

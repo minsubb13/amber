@@ -8,6 +8,7 @@ import briefing = require('./briefing.cjs');
 import contracts = require('./contract.cjs');
 import guards = require('./guards.cjs');
 import ledger = require('./ledger.cjs');
+import phaseStore = require('./phase-store.cjs');
 import state = require('./state-store.cjs');
 import text = require('./hook-text.cjs');
 import type { HookInput, HookOutput } from './types.cjs';
@@ -24,6 +25,8 @@ function runS1(input: HookInput): HookOutput {
   const prompt = guards.toText(input.prompt || '').trim();
   if (PLANNING_CALL.test(prompt)) {
     ledger.appendRecord(input, prompt, null, 'planning-invocation');
+    // The typed call opens the phase as the Skill record does (lib/phase).
+    phaseStore.enter(input, 'planning');
   }
   if (INIT_CALL.test(prompt)) {
     ledger.appendRecord(input, 'amber:init (typed)', null, 'skill-invocation');

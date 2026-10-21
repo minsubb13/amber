@@ -11,8 +11,10 @@ const briefing = require("./briefing.cjs");
 const clock = require("./clock.cjs");
 const contracts = require("./contract.cjs");
 const guards = require("./guards.cjs");
+const phase = require("./phase.cjs");
 const state = require("./state-store.cjs");
 const text = require("./hook-text.cjs");
+const zone = require("./zone.cjs");
 const STATE_TTL_MS = 48 * 60 * 60 * 1000;
 function sweepIdleState() {
     for (const name of fs.readdirSync(state.STATE_DIR)) {
@@ -70,10 +72,15 @@ function runS0(input) {
     // contract appears (or changes) after this session's opening.
     if (contract)
         sessionState.briefed = contract.boundaryFile || 'broken';
-    // A resumed or compacted session keeps driving its run.
-    const previousRun = guards.readField(state.readSessionState(input.session_id), 'run');
+    // A resumed or compacted session keeps driving its run, and keeps the
+    // phase it opened: the gate outlives the context that opened it.
+    const previous = state.readSessionState(input.session_id);
+    const previousRun = guards.readField(previous, 'run');
     if (previousRun)
         sessionState.run = previousRun;
+    const previousPhase = guards.readField(previous, 'phase');
+    if (previousPhase)
+        sessionState.phase = previousPhase;
     state.writeStateAtomic(statePath, sessionState);
     sweepIdleState();
     const failures = sensorFailureCount();
@@ -96,6 +103,10 @@ function runS0(input) {
         const worktreeCtx = briefing.linkedWorktreeContextFor(input.cwd);
         if (worktreeCtx)
             parts.push(worktreeCtx);
+        const openPhase = phase.readPhase(previousPhase);
+        if (openPhase && openPhase.zone === zone.zoneRoot(input.cwd)) {
+            parts.push(phase.briefLine(openPhase));
+        }
         parts.push(briefsFullProcedure(input.source, hadState)
             ? text.noContractGuidance()
             : text.NO_CONTRACT_INDEX);

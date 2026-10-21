@@ -27,6 +27,7 @@ plan, and approval report, creating `.amber/active.json` on approval).
 - Record cycle events via `amber:mark` (`skip - declined opening - <reason>`,
   `skip - opening verdict - no contract: <reason>`; see `mark/SKILL.md`,
   `hosts.md`), never as bare text lines.
+- From the planning record until a skip record or the approved contract's pointer, file tools write only planning artifacts in this zone (`*-contract.md`, `*-plan.md`, `*-check.sh`, `*-review*.md`, `missions/*.md`; never `.amber/`): the hook refuses other writes, so record the no-contract verdict before routine work, and shell writes made meanwhile are listed on the phase's exit row in the ledger.
 
 ## Input and preconditions
 

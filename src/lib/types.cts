@@ -272,6 +272,30 @@ export interface MachineRules {
   readonly bashDeny: string[];
 }
 
+/** The pre-approval phase a session is in: planning, or set until approval. */
+export type PhaseState = 'planning' | 'set';
+
+/**
+ * A session's open phase, kept in its state file: while it stands, file-tool
+ * writes in `zone` outside planning artifacts are refused (lib/phase).
+ */
+export interface SessionPhase {
+  readonly state: PhaseState;
+  /** The zone root (absolute) the phase was entered in. */
+  readonly zone: string;
+  /** When the cycle opened (ISO); set keeps planning's. */
+  readonly since: string;
+  /**
+   * The zone's `git status --porcelain` paths at the entry, or null when git
+   * failed or the list was longer than SNAPSHOT_MAX: the phase-exit row's
+   * `changed` is what the exit sees beyond these.
+   */
+  readonly snapshot: readonly string[] | null;
+}
+
+/** How a phase ended, named on its phase-exit ledger row. */
+export type PhaseExit = 'skip' | 'approval' | 'release';
+
 /** A session's state file under <AMBER_HOME>/state/, as written. */
 export interface SessionState {
   model?: unknown;
@@ -280,6 +304,8 @@ export interface SessionState {
   briefed?: unknown;
   /** The boundary file of the run this session drives. */
   run?: unknown;
+  /** The session's open phase (a SessionPhase), carried like `run`. */
+  phase?: unknown;
 }
 
 /** The completion signal `record.cjs done` writes to <zone>/.amber/done.json. */

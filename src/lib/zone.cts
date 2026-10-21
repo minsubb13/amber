@@ -184,6 +184,7 @@ function projectKey(cwd: string | null | undefined): string {
 }
 
 export = {
+  insideZone,
   zoneRoot,
   worktreeTop,
   zoneRelative,

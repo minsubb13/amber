@@ -9,6 +9,7 @@ const briefing = require("./briefing.cjs");
 const contracts = require("./contract.cjs");
 const guards = require("./guards.cjs");
 const ledger = require("./ledger.cjs");
+const phaseStore = require("./phase-store.cjs");
 const state = require("./state-store.cjs");
 const text = require("./hook-text.cjs");
 const PLANNING_CALL = /^(?:\/|\$)amber:planning\b/;
@@ -22,6 +23,8 @@ function runS1(input) {
     const prompt = guards.toText(input.prompt || '').trim();
     if (PLANNING_CALL.test(prompt)) {
         ledger.appendRecord(input, prompt, null, 'planning-invocation');
+        // The typed call opens the phase as the Skill record does (lib/phase).
+        phaseStore.enter(input, 'planning');
     }
     if (INIT_CALL.test(prompt)) {
         ledger.appendRecord(input, 'amber:init (typed)', null, 'skill-invocation');

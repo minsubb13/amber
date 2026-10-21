@@ -1,15 +1,19 @@
 // S3 (PreToolUse Skill): record model-invoked amber skills (the judged
 // cycle-opening path S1 cannot see) and amber:mark calls (cycle events - the
 // call itself is the record). Sensor only: no permission decision, silence on
-// everything that is not an amber skill.
+// everything that is not an amber skill. A planning or set record opens the
+// session's phase and a skip record closes it (lib/phase-store); the Codex
+// recorder's invoke and mark run this too.
 
 import clock = require('./clock.cjs');
 import contracts = require('./contract.cjs');
 import guards = require('./guards.cjs');
 import ledger = require('./ledger.cjs');
 import model = require('./progress-model.cjs');
+import phaseStore = require('./phase-store.cjs');
 import store = require('./progress-store.cjs');
 import recordArgs = require('./record-args.cjs');
+import zone = require('./zone.cjs');
 import type { HookInput, HookOutput } from './types.cjs';
 
 // Model-invoked amber skills arrive as Skill tool calls; match the likely
@@ -87,6 +91,11 @@ function runS3(input: HookInput): HookOutput {
         );
       }
       ledger.appendRecord(input, eventText.trim(), null, kind);
+      // Every skip closes the cycle: the declined opening and the no-contract
+      // verdict alike release the phase gate of this zone.
+      if (kind === 'skip') {
+        phaseStore.exit(input, zone.zoneRoot(input.cwd), 'skip');
+      }
       return null;
     }
   }
@@ -96,6 +105,7 @@ function runS3(input: HookInput): HookOutput {
     null,
     'skill-invocation',
   );
+  if (m[1] === 'planning' || m[1] === 'set') phaseStore.enter(input, m[1]);
   return null;
 }
 
