@@ -57,6 +57,7 @@ package command, keeping the shell working directory in the project zone:
   node "$amber_plugin_root/scripts/record.cjs" mark finding '<finding> - <disposition>'
   node "$amber_plugin_root/scripts/record.cjs" mark hold 'U<n> - <reason>'
   ```
+- **Both hosts:** the planning or set record (S3, the Codex `invoke` above, or the typed `/amber:planning`) opens the session's phase: file-tool writes in that zone outside planning artifacts are refused until `mark skip` or the pointer closes it, each leaving a `phase-exit` ledger row with the files changed meanwhile; S0 carries the phase across a resume or compaction and says so.
 
 ---
 

@@ -936,7 +936,7 @@ test('Codex invoke planning opens the phase and mark skip closes it with a phase
   assert.equal(get(rows, 2, 'session_id'), f.session);
   assert.equal(get(rows, 2, 'model'), 'gpt-fixture-model');
   assert.equal(
-    'phase' in (parseJson(fs.readFileSync(stateFile, 'utf8')) as object),
+    hasKey(parseJson(fs.readFileSync(stateFile, 'utf8')), 'phase'),
     false,
   );
 });
