@@ -2662,6 +2662,17 @@ const sessionState = (home: string, sessionId: string): unknown => {
       'preexist.txt,top.txt',
     JSON.stringify(get(progress(), 'preexisting')),
   );
+  // The pointer was hand-written (no baseline), so init took the content
+  // baseline itself: the HEAD and the blob hash of each pre-run path.
+  check(
+    'unit init under a hand-written pointer records its own content baseline',
+    at(progress(), 'baseline', 'commit') === baseline &&
+      at(progress(), 'baseline', 'manifest', 'top.txt') ===
+        git('hash-object', 'top.txt') &&
+      at(progress(), 'baseline', 'manifest', 'preexist.txt') ===
+        git('hash-object', 'preexist.txt'),
+    JSON.stringify(at(progress(), 'baseline')),
+  );
   record(['unit', 'start', 'U1']);
   fs.writeFileSync(path.join(zone, 'plugin', 'new.cjs'), 'ok\n');
   const inScope = record([
@@ -2776,8 +2787,27 @@ const sessionState = (home: string, sessionId: string): unknown => {
       !signalExists(zone),
     commitRefused.stderr,
   );
-  // the contract file itself is never compared; a glob declaration is accepted
+  // The contract file is frozen while active: an edit through the shell
+  // refuses done and cannot be declared away. Restored, done passes with the
+  // glob declaration covering stray.md.
   fs.appendFileSync(path.join(zone, 'test-boundary.md'), '\n<!-- note -->\n');
+  const tampered = done(zone, home, [
+    ...SCOPE_DONE,
+    ...STRAY,
+    '--out-of-scope',
+    'other.txt=hotfix agreed in chat',
+    '--out-of-scope',
+    'test-boundary.md=note',
+  ]);
+  check(
+    'done refuses a contract file modified since the run began, declared or not',
+    tampered.status !== 0 &&
+      /test-boundary\.md/.test(tampered.stderr) &&
+      /frozen/.test(tampered.stderr) &&
+      !signalExists(zone),
+    tampered.stderr,
+  );
+  git('checkout', '--', 'test-boundary.md');
   const declaredDone = done(zone, home, [
     ...SCOPE_DONE,
     '--out-of-scope',
@@ -2789,7 +2819,7 @@ const sessionState = (home: string, sessionId: string): unknown => {
     ? parseJson(fs.readFileSync(signalPath(zone), 'utf8'))
     : null;
   check(
-    'done passes with every out-of-scope file declared and ignores the contract file',
+    'done passes with every out-of-scope file declared once the contract file is restored',
     declaredDone.status === 0 &&
       !!signal &&
       get(signal, 'out_of_scope_count') === 2 &&
@@ -2977,6 +3007,501 @@ const sessionState = (home: string, sessionId: string): unknown => {
       ),
       'baseline_commit',
     ),
+  );
+}
+
+// ---- activate: the pointer and the content baseline written by one command ----
+{
+  const RECORD = path.join(PLUGIN, 'scripts', 'record.cjs');
+  const zone = makeZone('activate', null, null);
+  fs.writeFileSync(path.join(zone, '.gitignore'), '.amber/\n');
+  fs.writeFileSync(
+    path.join(zone, 'contract.md'),
+    '- code [machine: write-scope src/**]\n',
+  );
+  fs.writeFileSync(path.join(zone, 'top.txt'), 'x\n');
+  fs.writeFileSync(path.join(zone, 'gone.txt'), 'g\n');
+  const git = (...args: string[]): string =>
+    execFileSync('git', ['-C', zone, ...args], { encoding: 'utf8' }).trim();
+  git('config', 'user.email', 't@t');
+  git('config', 'user.name', 't');
+  git('add', '-A');
+  git('commit', '-q', '-m', 'init');
+  const head = git('rev-parse', 'HEAD');
+  // Dirty before activation: a modified tracked file, an untracked file and
+  // a deleted file.
+  fs.appendFileSync(path.join(zone, 'top.txt'), 'pre-run edit\n');
+  fs.writeFileSync(path.join(zone, 'untracked.txt'), 'new\n');
+  fs.unlinkSync(path.join(zone, 'gone.txt'));
+  const objectsBefore = git('count-objects', '-v');
+  const home = freshHome('activate');
+  const record = (
+    args: readonly string[],
+    cwd = zone,
+  ): SpawnSyncReturns<string> =>
+    spawnSync('node', [RECORD, ...args], {
+      cwd,
+      encoding: 'utf8',
+      timeout: 10000,
+      env: {
+        ...process.env,
+        AMBER_HOME: home,
+        AMBER_SESSION_ID: 'activate-shell',
+      },
+    });
+  const pointerFile = path.join(zone, '.amber', 'active.json');
+  // Lenient reads: the reference build of the parity harness has no activate
+  // and writes no pointer, and its run of this file must not abort here.
+  const pointer = (): unknown =>
+    fs.existsSync(pointerFile)
+      ? parseJson(fs.readFileSync(pointerFile, 'utf8'))
+      : null;
+  const pointerText = (): string =>
+    fs.existsSync(pointerFile) ? fs.readFileSync(pointerFile, 'utf8') : '';
+  const sorted = (value: unknown): string =>
+    Array.isArray(value) ? value.map(String).sort().join() : '';
+  const activated = record([
+    'activate',
+    'contract.md',
+    '--by',
+    'operator',
+    '--at',
+    '2026-10-21',
+  ]);
+  check(
+    'activate writes the pointer and exits 0',
+    activated.status === 0 && fs.existsSync(pointerFile),
+    activated.stderr,
+  );
+  check(
+    'the pointer keeps the schema-v1 fields',
+    at(pointer(), 'v') === 1 &&
+      at(pointer(), 'boundary') === 'contract.md' &&
+      at(pointer(), 'ratified_by') === 'operator' &&
+      at(pointer(), 'ratified_at') === '2026-10-21',
+    JSON.stringify(pointer()),
+  );
+  check(
+    'baseline.commit is the HEAD at activation',
+    at(pointer(), 'baseline', 'commit') === head,
+    JSON.stringify(at(pointer(), 'baseline')),
+  );
+  check(
+    'the manifest hashes the modified tracked file',
+    at(pointer(), 'baseline', 'manifest', 'top.txt') ===
+      git('hash-object', 'top.txt'),
+    JSON.stringify(at(pointer(), 'baseline', 'manifest')),
+  );
+  check(
+    'the manifest hashes the untracked file',
+    at(pointer(), 'baseline', 'manifest', 'untracked.txt') ===
+      git('hash-object', 'untracked.txt'),
+  );
+  check(
+    'the manifest records a deleted file as null',
+    // at() yields undefined for a missing key and null only for a null value
+    at(pointer(), 'baseline', 'manifest', 'gone.txt') === null,
+  );
+  check(
+    'contract_blob is the hash of the contract file',
+    at(pointer(), 'baseline', 'contract_blob') ===
+      git('hash-object', 'contract.md'),
+  );
+  check(
+    'activate writes no object and leaves the working tree as it was',
+    git('count-objects', '-v') === objectsBefore &&
+      git('status', '--porcelain').includes(' M top.txt'),
+    git('status', '--porcelain'),
+  );
+  const activateRows = ledger(home).filter(
+    (r) => get(r, 'trigger') === 'activate',
+  );
+  check(
+    'activate records one ledger row carrying the baseline commit',
+    activateRows.length === 1 &&
+      at(activateRows[0], 'baseline_commit') === head &&
+      at(activateRows[0], 'pre_run_paths') === 3,
+    JSON.stringify(activateRows),
+  );
+  const before = pointerText();
+  const again = record(['activate', 'contract.md', '--by', 'operator']);
+  check(
+    'a second activate refuses and leaves the pointer unchanged',
+    again.status !== 0 &&
+      /already exists/.test(again.stderr) &&
+      pointerText() === before,
+    again.stderr,
+  );
+  if (fs.existsSync(pointerFile)) fs.unlinkSync(pointerFile);
+  const missing = record(['activate', 'nope.md', '--by', 'operator']);
+  check(
+    'activate refuses a missing contract file',
+    missing.status !== 0 &&
+      /not found/.test(missing.stderr) &&
+      !fs.existsSync(pointerFile),
+    missing.stderr,
+  );
+  const noBy = record(['activate', 'contract.md']);
+  check(
+    'activate refuses without --by',
+    noBy.status !== 0 &&
+      /--by/.test(noBy.stderr) &&
+      !fs.existsSync(pointerFile),
+    noBy.stderr,
+  );
+  const nogit = path.join(BASE, 'activate-nogit');
+  fs.mkdirSync(nogit, { recursive: true });
+  fs.writeFileSync(path.join(nogit, 'contract.md'), 'c\n');
+  const outside = record(
+    ['activate', 'contract.md', '--by', 'operator'],
+    nogit,
+  );
+  check(
+    'activate refuses outside a git repository',
+    outside.status !== 0 &&
+      /git repository/.test(outside.stderr) &&
+      !fs.existsSync(path.join(nogit, '.amber', 'active.json')),
+    outside.stderr,
+  );
+  // unit init under an activated pointer: the pointer's baseline applies and
+  // init records none of its own; the compatibility fields follow it.
+  fs.writeFileSync(
+    path.join(zone, 'plan.md'),
+    '## Work units\n- [ ] U1 one [unit: U1 scope=src/** oracle=true]\n',
+  );
+  record(['activate', 'contract.md', '--by', 'operator', '--at', '2026-10-21']);
+  record(['unit', 'init', 'plan.md']);
+  const progressFile = path.join(zone, '.amber', 'progress.json');
+  const progress = (): unknown =>
+    fs.existsSync(progressFile)
+      ? parseJson(fs.readFileSync(progressFile, 'utf8'))
+      : null;
+  check(
+    'unit init under an activated pointer stores no baseline of its own',
+    at(progress(), 'baseline') === undefined &&
+      at(progress(), 'baseline_commit') === head,
+    JSON.stringify(progress()),
+  );
+  check(
+    "preexisting lists the pointer's pre-run paths (compatibility field)",
+    sorted(at(progress(), 'preexisting')) ===
+      'gone.txt,plan.md,top.txt,untracked.txt',
+    JSON.stringify(at(progress(), 'preexisting')),
+  );
+}
+
+// ---- content baseline: a pre-run edit is excused only while its content stays ----
+{
+  const RECORD = path.join(PLUGIN, 'scripts', 'record.cjs');
+  const CONTRACT = '- code [machine: write-scope src/**]\n';
+  const PLAN =
+    '## Work units\n- [ ] U1 code [unit: U1 scope=src/** oracle=true]\n';
+  const CONTENT_DONE = [
+    '--review',
+    'checked',
+    '--goal',
+    'met',
+    '--summary',
+    'content probe',
+  ];
+  interface Flow {
+    readonly zone: string;
+    readonly git: (...a: string[]) => string;
+    readonly record: (a: readonly string[]) => SpawnSyncReturns<string>;
+  }
+  let n = 0;
+  // A zone with one commit (.gitignore, top.txt, plan.md and, unless told
+  // otherwise, the contract), dirty before the run begins: top.txt modified
+  // and pre.txt untracked, both outside the write-scope.
+  function flow(tag: string, commitContract = true): Flow {
+    n += 1;
+    const zone = makeZone('content-' + tag + '-' + String(n), null, null);
+    fs.writeFileSync(path.join(zone, '.gitignore'), '.amber/\n');
+    fs.writeFileSync(path.join(zone, 'top.txt'), 'x\n');
+    fs.writeFileSync(path.join(zone, 'contract.md'), CONTRACT);
+    fs.writeFileSync(path.join(zone, 'plan.md'), PLAN);
+    fs.mkdirSync(path.join(zone, 'src'));
+    const git = (...a: string[]): string =>
+      execFileSync('git', ['-C', zone, ...a], { encoding: 'utf8' }).trim();
+    git('config', 'user.email', 't@t');
+    git('config', 'user.name', 't');
+    git('add', '.gitignore', 'top.txt', 'plan.md');
+    if (commitContract) git('add', 'contract.md');
+    git('commit', '-q', '-m', 'init');
+    fs.appendFileSync(path.join(zone, 'top.txt'), 'pre-run edit\n');
+    fs.writeFileSync(path.join(zone, 'pre.txt'), 'pre\n');
+    const home = freshHome('content-' + tag + '-' + String(n));
+    const record = (a: readonly string[]): SpawnSyncReturns<string> =>
+      spawnSync('node', [RECORD, ...a], {
+        cwd: zone,
+        encoding: 'utf8',
+        timeout: 10000,
+        env: {
+          ...process.env,
+          AMBER_HOME: home,
+          AMBER_SESSION_ID: 'content-shell',
+        },
+      });
+    return { zone, git, record };
+  }
+  // A run with a plan the old way: hand-written pointer, so unit init takes
+  // the baseline itself; then U1 starts.
+  function started(tag: string): Flow {
+    const f = flow(tag);
+    fs.mkdirSync(path.join(f.zone, '.amber'), { recursive: true });
+    fs.writeFileSync(
+      path.join(f.zone, '.amber', 'active.json'),
+      JSON.stringify({
+        v: 1,
+        boundary: 'contract.md',
+        ratified_by: 'operator',
+        ratified_at: '2026-10-21',
+      }),
+    );
+    f.record(['unit', 'init', 'plan.md']);
+    f.record(['unit', 'start', 'U1']);
+    return f;
+  }
+  const verify = (f: Flow): SpawnSyncReturns<string> =>
+    f.record(['unit', 'verified', 'U1', '--evidence', 'oracle ran']);
+
+  const a = started('a');
+  fs.appendFileSync(
+    path.join(a.zone, 'top.txt'),
+    'shell edit during the run\n',
+  );
+  const aRefused = verify(a);
+  check(
+    'verified refuses a pre-run dirty file modified again during the run',
+    aRefused.status !== 0 && /working-tree\s+top\.txt/.test(aRefused.stderr),
+    aRefused.stderr,
+  );
+  check(
+    'the refusal marks the file as modified before the run and warns against git checkout',
+    /top\.txt\s+\(already modified before the run began\)/.test(
+      aRefused.stderr,
+    ) && /Do not `git checkout` these/.test(aRefused.stderr),
+    aRefused.stderr,
+  );
+  const b = started('b');
+  fs.writeFileSync(path.join(b.zone, 'src', 'new.txt'), 'ok\n');
+  const bOk = verify(b);
+  check(
+    'verified passes while the pre-run files keep their content',
+    bOk.status === 0,
+    bOk.stderr,
+  );
+  const c = started('c');
+  fs.appendFileSync(path.join(c.zone, 'pre.txt'), 'more\n');
+  const cRefused = verify(c);
+  check(
+    'verified refuses a pre-run untracked file whose content changed',
+    cRefused.status !== 0 &&
+      /pre\.txt\s+\(already modified before the run began\)/.test(
+        cRefused.stderr,
+      ),
+    cRefused.stderr,
+  );
+  const d = started('d');
+  fs.unlinkSync(path.join(d.zone, 'pre.txt'));
+  const dRefused = verify(d);
+  check(
+    'verified refuses when a pre-run untracked file was deleted during the run',
+    dRefused.status !== 0 && /pre\.txt/.test(dRefused.stderr),
+    dRefused.stderr,
+  );
+  const e = started('e');
+  fs.writeFileSync(path.join(e.zone, 'stray.txt'), 'stray\n');
+  const eRefused = verify(e);
+  check(
+    'a fresh out-of-scope file is refused without the pre-run warning',
+    eRefused.status !== 0 &&
+      /stray\.txt/.test(eRefused.stderr) &&
+      !/before the run/.test(eRefused.stderr),
+    eRefused.stderr,
+  );
+  // plan-less: activate records the pre-run dirt, so done needs no declaration
+  const f = flow('planless');
+  f.record(['activate', 'contract.md', '--by', 'operator']);
+  const fOk = f.record(['done', ...CONTENT_DONE]);
+  check(
+    'plan-less done passes without declaring the files that were dirty at activation',
+    fOk.status === 0 && fs.existsSync(path.join(f.zone, '.amber', 'done.json')),
+    fOk.stderr,
+  );
+  // plan-less with the contract file never committed: the recorded commit is
+  // the baseline, so a commit past the scope is still caught
+  const g = flow('uncommitted', false);
+  g.record(['activate', 'contract.md', '--by', 'operator']);
+  fs.writeFileSync(path.join(g.zone, 'outside.txt'), 'o\n');
+  g.git('add', 'outside.txt');
+  g.git('commit', '-q', '-m', 'outside');
+  const gRefused = g.record(['done', ...CONTENT_DONE]);
+  check(
+    'plan-less done refuses an out-of-scope commit after activation although no commit added the contract file',
+    gRefused.status !== 0 && /committed\s+outside\.txt/.test(gRefused.stderr),
+    gRefused.stderr,
+  );
+  // a baseline whose commit is not a hash refuses as malformed
+  const h = flow('malformed');
+  h.record(['activate', 'contract.md', '--by', 'operator']);
+  const pointerFile = path.join(h.zone, '.amber', 'active.json');
+  const recorded = fs.existsSync(pointerFile)
+    ? parseJson(fs.readFileSync(pointerFile, 'utf8'))
+    : null;
+  fs.mkdirSync(path.dirname(pointerFile), { recursive: true });
+  fs.writeFileSync(
+    pointerFile,
+    JSON.stringify({
+      v: 1,
+      boundary: 'contract.md',
+      ratified_by: 'operator',
+      ratified_at: '2026-10-21',
+      baseline: {
+        commit: 'not-a-sha',
+        manifest: at(recorded, 'baseline', 'manifest'),
+        contract_blob: at(recorded, 'baseline', 'contract_blob'),
+        taken_at: 'x',
+      },
+    }),
+  );
+  const hRefused = h.record(['done', ...CONTENT_DONE]);
+  check(
+    'a baseline whose commit is not a git hash refuses as malformed',
+    hRefused.status !== 0 &&
+      /malformed/.test(hRefused.stderr) &&
+      /commit/.test(hRefused.stderr),
+    hRefused.stderr,
+  );
+  // the contract file edited through the shell after activation
+  const i = flow('tamper');
+  i.record(['activate', 'contract.md', '--by', 'operator']);
+  fs.appendFileSync(path.join(i.zone, 'contract.md'), '\n<!-- note -->\n');
+  const iRefused = i.record([
+    'done',
+    ...CONTENT_DONE,
+    '--out-of-scope',
+    'contract.md=note',
+  ]);
+  check(
+    'done refuses a contract file edited after activation even when declared',
+    iRefused.status !== 0 &&
+      /contract\.md/.test(iRefused.stderr) &&
+      /frozen/.test(iRefused.stderr),
+    iRefused.stderr,
+  );
+  i.git('checkout', '--', 'contract.md');
+  const iOk = i.record(['done', ...CONTENT_DONE]);
+  check(
+    'done passes once the contract file is restored',
+    iOk.status === 0,
+    iOk.stderr,
+  );
+  // The integrity check does not depend on the contract's rows: a contract
+  // whose write-scope rows were removed through the shell still refuses.
+  const j = flow('scope-rows');
+  j.record(['activate', 'contract.md', '--by', 'operator']);
+  fs.writeFileSync(
+    path.join(j.zone, 'contract.md'),
+    '- no machine rows left\n',
+  );
+  const jRefused = j.record(['done', ...CONTENT_DONE]);
+  check(
+    'done refuses a contract whose write-scope rows were removed after activation',
+    jRefused.status !== 0 && /frozen/.test(jRefused.stderr),
+    jRefused.stderr,
+  );
+  const k = started('scope-rows-unit');
+  fs.writeFileSync(
+    path.join(k.zone, 'contract.md'),
+    '- no machine rows left\n',
+  );
+  const kRefused = verify(k);
+  check(
+    'verified refuses a contract whose write-scope rows were removed after the run began',
+    kRefused.status !== 0 && /frozen/.test(kRefused.stderr),
+    kRefused.stderr,
+  );
+  // A path named like an Object property is a change like any other.
+  const l = started('proto');
+  fs.writeFileSync(path.join(l.zone, 'constructor'), 'c\n');
+  const lRefused = verify(l);
+  check(
+    'verified refuses a new out-of-scope file named constructor',
+    lRefused.status !== 0 && /working-tree\s+constructor/.test(lRefused.stderr),
+    lRefused.stderr,
+  );
+  // A baseline that is present but not the recorded shape refuses as
+  // malformed instead of counting as none.
+  const m = flow('manifest-null');
+  m.record(['activate', 'contract.md', '--by', 'operator']);
+  const mPointer = path.join(m.zone, '.amber', 'active.json');
+  fs.mkdirSync(path.dirname(mPointer), { recursive: true });
+  fs.writeFileSync(
+    mPointer,
+    JSON.stringify({
+      v: 1,
+      boundary: 'contract.md',
+      ratified_by: 'operator',
+      ratified_at: '2026-10-21',
+      baseline: {
+        commit: null,
+        manifest: null,
+        contract_blob: null,
+        taken_at: 'x',
+      },
+    }),
+  );
+  const mRefused = m.record(['done', ...CONTENT_DONE]);
+  check(
+    'a baseline whose manifest is not an object refuses as malformed instead of counting as none',
+    mRefused.status !== 0 && /malformed/.test(mRefused.stderr),
+    mRefused.stderr,
+  );
+  // A pre-run edit committed as it was is reported as committed and still
+  // marked as a pre-run file.
+  const o = started('committed-pre-run');
+  o.git('add', 'top.txt');
+  o.git('commit', '-q', '-m', 'commit the pre-run edit');
+  const oRefused = verify(o);
+  check(
+    'a pre-run edit committed unchanged is reported as committed and marked as pre-run',
+    oRefused.status !== 0 &&
+      /committed\s+top\.txt\s+\(already modified before the run began\)/.test(
+        oRefused.stderr,
+      ),
+    oRefused.stderr,
+  );
+  // A baseline recorded before the first commit: every path committed since
+  // counts, instead of falling back to the commit that added the contract.
+  const nZone = makeZone('content-nocommit', null, null);
+  fs.writeFileSync(path.join(nZone, '.gitignore'), '.amber/\n');
+  fs.writeFileSync(path.join(nZone, 'contract.md'), CONTRACT);
+  const nGit = (...a: string[]): string =>
+    execFileSync('git', ['-C', nZone, ...a], { encoding: 'utf8' }).trim();
+  nGit('config', 'user.email', 't@t');
+  nGit('config', 'user.name', 't');
+  const nHome = freshHome('content-nocommit');
+  const nRecord = (a: readonly string[]): SpawnSyncReturns<string> =>
+    spawnSync('node', [RECORD, ...a], {
+      cwd: nZone,
+      encoding: 'utf8',
+      timeout: 10000,
+      env: {
+        ...process.env,
+        AMBER_HOME: nHome,
+        AMBER_SESSION_ID: 'content-shell',
+      },
+    });
+  nRecord(['activate', 'contract.md', '--by', 'operator']);
+  fs.writeFileSync(path.join(nZone, 'outside.txt'), 'o\n');
+  nGit('add', 'outside.txt');
+  nGit('commit', '-q', '-m', 'first commit, past the scope');
+  const nRefused = nRecord(['done', ...CONTENT_DONE]);
+  check(
+    'a baseline recorded before the first commit counts every path committed since',
+    nRefused.status !== 0 && /committed\s+outside\.txt/.test(nRefused.stderr),
+    nRefused.stderr,
   );
 }
 

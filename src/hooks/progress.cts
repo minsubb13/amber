@@ -11,7 +11,7 @@ import glob = require('../lib/glob.cjs');
 import plan = require('../lib/plan.cjs');
 import model = require('../lib/progress-model.cjs');
 import store = require('../lib/progress-store.cjs');
-import type { EventExtra, Progress } from '../lib/types.cjs';
+import type { Baseline, EventExtra, Progress } from '../lib/types.cjs';
 
 function saveProgress(root: string, p: Progress): void {
   store.saveProgress(root, p, clock.isoNow);
@@ -24,6 +24,7 @@ function initProgress(
   force: boolean,
   preexisting: unknown,
   baselineCommit?: string | null,
+  baseline?: Baseline | null,
 ): Progress {
   return store.initProgress(
     root,
@@ -33,6 +34,7 @@ function initProgress(
     preexisting,
     clock.isoNow,
     baselineCommit,
+    baseline,
   );
 }
 

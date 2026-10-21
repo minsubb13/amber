@@ -9,17 +9,30 @@
 // change was legitimate stays with the model's declaration
 // (--out-of-scope <path>=<reason>) and the operator reading the record.
 //
-// Changed set = (baseline..HEAD commits) ∪ ((working tree ∪ untracked) −
-// preexisting). The baseline is the commit that added the contract file (set
-// commits contract and plan before approval) or, when no commit added it,
-// the HEAD `unit init` recorded in progress.json as baseline_commit; without
-// either, only the working tree is compared. preexisting is the dirty path
-// list `unit init` stored there too. `.amber/` and the contract file itself
-// are never compared. Any git failure refuses (fail closed).
+// A path counts as changed when its content now differs from the run's
+// baseline, or when a commit since the baseline touched it:
+//   changed = (baseline.commit..HEAD commits)
+//           ∪ (working tree ∪ untracked, minus manifest paths whose blob hash
+//              is still the recorded one)
+//           ∪ (manifest paths whose blob hash is no longer the recorded one)
+// The baseline is the one `record.cjs activate` wrote into the pointer, or
+// the one `unit init` recorded in progress.json for a hand-written pointer;
+// its manifest holds the blob hash of every path that was already dirty when
+// the run began, so a pre-run edit is excused only while its content stays
+// what it was. Without a recorded baseline the commit that added the contract
+// file is the baseline and nothing is excused. The contract file's own hash
+// is compared with the recorded one and a difference refuses outright (the
+// contract is frozen while active). Baseline values that are not SHAs refuse
+// as malformed. `.amber/` and the contract file itself are never listed as
+// changed paths. Any git failure refuses (fail closed).
 //
 // This module runs git and keeps the interface scripts/record.cjs uses; the
 // rules live in lib/scope.
+const fs = require("node:fs");
+const path = require("node:path");
+const clock = require("../lib/clock.cjs");
 const git = require("../lib/git.cjs");
+const guards = require("../lib/guards.cjs");
 const scope = require("../lib/scope.cjs");
 function toplevel(cwd) {
     try {
@@ -91,22 +104,208 @@ function headCommit(cwd) {
         return null;
     }
 }
+/** Whether `file` names a regular file (a symbolic link to one included). */
+function isRegularFile(file) {
+    try {
+        return fs.statSync(file).isFile();
+    }
+    catch {
+        return false;
+    }
+}
+/**
+ * The blob SHA of each toplevel-relative path that names a regular file, from
+ * one `git hash-object --stdin-paths` run that writes nothing to the object
+ * store; a path naming anything else (deleted, a directory, a link to one)
+ * maps to null. A path holding a newline is hashed on its own, since the
+ * batch reads one path per line.
+ */
+function blobHashes(top, paths) {
+    const out = new Map();
+    const files = [];
+    for (const p of paths) {
+        if (isRegularFile(path.join(top, p)))
+            files.push(p);
+        else
+            out.set(p, null);
+    }
+    const batch = files.filter((p) => !p.includes('\n'));
+    if (batch.length > 0) {
+        const shas = git
+            .gitInput(top, ['hash-object', '--stdin-paths'], batch.join('\n') + '\n')
+            .split('\n')
+            .filter(Boolean);
+        if (shas.length !== batch.length) {
+            throw new Error('git hash-object returned ' +
+                String(shas.length) +
+                ' hashes for ' +
+                String(batch.length) +
+                ' paths');
+        }
+        batch.forEach((p, i) => out.set(p, shas[i] ?? null));
+    }
+    for (const p of files) {
+        if (p.includes('\n')) {
+            out.set(p, git.git(top, ['hash-object', '--', p]).trim() || null);
+        }
+    }
+    return out;
+}
+/**
+ * The content baseline of the tree cwd lies in: HEAD, the blob hash of every
+ * path `git status` reports (tracked changes and untracked files; `.amber/`
+ * excepted), and the blob hash of the contract file. Null when cwd is not
+ * inside a git repository; any other git failure throws (the caller decides
+ * whether that refuses). Reads only - no object, index entry or file is
+ * written.
+ */
+function takeBaseline(cwd, boundaryPath) {
+    let top;
+    try {
+        top = toplevel(cwd);
+    }
+    catch {
+        return null;
+    }
+    const paths = dirtyPaths(top).filter((p) => p !== '.amber' && !p.startsWith('.amber/'));
+    const hashes = blobHashes(top, paths);
+    // Object.fromEntries defines own properties, so a path named __proto__
+    // is recorded like any other.
+    const manifest = Object.fromEntries(paths.map((p) => [p, hashes.get(p) ?? null]));
+    let contractBlob = null;
+    if (boundaryPath) {
+        const rel = path.relative(top, boundaryPath).split(path.sep).join('/');
+        contractBlob = blobHashes(top, [rel]).get(rel) ?? null;
+    }
+    return {
+        commit: headCommit(cwd),
+        manifest,
+        contract_blob: contractBlob,
+        taken_at: clock.isoNow(),
+    };
+}
+const SHA = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/;
+/** A git object hash or null as recorded; undefined for anything else. */
+function hashOrNull(value) {
+    if (value === null)
+        return null;
+    return typeof value === 'string' && SHA.test(value) ? value : undefined;
+}
+/**
+ * The recorded baseline of a run in checked form, or null when none was
+ * recorded (the value is undefined). A value that is present but not the
+ * recorded shape, or whose hashes are not git object hashes, refuses as
+ * malformed: every value reaches a git command line or decides a comparison,
+ * and a baseline that was tampered with must not quietly count as none. The
+ * manifest comes back as a Map so a path named like an Object property
+ * (constructor, __proto__) is an entry like any other.
+ */
+function readBaseline(raw) {
+    if (raw === undefined)
+        return null;
+    const malformed = (what) => new Error('scope baseline is malformed (' +
+        what +
+        '); the run state under .amber/ was not written by record.cjs as ' +
+        'found - restore it or release the contract');
+    if (!guards.isObject(raw))
+        throw malformed('not the recorded object shape');
+    const manifestRaw = raw['manifest'];
+    if (!guards.isObject(manifestRaw)) {
+        throw malformed('manifest is not an object');
+    }
+    const bad = [];
+    const commit = hashOrNull(raw['commit']);
+    if (commit === undefined)
+        bad.push('commit');
+    const contractBlob = hashOrNull(raw['contract_blob']);
+    if (contractBlob === undefined)
+        bad.push('contract_blob');
+    const manifest = new Map();
+    for (const [p, value] of Object.entries(manifestRaw)) {
+        const sha = hashOrNull(value);
+        if (sha === undefined)
+            bad.push('manifest[' + p + ']');
+        else
+            manifest.set(p, sha);
+    }
+    if (bad.length > 0) {
+        throw malformed(bad.join(', ') + ' is not a git object hash');
+    }
+    return {
+        commit: commit ?? null,
+        manifest,
+        contractBlob: contractBlob ?? null,
+    };
+}
+/**
+ * Refuses when the contract file's content is no longer what the baseline
+ * recorded. An active contract is frozen, and this holds whatever the
+ * contract text now says: a contract whose write-scope rows were removed
+ * through the shell fails here, not in the scope comparison that such a
+ * contract no longer triggers. Nothing recorded (no baseline, or none for
+ * the contract file) checks nothing.
+ */
+function checkContract(opts) {
+    const b = readBaseline(opts.baseline);
+    if (!b || !b.contractBlob || !opts.boundaryPath)
+        return;
+    const top = toplevel(opts.cwd);
+    const rel = path.relative(top, opts.boundaryPath).split(path.sep).join('/');
+    const current = blobHashes(top, [rel]).get(rel) ?? null;
+    if (current !== b.contractBlob) {
+        throw new Error('the contract file ' +
+            rel +
+            ' was modified since the contract was activated (recorded ' +
+            b.contractBlob.slice(0, 7) +
+            ', now ' +
+            (current ? current.slice(0, 7) : 'missing') +
+            '). An active contract is frozen: restore the file to its recorded ' +
+            'content (for a committed contract, `git checkout -- ' +
+            rel +
+            '`) and run the command again. This cannot be declared away.');
+    }
+}
+/**
+ * Every path in HEAD's tree: what counts as committed since a baseline that
+ * was taken before the first commit.
+ */
+function trackedPaths(top) {
+    if (!headCommit(top))
+        return [];
+    return git
+        .git(top, ['ls-tree', '-r', '--name-only', '-z', 'HEAD'])
+        .split('\0')
+        .filter(Boolean);
+}
 function check(opts) {
     const { cwd, writeScopes, boundaryRel } = opts;
     const top = toplevel(cwd);
-    const baseline = baselineCommit(top, boundaryRel) ?? opts.baselineCommit ?? null;
-    const skip = new Set(opts.preexisting || []);
-    const committed = committedPaths(top, baseline);
-    const workingTree = dirtyPaths(top).filter((p) => !skip.has(p));
+    const b = readBaseline(opts.baseline);
+    // With a recorded baseline its commit is the moment the run began, and a
+    // recorded null means the tree had no commit then, so every path committed
+    // since counts. The commit that added the contract file stands in only
+    // when nothing was recorded.
+    const baseline = b ? b.commit : baselineCommit(top, boundaryRel);
+    const committed = b && b.commit === null ? trackedPaths(top) : committedPaths(top, baseline);
+    const manifest = b
+        ? b.manifest
+        : new Map();
+    const recorded = [...manifest.keys()].filter((p) => p !== boundaryRel && p !== '.amber' && !p.startsWith('.amber/'));
+    const now = blobHashes(top, recorded);
+    const changedPreRun = recorded.filter((p) => (now.get(p) ?? null) !== manifest.get(p));
+    const workingTree = dirtyPaths(top).filter((p) => !manifest.has(p));
     return scope.classify(baseline, [
         ['committed', committed],
-        ['working-tree', workingTree],
-    ], writeScopes, boundaryRel, opts.declarations || []);
+        ['working-tree', [...workingTree, ...changedPreRun]],
+    ], writeScopes, boundaryRel, opts.declarations || [], new Set(manifest.keys()));
 }
 module.exports = {
     OUT_OF_SCOPE_MAX: scope.OUT_OF_SCOPE_MAX,
     snapshot,
     headCommit,
+    takeBaseline,
+    readBaseline,
+    checkContract,
     parseDeclarations: scope.parseDeclarations,
     check,
     refusal: scope.refusal,

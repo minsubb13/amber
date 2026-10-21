@@ -69,9 +69,10 @@ understanding, waits for the operator's approval utterance (`protocol.md`
 2. **Write the plan** - When `planning` marked a small single-unit task for a
    **plan-less (single-file) contract** (no multi-unit split, no parallel
    worktrees, no independent review unit), skip `-plan.md` and go to step 3
-   with the contract alone (without `progress.json` `preexisting` snapshots,
-   start from a clean working tree or pass `--out-of-scope "<path> - pre-existing"`
-   to `record.cjs done`). Otherwise write `docs/YYYY-MM-DD-<slug>-plan.md`
+   with the contract alone (activation records the baseline, so files already
+   dirty at that moment need no declaration; only files the run changes
+   outside the write scope need `--out-of-scope "<path>=<reason>"` on
+   `record.cjs done`). Otherwise write `docs/YYYY-MM-DD-<slug>-plan.md`
    (revisable guidance; the frozen contract is authority), covered by a
    write-scope row.
    - **Work units.** Under `## Work units`, list one column-0 checkbox row per
@@ -120,11 +121,15 @@ understanding, waits for the operator's approval utterance (`protocol.md`
    not. On approval, in that same turn: append a line to the plan's
    `## Progress log` quoting the utterance with its time (or, for a plan-less
    contract, record the quoted utterance in `## Settled decisions` before
-   creating the pointer), then create the schema-v1 pointer in the zone root
-   (main checkout or linked worktree):
-   `mkdir -p .amber && echo '{"v":1,"boundary":"<contract-file>","ratified_by":"<operator>","ratified_at":"YYYY-MM-DD"}' > .amber/active.json`
-   with `ratified_by` from the contract's approval line and `ratified_at` = the
-   day of the utterance.
+   creating the pointer), then create the pointer in the zone root (main
+   checkout or linked worktree) with
+   `node "<amber_plugin_root>/scripts/record.cjs" activate <contract-file> --by <operator> --at YYYY-MM-DD`
+   (`--by` from the contract's approval line, `--at` = the day of the
+   utterance). The command writes `.amber/active.json` together with the run's
+   baseline - the HEAD and the content hash of every file already dirty or
+   untracked at that moment, plus the contract file's hash - which the scope
+   check later compares against; it refuses an existing pointer, a missing
+   contract file, and a zone outside git. Never write the pointer by hand.
 7. **Announce execution.** Tell the operator in one plain line what you start
    with, in the operator-facing voice. When the run has a plan file, seed the
    loop body via `node "<amber_plugin_root>/scripts/record.cjs" unit init <plan-path>`

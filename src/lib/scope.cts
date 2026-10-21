@@ -56,7 +56,9 @@ function parseDeclarations(rest: readonly string[]): Declaration[] {
 /**
  * Sorts the changed paths (committed first, then the working tree, each path
  * once; the contract file and .amber/ never count) against the write-scope
- * and the declarations.
+ * and the declarations. Paths in `preRun` were already dirty when the run
+ * began (the baseline's manifest); a listed one is marked so the refusal can
+ * say so, whether it changed again or was committed as it was.
  */
 function classify(
   baseline: string | null,
@@ -64,6 +66,7 @@ function classify(
   writeScopes: readonly string[],
   boundaryRel: string | null | undefined,
   declarations: readonly Declaration[],
+  preRun?: ReadonlySet<string>,
 ): ScopeResult {
   const changed: ChangedPath[] = [];
   const seen = new Set<string>();
@@ -78,7 +81,9 @@ function classify(
         continue;
       }
       seen.add(p);
-      changed.push({ path: p, kind });
+      changed.push(
+        preRun?.has(p) ? { path: p, kind, preRun: true } : { path: p, kind },
+      );
     }
   }
   const outside = changed.filter((c) => !glob.inScopes(c.path, writeScopes));
@@ -112,7 +117,13 @@ function refusal(
       ':',
   ];
   for (const c of result.undeclared) {
-    lines.push('  ' + c.kind.padEnd(12) + ' ' + c.path);
+    lines.push(
+      '  ' +
+        c.kind.padEnd(12) +
+        ' ' +
+        c.path +
+        (c.preRun ? '  (already modified before the run began)' : ''),
+    );
   }
   lines.push('write-scope: ' + writeScopes.join(', '));
   lines.push(
@@ -123,6 +134,15 @@ function refusal(
       '` again. Declared paths are recorded in progress.json and ' +
       'the ledger; whether the change was legitimate stays with you and the operator.',
   );
+  const preRun = result.undeclared.filter((c) => c.preRun).map((c) => c.path);
+  if (preRun.length > 0) {
+    lines.push(
+      'Already modified before the run began: ' +
+        preRun.join(', ') +
+        '. Do not `git checkout` these - that would also discard the edit that ' +
+        'was there before the run; restore each to its pre-run content instead.',
+    );
+  }
   return lines.join('\n');
 }
 

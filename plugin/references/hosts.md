@@ -87,16 +87,27 @@ host-assigned subagent id) and reports whether the claim was recorded. Holds can
 also be recorded via `amber:mark` (`hold - U1 - <reason>` or
 `hold - U1 - external: <job>`; Codex `mark hold` above).
 
-**Post-hoc scope check (both hosts):** `unit verified` and `done` compare
-git-reported changes in the target tree - commits since the contract file was
-added (or, when no commit added it, since the HEAD that `unit init` recorded in
-`progress.json` as `baseline_commit`), working-tree edits, and untracked files,
-except paths already dirty at `unit init` - against the contract's `write-scope`
-rows. Any undeclared file outside scope (or any git failure) refuses the
-command; declare legitimate exceptions with repeatable
-`--out-of-scope <path>=<reason>` (globs accepted, recorded in `progress.json`
-and the ledger as `out_of_scope`). E1 still blocks out-of-scope file-tool writes
-beforehand; shell writes are caught here.
+**Post-hoc scope check (both hosts):** `unit verified` and `done` compare the
+files changed since the run began against the contract's `write-scope` rows.
+The run's baseline is the one `record.cjs activate` records in
+`.amber/active.json` (`baseline`: the HEAD, a `manifest` of blob hashes for
+every path that was dirty or untracked at that moment, and `contract_blob`,
+the contract file's own hash); `unit init` records one in `progress.json` only
+for a pointer written without one. Changed = commits since the baseline
+commit, working-tree edits and untracked files that were not in the manifest,
+and manifest paths whose content (blob hash) is no longer the recorded one -
+so a pre-run edit is excused only while it stays what it was, and the refusal
+marks such paths (do not `git checkout` them; restore the pre-run content). A
+contract file whose hash differs from `contract_blob` refuses outright and
+cannot be declared away (the contract is frozen while active; this check runs
+before the scope comparison and even when the contract has no write-scope
+rows left). Without any
+recorded baseline the commit that added the contract file is the baseline and
+nothing is excused. Any undeclared file outside scope (or any git failure, or a
+baseline value that is not a git hash) refuses the command; declare legitimate
+exceptions with repeatable `--out-of-scope <path>=<reason>` (globs accepted,
+recorded in `progress.json` and the ledger as `out_of_scope`). E1 still blocks
+out-of-scope file-tool writes beforehand; shell writes are caught here.
 
 ### Parallel unit worktrees
 

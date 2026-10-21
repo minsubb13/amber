@@ -55,6 +55,37 @@ export interface Hold {
 }
 
 /**
+ * The content baseline of a run: the HEAD when the run began and the blob
+ * hash of every path that differed from it at that moment, so the scope check
+ * can tell a file the run changed from one that was already dirty when the
+ * run began. `record.cjs activate` records it in the pointer; `unit init`
+ * records one in progress.json only when the pointer carries none.
+ */
+export interface Baseline {
+  /** HEAD when the baseline was taken; null in a tree without a commit. */
+  commit: string | null;
+  /**
+   * Toplevel-relative path -> blob SHA of its content at that moment; null
+   * when the path named no regular file (deleted, a directory).
+   */
+  manifest: Record<string, string | null>;
+  /** The contract file's blob SHA at that moment; null without a file. */
+  contract_blob: string | null;
+  taken_at: string;
+}
+
+/**
+ * A recorded Baseline read back and checked (hooks/scope-check readBaseline):
+ * the manifest is a Map so a path named like an Object property is an entry
+ * like any other.
+ */
+export interface CheckedBaseline {
+  readonly commit: string | null;
+  readonly manifest: ReadonlyMap<string, string | null>;
+  readonly contractBlob: string | null;
+}
+
+/**
  * .amber/progress.json. The CommonJS hook and recorder mutate the object they
  * get back (re-entry counts, registered sessions), so the fields stay
  * writable.
@@ -74,6 +105,8 @@ export interface Progress {
    * baseline for a contract file that was never committed.
    */
   baseline_commit?: string;
+  /** The baseline `unit init` took itself, only when the pointer carried none. */
+  baseline?: Baseline;
   units: Record<string, Unit>;
   updated_at?: string;
 }
@@ -108,6 +141,8 @@ export type ChangeKind = 'committed' | 'working-tree';
 export interface ChangedPath {
   readonly path: string;
   readonly kind: ChangeKind;
+  /** Set when the path was already dirty when the run began and changed since. */
+  readonly preRun?: boolean;
 }
 
 export interface DeclaredPath {
@@ -127,10 +162,18 @@ export interface ScopeCheckOptions {
   readonly cwd: string;
   readonly writeScopes: string[];
   readonly boundaryRel?: string | null;
-  readonly preexisting?: unknown[] | null;
-  /** progress.json's baseline_commit, the baseline when no commit added the contract file. */
-  readonly baselineCommit?: string | null;
+  /** The run's recorded baseline as found (pointer first, then progress.json); undefined when none. */
+  readonly baseline?: unknown;
   readonly declarations?: Declaration[];
+}
+
+/** What the contract-integrity check needs. */
+export interface ContractCheckOptions {
+  readonly cwd: string;
+  /** The run's recorded baseline as found; undefined when none. */
+  readonly baseline: unknown;
+  /** The contract file's absolute path. */
+  readonly boundaryPath?: string | null;
 }
 
 /** The hook events hooks.json passes to the entry. */
@@ -187,6 +230,11 @@ export interface ActiveContract {
   /** As the pointer wrote it; 'unknown' when absent. */
   readonly ratifiedBy: unknown;
   readonly ratifiedAt: unknown;
+  /**
+   * The pointer's `baseline` as found - undefined for a pointer written
+   * without one; the scope check reads and validates it.
+   */
+  readonly baseline: unknown;
   readonly text: string;
   readonly broken: false;
 }

@@ -48,7 +48,7 @@ function transitionOf(event) {
     }
 }
 /** A fresh state for the plan's units, before anything has run. */
-function newProgress(units, contract, plan, preexisting, now, baselineCommit) {
+function newProgress(units, contract, plan, preexisting, now, baselineCommit, baseline) {
     const p = {
         v: 1,
         contract,
@@ -66,6 +66,9 @@ function newProgress(units, contract, plan, preexisting, now, baselineCommit) {
     // baseline for a contract file that was never committed.
     if (baselineCommit)
         p.baseline_commit = baselineCommit;
+    // The content baseline init took itself (only when the pointer had none).
+    if (baseline)
+        p.baseline = baseline;
     for (const u of units) {
         p.units[u.id] = {
             title: u.title,
