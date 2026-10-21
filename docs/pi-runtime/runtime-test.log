@@ -1,0 +1,63 @@
+
+> test:pi-runtime
+> node tools/test/pi-runtime-types.mjs && node --test test/pi-runtime/e2e/*.test.ts
+
+Handwritten pi adapter/runtime strict typecheck passed
+(node:2689180) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///home/remote3/dev/amber-pi/test/pi-runtime/e2e/fast.test.ts is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to /home/remote3/dev/amber-pi/package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ fast defaults on, OpenAI only, toggles/report/invalid args, new process resets (985.943857ms)
+✔ completed tier=default: notice only when downgraded, once per process (399.285213ms)
+✔ completed tier=auto: notice only when downgraded, once per process (401.101266ms)
+✔ completed tier=priority: notice only when downgraded, once per process (397.826275ms)
+✔ completed tier=unknown: notice only when downgraded, once per process (384.660557ms)
+✔ tier rejection: one default-tier continuation; second attempt succeeds (422.591904ms)
+✔ tier rejection: one default-tier continuation; second attempt fails without loop (416.68471ms)
+✔ unrelated error untouched: openai 400 Invalid reasoning.effort (348.808928ms)
+✔ unrelated error untouched: openai 403 Forbidden service_tier (341.465899ms)
+✔ unrelated error untouched: openai 500 server failed; service_tier unsupported 400 (327.169397ms)
+✔ unrelated error untouched: anthropic 400 Unsupported service_tier (326.798338ms)
+✔ realistic tier error with param only: default-tier fallback with native retries enabled (347.21961ms)
+✔ native retry consumes tier recovery without a duplicate; next request succeeds (346.4931ms)
+✔ native retry consumes tier recovery without a duplicate; next request fails (339.840394ms)
+✔ fast follows mid-run switch in both directions (697.275999ms)
+(node:2689186) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///home/remote3/dev/amber-pi/test/pi-runtime/e2e/integration.test.ts is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to /home/remote3/dev/amber-pi/package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ prompt-free startup flag false: registration and payload gating (386.132436ms)
+✔ prompt-free startup flag true: registration and payload gating (361.844172ms)
+✔ flag off leaves service-tier errors to pi: no fallback or notifications (331.60767ms)
+✔ standalone tool before Amber: refuse runtime without overriding (466.954162ms)
+✔ standalone tool after Amber: refuse runtime without overriding (471.993165ms)
+✔ standalone command before Amber: refuse runtime without overriding (464.377237ms)
+✔ standalone command after Amber: refuse runtime without overriding (451.477508ms)
+✔ mid-run anthropic -> openai: next-request pickup, attribution and E1 refusal (383.597161ms)
+✔ mid-run openai -> anthropic: next-request pickup, attribution and E1 refusal (337.39322ms)
+✔ tier recovery plus S2 refuses completion of open work (native retry=false) (505.814602ms)
+✔ tier recovery plus S2 refuses completion of open work (native retry=true) (494.264203ms)
+(node:2689187) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///home/remote3/dev/amber-pi/test/pi-runtime/e2e/reload.test.ts is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to /home/remote3/dev/amber-pi/package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ reload preserves process toggle and once-only completed-tier notice (662.802133ms)
+(node:2689188) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///home/remote3/dev/amber-pi/test/pi-runtime/e2e/switch.test.ts is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to /home/remote3/dev/amber-pi/package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ switch_model anthropic -> openai: pickup, session entry, thinking and unchanged defaults (741.386502ms)
+✔ switch_model openai -> anthropic: pickup, session entry, thinking and unchanged defaults (690.034295ms)
+✔ switch_model refuses allowlist without model/thinking/session changes (403.849064ms)
+✔ switch_model refuses missing credentials without model/thinking/session changes (406.294621ms)
+✔ switch_model refuses invalid thinking without model/thinking/session changes (405.633012ms)
+✔ scope oracle negative control: persisted-default mutation is detected and affects unforced startup (269.042056ms)
+✔ omitted thinking uses pi per-model default (375.467847ms)
+ℹ tests 34
+ℹ suites 0
+ℹ pass 34
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 6587.117638

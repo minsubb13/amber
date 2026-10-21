@@ -32,12 +32,14 @@ function unitCommand(name, rest) {
     }
     // Session identity: an explicit environment id wins (AMBER_SESSION_ID,
     // CODEX_THREAD_ID, then CLAUDE_CODE_SESSION_ID - Claude Code exports it to
-    // the tool shell, equal to the hooks' session_id, and subagents inherit it);
-    // otherwise the recorder reads back the driver E1 registered for this run
+    // the tool shell, equal to the hooks' session_id, and subagents inherit it -
+    // then PI_SESSION_ID, which pi's bash tool exports, equal to the session id
+    // the pi extension records); otherwise the recorder reads back the driver E1 registered for this run
     // just before the command.
     const envSessionId = (process.env['AMBER_SESSION_ID'] ||
         process.env['CODEX_THREAD_ID'] ||
         process.env['CLAUDE_CODE_SESSION_ID'] ||
+        process.env['PI_SESSION_ID'] ||
         '').trim();
     const driver = envSessionId ? null : ownership.driverOfRun(info.boundaryFile);
     const sessionId = envSessionId || driver?.sessionId || 'shell';
@@ -230,7 +232,7 @@ function doneCommand(rest) {
         target +
         '; end the turn with the completion report (no marker lines)\n');
 }
-/** invoke and mark: a Codex skill call or cycle event, recorded through S3. */
+/** invoke and mark: a Codex or pi skill call or cycle event, recorded through S3. */
 function recordCall(command, name, rest) {
     const invoked = command === 'invoke' ? args.invokedSkillOf(name) : null;
     const mark = command === 'mark' ? args.markKindOf(name) : null;
@@ -250,9 +252,11 @@ function recordCall(command, name, rest) {
     else {
         throw new Error('invalid recording arguments\n' + USAGE);
     }
-    const sessionId = (process.env['CODEX_THREAD_ID'] || '').trim();
+    const sessionId = (process.env['CODEX_THREAD_ID'] ||
+        process.env['PI_SESSION_ID'] ||
+        '').trim();
     if (!sessionId) {
-        throw new Error('CODEX_THREAD_ID is required; run this command inside the Codex session being recorded');
+        throw new Error('CODEX_THREAD_ID or PI_SESSION_ID is required; run this command inside the Codex or pi session being recorded');
     }
     skillRecorder.runS3(inputs.hookInput({
         session_id: sessionId,

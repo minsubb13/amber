@@ -1,0 +1,94 @@
+# Optional pi runtime integration evidence (2026-10-21)
+
+Contract: `docs/2026-10-21-pi-runtime-contract.md`. All results below are local verified observations unless explicitly quoted or unverified.
+
+## Implementation and isolation
+
+- Target checkout `/home/remote3/dev/amber-pi`, branch `pi-port`; preparation `b01eebc`. Driver switched from Claude to `openai/gpt-6.1-sol` before starting U1; environment confirmed that model.
+- Read-only source `/home/remote3/dev/pi-model-tools` at `814562b`. Copied/adapted production helpers and mock harness. The 22 production mock cases are ported; the two feasibility spike cases are represented by the two stronger mid-run attribution/enforcement cases, using the production switch tool rather than a separate unrestricted spike tool. Total current integration suite: **34 passed, 0 failed** (`npm run test:pi-runtime`, Node v24.13.1, pi 1.3.0).
+- All provider requests in tests go to an ephemeral `127.0.0.1` HTTP server. Child environment is constructed from PATH plus temporary HOME, PI_CODING_AGENT_DIR, AMBER_HOME, offline mode and terminal/locale. Dummy keys and local model endpoints only; no inherited provider credentials, real settings or real session directory. Persistent-session tests write only inside that temporary directory. No real-priority script was executed.
+- Handwritten pi modules remain separate from shared enforcement. `runtime/index.ts` registers the false-by-default flag in the factory, then checks it at session_start, after pi parses extension flags and binds APIs. It checks existing switch_model tools and fast commands before registering either helper. No dependencies, settings migration or shared-module edits.
+
+## Behavioral evidence
+
+- Prompt-free flag off/on startup: no HTTP requests before prompting; `/fast` and fast status appear only when on; switch_model declaration and service_tier injection follow the flag. Off mode has no downgrade notice or error fallback.
+- Both handoff directions: next request provider/model, transcript model/thinking changes, no confirmation, takeover result, unchanged settings and fresh-process defaults. Invalid allowlist/thinking/credentials produce error without changing state. A deliberate isolated settings mutation proves the defaults oracle detects persistence.
+- Fast: OpenAI only; process on/off and invalid arguments; new process resets; completed default/auto/unknown tier warns once, completed priority does not warn even when created tier is auto. Rejection recovers at default once; repeated and unrelated errors do not loop or hijack pi handling. Native retry consumes recovery without a second continuation, for success and failure. Reload preserves toggle and once-only notice.
+- Standalone conflict fixtures separately register switch_model and /fast, before and after Amber. Runtime refusal warns, retains the standalone sentinel and introduces no competing handler or priority injection.
+- Active-contract fixtures: after either model switch, forbidden writes are blocked and Amber session state attributes the new model. With and without native retry, service-tier recovery cannot release an incomplete contract: a premature done command is refused by the recorder while units are open, S2 requests an incomplete-work continuation, the contract pointer and unverified progress remain, and no duplicate fast continuation occurs. Fixture stops use an explicit external hold after observing the continuation, not fake completion.
+
+## Development failures and corrections
+
+Two failed oracle attempts preceded the passing U1 suite: the first port assumed fast was the last status event (Amber also updates its own status); the second integration run assumed a tools array existed when no tools were registered. Oracles were corrected to select the fast status key and treat an omitted tools array as empty. No product failure was hidden. The subsequent full suite passed all 34 cases. U1 budget: two failed attempts, within the three-attempt limit.
+
+## Supplemental handwritten-pi typecheck
+
+During U2, an additional strict typecheck against installed pi declarations found the standalone mapped TypeBox literal arrays inferred the execute parameter as `never`. U2 was marked failed and U1 reopened serially. Explicit literal tuple schemas fixed inference without changing the accepted values; `tools/test/pi-runtime-types.mjs` now makes that check part of `npm run test:pi-runtime`. The re-entered U1 passed strict adapter/runtime typechecking plus **34/34** mock tests. The standard package typecheck/lint excludes these handwritten sources; no claim of coverage by those commands is made. The native `.ts` mock fixtures themselves are transpiled, not statically typechecked.
+
+## Remaining verification
+
+Full package regressions, fresh-build equality, independent pinned-commit review, normal remote push and existing PR #22 verification are recorded in the subsequent sections and review file. Raw standalone receipts were copied byte-for-byte under `docs/pi-runtime/` with SHA-256 equality and quoted provenance.
+
+## Full regression verification (U2)
+
+Verified on 2026-10-21, Node v24.13.1 and pi 1.3.0:
+
+- `npm test`: **412 passed, 0 failed**, no skips.
+- `npm run typecheck`: passed (shared sources/tools/compiled-test project).
+- `npm run lint`: passed, zero warnings under the existing configuration.
+- `npm run format:check`: passed, including runtime mock tests and supplemental tooling.
+- `npm run test:pi-runtime`: strict handwritten adapter/runtime typecheck passed; **34 passed, 0 failed**, no skips.
+- `npm run build`: passed. `git diff --exit-code -- plugin/lib plugin/hooks plugin/scripts` passed: no generated artifacts or shared/other-host modules changed.
+
+Raw local command outputs: `docs/pi-runtime/{package-test,runtime-test,typecheck,lint,format,build}.log`. These contain local mock verification only. Existing installed gh does not support the planned `headRefOid` JSON field; final verification will use the equivalent GitHub REST `pulls/22` head.sha plus `gh pr view` branch/body and `git ls-remote`, not weaken remote-head equality.
+
+## Final validation receipt (U4)
+
+Verified clean committed HEAD `fdd8ab33c2adaff62a64ebd54767e3619585e158`, tree `ed7389e1ef3212ce03e785b8eca8c1aa996ebe49`, on 2026-10-21. This includes the independently reviewed implementation plus review documentation; no runtime/source/test changes since pinned review `00be0e0`.
+
+Serial command chain (every command exited 0): `npm test`, `npm run typecheck`, `npm run lint`, `npm run format:check`, `npm run test:pi-runtime`, `npm run build`, **`git diff --exit-code` over the entire tree**. Clean `git status --porcelain` before and after the build. This closes reviewer E1: fresh build changed no tracked artifact, not merely the selected generated directories.
+
+Raw final terminal receipt (selected result lines, not an author estimate):
+
+```text
+VALIDATED_HEAD=fdd8ab33c2adaff62a64ebd54767e3619585e158
+VALIDATED_TREE=ed7389e1ef3212ce03e785b8eca8c1aa996ebe49
+FULL_TREE_FRESH_BUILD_DIFF_EXIT=0
+package: tests 412; pass 412; fail 0; cancelled 0; skipped 0; todo 0
+Handwritten pi adapter/runtime strict typecheck passed
+runtime: tests 34; pass 34; fail 0; cancelled 0; skipped 0; todo 0
+```
+
+Full earlier raw outputs remain committed under `docs/pi-runtime/`; final rerun raw logs were captured in `/tmp/amber-runtime-final-{package,types,lint,format,runtime,build}.log`. Final log SHA-256 receipts, closing E2 by identifying the validated committed tree and exact captured outputs:
+
+```text
+5e0b9d9262a37c0dba5f8ab4c616050a204b7b8559c862a234987df615ad7832 package
+037be3153c6d85e2d4562c63579c82ed503ebf549adfbb2db18745a5e6eb8c7c types
+38da703b3edcb307e9c8aa5b4e485db1889b7441588aadeae7034943c87b6e02 lint
+75288df76faa94502cc2c309485151c70d9b6d8b0508e238e68e73a2e5887718 format
+dd6d872b30a62d1d0ab2866bfead7478d4c1cd926215d3d0179186e1819b7f47 runtime
+c9843226974419f05b4f1a128314cb257af3fff52213d7351c629b232999d2cc build
+```
+
+Source checkout remains `814562bccfad5627df342e00678e6763a5d22c1e` with clean git status. No source-repository writes or real probes. Review E3 is dispositioned in the updated plan: supported gh REST head.sha is the same remote-head oracle as unavailable headRefOid. Review E4 is closed only by the delivery receipt below, not by the code-review PASS.
+
+## Delivery receipt and required-condition recheck
+
+Verified normal `git push origin pi-port` (no force) advanced the existing branch from b6b37a3 to `4c97e315d63fe306d1d5008e5cc56ebe50f12f47`. Existing PR https://github.com/minsubb13/amber/pull/22 remained OPEN, head branch pi-port. GitHub REST `pulls/22` head.sha, `git ls-remote origin refs/heads/pi-port`, and local HEAD all returned that same SHA. The final bookkeeping documentation commit is pushed normally afterward; equality to the final HEAD is rechecked before the completion signal.
+
+PR body update used PATCH of the **existing** PR only. The original full pi-port description was retained as the body prefix, mechanically asserted from before/after JSON. Appended sections describe opt-in/default-off behavior, fixed switch interface, /fast recovery and migration, actual **412/412** and **34/34** checks, strict handwritten typechecking, review pin/PASS and the completed-default real-tier limitation. No PR was created, merged or released. No settings were edited or standalone package uninstalled.
+
+Semantic recheck matrix against contract conditions:
+
+1. Flag/default-off: factory advertises boolean false; session_start-only initialization; real-pi registration/payload/error negative controls pass. Dedicated runtime modules, no new dependency, no other-host/shared edits.
+2. Handoff: fixed allowlist/thinking schema; credential-first pi.setModel; transcript/next-request/takeover/defaults assertions in both directions, failures preserve state, model_select attribution checked.
+3. Fast: process defaults/reload/toggle, OpenAI agent-loop injection, completed-tier notice, HTTP400-only one-shot recovery and native retry consumption all pass; historical retry message preserved; no summary/compaction path changed.
+4. Coexistence/enforcement: pre-registration conflict refusal in both load orders; no auto migration. Forbidden writes after both switches remain blocked. Premature done command is refused with units open; S2 incomplete-work continuation and native/non-native recovery do not release the contract or duplicate fast continuation.
+5. Verification/docs: all required package checks and 34 isolated runtime cases pass, strict handwritten adapter/runtime types pass, full-tree fresh build is unchanged. README/DEVELOPMENT describe migration/prerequisites and unverified priority; raw quoted receipts retain byte equality and provenance. No real-provider verification request was sent.
+6. Review/delivery: independent Claude read the pinned source, contract, actual tests, pi internals and evidence read-only; PASS with no MUST-FIX, dispositions in review file. Normal push extends existing PR22 and body is preserved/updated. All unit transitions are verified through record.cjs. Final HEAD/remote equality and clean tree are required again after this documentation commit, immediately before done.
+
+All implementation and test artifacts remain exactly those reviewed at `00be0e0`; subsequent edits are documentation only. Review E1–E4 are addressed by the full-tree build receipt, pinned rerun, equivalent remote oracle, review artifact and delivery receipt above. Optional implementation suggestions were dispositioned without changing source; no re-review of source fixes was needed after PASS.
+
+## Real-provider limitation (quoted provenance)
+
+Source `814562b`, `docs/findings.md`: two authorized requests were consumed. Original HTTP400 rejected unsupported reasoning.effort=none, not service_tier. Corrected HTTP200 accepted a priority payload but response.completed reported **service_tier=default**, not priority. These are quoted reference observations, not an integrated live-provider test. Priority execution, speed and quota impact remain **unverified**. No further real probes are authorized.

@@ -1,0 +1,4 @@
+
+> typecheck
+> tsc -p . --noEmit && tsc -p tools --noEmit && tsc -p test --noEmit
+

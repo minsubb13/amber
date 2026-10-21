@@ -2152,8 +2152,8 @@ const sessionState = (home: string, sessionId: string): unknown => {
   const progress = (): unknown =>
     parseJson(fs.readFileSync(progressFile, 'utf8'));
   // No environment session id: the registration-lookup path. The runner may
-  // itself run inside a Claude Code session, whose CLAUDE_CODE_SESSION_ID
-  // would otherwise be inherited and win - blank it explicitly.
+  // itself run inside a Claude Code or pi session, whose CLAUDE_CODE_SESSION_ID
+  // or PI_SESSION_ID would otherwise be inherited and win - blank them explicitly.
   const bare = (
     args: readonly string[],
     extraEnv?: NodeJS.ProcessEnv,
@@ -2168,6 +2168,7 @@ const sessionState = (home: string, sessionId: string): unknown => {
         AMBER_SESSION_ID: '',
         CODEX_THREAD_ID: '',
         CLAUDE_CODE_SESSION_ID: '',
+        PI_SESSION_ID: '',
         ...extraEnv,
       },
     });
@@ -2885,6 +2886,7 @@ const sessionState = (home: string, sessionId: string): unknown => {
         AMBER_SESSION_ID: '',
         CODEX_THREAD_ID: '',
         CLAUDE_CODE_SESSION_ID: 'cc-sess',
+        PI_SESSION_ID: '',
         ...extraEnv,
       },
     });

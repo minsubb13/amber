@@ -1,0 +1,57 @@
+{
+  "provenance": "verified: single direct HTTPS request, existing ChatGPT OAuth bearer, no SDK retries or refresh",
+  "startedAt": "2026-10-21T00:00:03.214Z",
+  "endpoint": "https://api.openai.com/v1/responses",
+  "payload": {
+    "model": "gpt-6.1-sol",
+    "input": [
+      {
+        "role": "user",
+        "content": [
+          {
+            "type": "input_text",
+            "text": "Reply only OK."
+          }
+        ]
+      }
+    ],
+    "stream": true,
+    "store": false,
+    "reasoning": {
+      "effort": "low"
+    },
+    "service_tier": "priority"
+  },
+  "attemptNumber": 2,
+  "attempts": 1,
+  "state": "response-recorded",
+  "accepted": true,
+  "reportedTier": "default",
+  "httpStatus": 200,
+  "requestId": null,
+  "events": [
+    {
+      "type": "response.created",
+      "id": "resp_080ed12af7e5f219016ad800842a5487d0a86f9036b21bbc78",
+      "status": "in_progress",
+      "service_tier": "auto",
+      "error": null
+    },
+    {
+      "type": "response.in_progress",
+      "id": "resp_080ed12af7e5f219016ad800842a5487d0a86f9036b21bbc78",
+      "status": "in_progress",
+      "service_tier": "auto",
+      "error": null
+    },
+    {
+      "type": "response.completed",
+      "id": "resp_080ed12af7e5f219016ad800842a5487d0a86f9036b21bbc78",
+      "status": "completed",
+      "service_tier": "default",
+      "error": null
+    }
+  ],
+  "completed": true,
+  "finishedAt": "2026-10-21T00:00:05.455Z"
+}
