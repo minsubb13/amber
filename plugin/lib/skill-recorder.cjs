@@ -10,19 +10,22 @@ const guards = require("./guards.cjs");
 const ledger = require("./ledger.cjs");
 const model = require("./progress-model.cjs");
 const store = require("./progress-store.cjs");
+const recordArgs = require("./record-args.cjs");
 // Model-invoked amber skills arrive as Skill tool calls; match the likely
 // fields defensively (with or without the plugin prefix).
 const AMBER_SKILL = /^(?:amber:)?(planning|set|status|init|mark|audit)$/;
-// mark arguments: "<kind> - <text>". Anything else falls back to a plain
-// skill-invocation row, so no call ever vanishes unrecorded.
+// mark arguments: "<kind> - <text>", read after record-args prepared the
+// text (separator and unit-id variants folded). Anything else falls back to
+// a plain skill-invocation row, so no call ever vanishes unrecorded.
 const MARK_ARGS = /^(skip|finding|hold)\s*[-:]\s*([\s\S]+)$/;
 const HOLD_TEXT = /^(U\d+)\s*[-:]\s*([\s\S]*)$/;
 /**
  * A hold recorded through mark: `hold - U<n> - <reason>`. Sets the pass in
  * progress.json (when the zone has one) - one-shot, or standing when the
- * reason starts with `external:` - and always leaves a ledger row.
+ * reason starts with `external:` - and always leaves a ledger row whose
+ * summary is the text as written; the unit field carries the prepared id.
  */
-function recordHold(input, holdText) {
+function recordHold(input, rawText, holdText) {
     const m = HOLD_TEXT.exec(holdText);
     const unitId = m ? (m[1] ?? null) : null;
     const reason = m ? (m[2] ?? '').trim() : holdText;
@@ -50,7 +53,7 @@ function recordHold(input, holdText) {
             }
         }
     }
-    ledger.appendRecord(input, holdText, fields, 'unit-hold');
+    ledger.appendRecord(input, rawText, fields, 'unit-hold');
     return null;
 }
 function runS3(input) {
@@ -63,11 +66,12 @@ function runS3(input) {
         return null;
     const args = guards.toText(toolInput['args'] || '').trim();
     if (m[1] === 'mark') {
-        const ev = MARK_ARGS.exec(args);
+        const ev = MARK_ARGS.exec(recordArgs.prepareMarkText(args));
         if (ev) {
             const [, kind = '', eventText = ''] = ev;
-            if (kind === 'hold')
-                return recordHold(input, eventText.trim());
+            if (kind === 'hold') {
+                return recordHold(input, recordArgs.markText(args) ?? eventText.trim(), eventText.trim());
+            }
             ledger.appendRecord(input, eventText.trim(), null, kind);
             return null;
         }
