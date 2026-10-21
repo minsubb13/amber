@@ -2666,12 +2666,12 @@ const sessionState = (home: string, sessionId: string): unknown => {
   // baseline itself: the HEAD and the blob hash of each pre-run path.
   check(
     'unit init under a hand-written pointer records its own content baseline',
-    get(progress(), 'baseline', 'commit') === baseline &&
-      get(progress(), 'baseline', 'manifest', 'top.txt') ===
+    at(progress(), 'baseline', 'commit') === baseline &&
+      at(progress(), 'baseline', 'manifest', 'top.txt') ===
         git('hash-object', 'top.txt') &&
-      get(progress(), 'baseline', 'manifest', 'preexist.txt') ===
+      at(progress(), 'baseline', 'manifest', 'preexist.txt') ===
         git('hash-object', 'preexist.txt'),
-    JSON.stringify(get(progress(), 'baseline')),
+    JSON.stringify(at(progress(), 'baseline')),
   );
   record(['unit', 'start', 'U1']);
   fs.writeFileSync(path.join(zone, 'plugin', 'new.cjs'), 'ok\n');
@@ -3050,8 +3050,16 @@ const sessionState = (home: string, sessionId: string): unknown => {
       },
     });
   const pointerFile = path.join(zone, '.amber', 'active.json');
+  // Lenient reads: the reference build of the parity harness has no activate
+  // and writes no pointer, and its run of this file must not abort here.
   const pointer = (): unknown =>
-    parseJson(fs.readFileSync(pointerFile, 'utf8'));
+    fs.existsSync(pointerFile)
+      ? parseJson(fs.readFileSync(pointerFile, 'utf8'))
+      : null;
+  const pointerText = (): string =>
+    fs.existsSync(pointerFile) ? fs.readFileSync(pointerFile, 'utf8') : '';
+  const sorted = (value: unknown): string =>
+    Array.isArray(value) ? value.map(String).sort().join() : '';
   const activated = record([
     'activate',
     'contract.md',
@@ -3067,36 +3075,36 @@ const sessionState = (home: string, sessionId: string): unknown => {
   );
   check(
     'the pointer keeps the schema-v1 fields',
-    get(pointer(), 'v') === 1 &&
-      get(pointer(), 'boundary') === 'contract.md' &&
-      get(pointer(), 'ratified_by') === 'operator' &&
-      get(pointer(), 'ratified_at') === '2026-10-21',
+    at(pointer(), 'v') === 1 &&
+      at(pointer(), 'boundary') === 'contract.md' &&
+      at(pointer(), 'ratified_by') === 'operator' &&
+      at(pointer(), 'ratified_at') === '2026-10-21',
     JSON.stringify(pointer()),
   );
   check(
     'baseline.commit is the HEAD at activation',
-    get(pointer(), 'baseline', 'commit') === head,
-    JSON.stringify(get(pointer(), 'baseline')),
+    at(pointer(), 'baseline', 'commit') === head,
+    JSON.stringify(at(pointer(), 'baseline')),
   );
   check(
     'the manifest hashes the modified tracked file',
-    get(pointer(), 'baseline', 'manifest', 'top.txt') ===
+    at(pointer(), 'baseline', 'manifest', 'top.txt') ===
       git('hash-object', 'top.txt'),
-    JSON.stringify(get(pointer(), 'baseline', 'manifest')),
+    JSON.stringify(at(pointer(), 'baseline', 'manifest')),
   );
   check(
     'the manifest hashes the untracked file',
-    get(pointer(), 'baseline', 'manifest', 'untracked.txt') ===
+    at(pointer(), 'baseline', 'manifest', 'untracked.txt') ===
       git('hash-object', 'untracked.txt'),
   );
   check(
     'the manifest records a deleted file as null',
-    has(get(pointer(), 'baseline', 'manifest'), 'gone.txt') &&
-      get(pointer(), 'baseline', 'manifest', 'gone.txt') === null,
+    // at() yields undefined for a missing key and null only for a null value
+    at(pointer(), 'baseline', 'manifest', 'gone.txt') === null,
   );
   check(
     'contract_blob is the hash of the contract file',
-    get(pointer(), 'baseline', 'contract_blob') ===
+    at(pointer(), 'baseline', 'contract_blob') ===
       git('hash-object', 'contract.md'),
   );
   check(
@@ -3111,20 +3119,20 @@ const sessionState = (home: string, sessionId: string): unknown => {
   check(
     'activate records one ledger row carrying the baseline commit',
     activateRows.length === 1 &&
-      get(activateRows[0], 'baseline_commit') === head &&
-      get(activateRows[0], 'pre_run_paths') === 3,
+      at(activateRows[0], 'baseline_commit') === head &&
+      at(activateRows[0], 'pre_run_paths') === 3,
     JSON.stringify(activateRows),
   );
-  const before = fs.readFileSync(pointerFile, 'utf8');
+  const before = pointerText();
   const again = record(['activate', 'contract.md', '--by', 'operator']);
   check(
     'a second activate refuses and leaves the pointer unchanged',
     again.status !== 0 &&
       /already exists/.test(again.stderr) &&
-      fs.readFileSync(pointerFile, 'utf8') === before,
+      pointerText() === before,
     again.stderr,
   );
-  fs.unlinkSync(pointerFile);
+  if (fs.existsSync(pointerFile)) fs.unlinkSync(pointerFile);
   const missing = record(['activate', 'nope.md', '--by', 'operator']);
   check(
     'activate refuses a missing contract file',
@@ -3163,20 +3171,22 @@ const sessionState = (home: string, sessionId: string): unknown => {
   );
   record(['activate', 'contract.md', '--by', 'operator', '--at', '2026-10-21']);
   record(['unit', 'init', 'plan.md']);
+  const progressFile = path.join(zone, '.amber', 'progress.json');
   const progress = (): unknown =>
-    parseJson(
-      fs.readFileSync(path.join(zone, '.amber', 'progress.json'), 'utf8'),
-    );
+    fs.existsSync(progressFile)
+      ? parseJson(fs.readFileSync(progressFile, 'utf8'))
+      : null;
   check(
     'unit init under an activated pointer stores no baseline of its own',
-    !has(progress(), 'baseline') && get(progress(), 'baseline_commit') === head,
+    at(progress(), 'baseline') === undefined &&
+      at(progress(), 'baseline_commit') === head,
     JSON.stringify(progress()),
   );
   check(
     "preexisting lists the pointer's pre-run paths (compatibility field)",
-    list(get(progress(), 'preexisting')).slice().sort().join() ===
+    sorted(at(progress(), 'preexisting')) ===
       'gone.txt,plan.md,top.txt,untracked.txt',
-    JSON.stringify(get(progress(), 'preexisting')),
+    JSON.stringify(at(progress(), 'preexisting')),
   );
 }
 
@@ -3336,7 +3346,10 @@ const sessionState = (home: string, sessionId: string): unknown => {
   const h = flow('malformed');
   h.record(['activate', 'contract.md', '--by', 'operator']);
   const pointerFile = path.join(h.zone, '.amber', 'active.json');
-  const recorded = parseJson(fs.readFileSync(pointerFile, 'utf8'));
+  const recorded = fs.existsSync(pointerFile)
+    ? parseJson(fs.readFileSync(pointerFile, 'utf8'))
+    : null;
+  fs.mkdirSync(path.dirname(pointerFile), { recursive: true });
   fs.writeFileSync(
     pointerFile,
     JSON.stringify({
@@ -3346,8 +3359,8 @@ const sessionState = (home: string, sessionId: string): unknown => {
       ratified_at: '2026-10-21',
       baseline: {
         commit: 'not-a-sha',
-        manifest: get(recorded, 'baseline', 'manifest'),
-        contract_blob: get(recorded, 'baseline', 'contract_blob'),
+        manifest: at(recorded, 'baseline', 'manifest'),
+        contract_blob: at(recorded, 'baseline', 'contract_blob'),
         taken_at: 'x',
       },
     }),
