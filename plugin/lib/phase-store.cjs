@@ -57,27 +57,29 @@ function enter(source, next) {
     state.writeStateAtomic(stateFile, sessionState);
 }
 /**
- * Clears the session's phase when it is open in `root` and records the
- * phase-exit row: how it ended and the paths changed since the entry outside
- * planning artifacts (CHANGED_MAX of them, the count beside), or null when
- * unknown. Nothing happens, and false is returned, without such a phase.
+ * Closes the session's phase when it is open in `root`: records the
+ * phase-exit row - how it ended and the paths changed since the entry
+ * outside planning artifacts (what fits the row, the count beside), or null
+ * when unknown - and then clears the phase, so a failure between the two
+ * leaves the phase for the next call rather than losing the row. Nothing
+ * happens, and false is returned, without such a phase.
  */
 function exit(source, root, how) {
     const current = phaseOf(source.session_id);
     if (!current || current.zone !== root)
         return false;
-    const stateFile = state.sessionStatePath(source.session_id);
-    const sessionState = state.readJsonOrEmpty(stateFile);
-    guards.deleteField(sessionState, 'phase');
-    state.writeStateAtomic(stateFile, sessionState);
     const changed = phase.changedSince(current.snapshot, statusPaths(root));
     ledger.appendRecord(source, phase.exitSummary(current, how, changed), {
         phase: current.state,
         since: current.since,
         exit: how,
-        changed: changed === null ? null : changed.slice(0, phase.CHANGED_MAX),
+        changed: changed === null ? null : phase.fitChanged(changed),
         changed_count: changed === null ? null : changed.length,
     }, 'phase-exit');
+    const stateFile = state.sessionStatePath(source.session_id);
+    const sessionState = state.readJsonOrEmpty(stateFile);
+    guards.deleteField(sessionState, 'phase');
+    state.writeStateAtomic(stateFile, sessionState);
     return true;
 }
 module.exports = { phaseOf, enter, exit };

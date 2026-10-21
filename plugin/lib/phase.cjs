@@ -24,8 +24,14 @@ const ARTIFACT_PATTERNS = [
 ];
 /** More status paths than this and the snapshot is null: changes unknown. */
 const SNAPSHOT_MAX = 2000;
-/** Paths a phase-exit row lists at most; changed_count keeps the total. */
+/**
+ * What a phase-exit row lists of the changed paths: at most CHANGED_MAX of
+ * them and at most CHANGED_BYTES as a JSON array, so the row stays well
+ * inside the ledger's line cap (4096 bytes, past which a row is dropped)
+ * beside its cwd and summary; changed_count keeps the total.
+ */
 const CHANGED_MAX = 50;
+const CHANGED_BYTES = 1500;
 function phaseStateOf(value) {
     return value === 'planning' || value === 'set' ? value : null;
 }
@@ -86,8 +92,33 @@ function changedSince(snapshot, now) {
         !p.startsWith('.amber/'))
         .sort();
 }
+/**
+ * The prefix of the sorted changed paths a phase-exit row lists: CHANGED_MAX
+ * paths at most, and no more than fit CHANGED_BYTES as a JSON array.
+ */
+function fitChanged(changed) {
+    const listed = [];
+    let bytes = 2; // the brackets
+    for (const p of changed.slice(0, CHANGED_MAX)) {
+        const item = Buffer.byteLength(JSON.stringify(p)) + (listed.length ? 1 : 0);
+        if (bytes + item > CHANGED_BYTES)
+            break;
+        bytes += item;
+        listed.push(p);
+    }
+    return listed;
+}
 function artifactList() {
     return ARTIFACT_PATTERNS.join(', ');
+}
+/** The two ways out of an open phase, closing every refusal. */
+function waysOut(recordCli) {
+    return ('To close the cycle: record the no-contract verdict with the amber:mark ' +
+        'skill (`skip - opening verdict - no contract: <reason>`; on Codex `node ' +
+        recordCli +
+        " mark skip 'opening verdict - no contract: <reason>'`), or finish set " +
+        "and wait for the operator's approval - the pointer it creates releases " +
+        'this gate.');
 }
 /** The refusal of a write outside planning artifacts while a phase is open. */
 function denyText(phase, rel, recordCli) {
@@ -99,12 +130,7 @@ function denyText(phase, rel, recordCli) {
         ' is not a planning artifact (' +
         artifactList() +
         '). Until the cycle closes, file tools write only those in this zone. ' +
-        'To close it: record the no-contract verdict with the amber:mark skill ' +
-        '(`skip - opening verdict - no contract: <reason>`; on Codex `node ' +
-        recordCli +
-        " mark skip 'opening verdict - no contract: <reason>'`), or finish set " +
-        "and wait for the operator's approval - the pointer it creates releases " +
-        'this gate.');
+        waysOut(recordCli));
 }
 /** The refusal of a write under .amber/ while a phase is open. */
 function stateDenyText(phase, rel, recordCli) {
@@ -115,7 +141,8 @@ function stateDenyText(phase, rel, recordCli) {
         rel +
         " is the run's state under .amber/, written only by `node " +
         recordCli +
-        '` and the hooks');
+        '` and the hooks. ' +
+        waysOut(recordCli));
 }
 /** S0's line for a phase carried into a resumed session of the same zone. */
 function briefLine(phase) {
@@ -142,10 +169,12 @@ module.exports = {
     ARTIFACT_PATTERNS,
     SNAPSHOT_MAX,
     CHANGED_MAX,
+    CHANGED_BYTES,
     readPhase,
     isArtifact,
     verdict,
     changedSince,
+    fitChanged,
     denyText,
     stateDenyText,
     briefLine,

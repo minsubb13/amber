@@ -4445,7 +4445,7 @@ const sessionState = (home: string, sessionId: string): unknown => {
   check(
     'E1 refuses a .amber/ write during the phase with the state reason',
     isDeny(stateDeny) &&
-      /^amber: planning phase open since \S+: \.amber\/active\.json is the run's state under \.amber\/, written only by `node \S+record\.cjs` and the hooks$/.test(
+      /^amber: planning phase open since \S+: \.amber\/active\.json is the run's state under \.amber\/, written only by `node \S+record\.cjs` and the hooks\. To close the cycle: record the no-contract verdict with the amber:mark skill .* releases this gate\.$/.test(
         reasonOf(stateDeny),
       ),
     reasonOf(stateDeny),
@@ -4583,5 +4583,150 @@ const sessionState = (home: string, sessionId: string): unknown => {
     bashUnder === null &&
       !has(sessionState(home, 'g1'), 'phase') &&
       get(ledger(home), ledger(home).length - 1, 'exit') === 'approval',
+  );
+}
+
+// ---- phase-exit row limits: the row survives many and long changed paths ----
+{
+  const home = freshHome('phase-cap');
+  const s3 = (
+    id: string,
+    zone: string,
+    skill: string,
+    args?: string,
+  ): HookRun =>
+    runHook(
+      'S3',
+      {
+        session_id: id,
+        cwd: zone,
+        hook_event_name: 'PreToolUse',
+        tool_name: 'Skill',
+        tool_input: { skill, ...(args === undefined ? {} : { args }) },
+      },
+      home,
+    );
+  const rawRows = (): string[] =>
+    fs
+      .readFileSync(path.join(home, 'runs.jsonl'), 'utf8')
+      .split('\n')
+      .filter(Boolean);
+  const many = makeZone('phase-many', null, null);
+  runHook('S0', { session_id: 'cap-1', cwd: many, model: 'm' }, home);
+  s3('cap-1', many, 'amber:planning');
+  for (let i = 1; i <= 51; i += 1) {
+    fs.writeFileSync(path.join(many, 'c' + String(i).padStart(2, '0')), 'x');
+  }
+  s3('cap-1', many, 'amber:mark', 'skip - opening verdict - no contract: many');
+  let rows = ledger(home);
+  let exit = rows[rows.length - 1];
+  check(
+    'an exit row lists at most 50 changed paths, sorted, and counts them all',
+    get(exit, 'trigger') === 'phase-exit' &&
+      list(get(exit, 'changed')).length === 50 &&
+      get(exit, 'changed', 0) === 'c01' &&
+      get(exit, 'changed', 49) === 'c50' &&
+      get(exit, 'changed_count') === 51 &&
+      /51 path\(s\) changed/.test(stringAt(exit, 'summary')),
+    JSON.stringify(exit),
+  );
+  const long = makeZone('phase-long', null, null);
+  runHook('S0', { session_id: 'cap-2', cwd: long, model: 'm' }, home);
+  s3('cap-2', long, 'amber:planning');
+  for (let i = 1; i <= 50; i += 1) {
+    fs.writeFileSync(
+      path.join(long, 'd' + String(i).padStart(2, '0') + '-' + 'x'.repeat(86)),
+      'x',
+    );
+  }
+  const before = rawRows().length;
+  s3('cap-2', long, 'amber:mark', 'skip - opening verdict - no contract: long');
+  rows = ledger(home);
+  exit = rows[rows.length - 1];
+  const line = rawRows()[rawRows().length - 1] ?? '';
+  check(
+    'an exit row with fifty 90-byte paths still fits the ledger line and keeps the count',
+    rawRows().length === before + 2 &&
+      get(exit, 'trigger') === 'phase-exit' &&
+      Buffer.byteLength(line) <= 4096 &&
+      list(get(exit, 'changed')).length > 0 &&
+      list(get(exit, 'changed')).length < 50 &&
+      get(exit, 'changed_count') === 50 &&
+      !has(sessionState(home, 'cap-2'), 'phase'),
+    JSON.stringify([rawRows().length - before, Buffer.byteLength(line), exit]),
+  );
+}
+
+// ---- phase gate and worktrees: a sibling worktree is outside, a unit worktree inside ----
+{
+  const home = freshHome('phase-wt');
+  const zone = makeZone('phase-wt', null, null);
+  execFileSync('git', [
+    '-C',
+    zone,
+    '-c',
+    'user.name=t',
+    '-c',
+    'user.email=t@t',
+    'commit',
+    '-q',
+    '--allow-empty',
+    '-m',
+    'init',
+  ]);
+  const sibling = path.join(BASE, 'phase-wt-sibling');
+  execFileSync('git', [
+    '-C',
+    zone,
+    'worktree',
+    'add',
+    '-q',
+    '--detach',
+    sibling,
+  ]);
+  const unit = path.join(zone, '.claude', 'worktrees', 'u1');
+  execFileSync('git', ['-C', zone, 'worktree', 'add', '-q', '--detach', unit]);
+  runHook('S0', { session_id: 'wt-1', cwd: zone, model: 'm' }, home);
+  runHook(
+    'S3',
+    {
+      session_id: 'wt-1',
+      cwd: zone,
+      hook_event_name: 'PreToolUse',
+      tool_name: 'Skill',
+      tool_input: { skill: 'amber:planning' },
+    },
+    home,
+  );
+  const write = (target: string): unknown =>
+    runHook(
+      'E1',
+      {
+        session_id: 'wt-1',
+        cwd: zone,
+        hook_event_name: 'PreToolUse',
+        tool_name: 'Write',
+        tool_input: { file_path: target },
+      },
+      home,
+    ).out;
+  check(
+    'a write into a sibling worktree (a zone of its own) passes the phase gate',
+    write(path.join(sibling, 'src', 'a.ts')) === null &&
+      write(path.join(sibling, 'README.md')) === null,
+  );
+  const inUnit = write(path.join(unit, 'src', 'a.ts'));
+  check(
+    'a write into a unit worktree inside the zone is judged by its zone-relative path',
+    isDeny(inUnit) &&
+      /write target src\/a\.ts is not a planning artifact/.test(
+        stringAt(inUnit, 'hookSpecificOutput', 'permissionDecisionReason'),
+      ) &&
+      write(path.join(unit, 'docs', 'u-plan.md')) === null,
+    JSON.stringify(inUnit),
+  );
+  check(
+    'the zone itself stays gated',
+    isDeny(write(path.join(zone, 'src', 'a.ts'))),
   );
 }

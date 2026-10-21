@@ -158,7 +158,12 @@ function targetsOf(input) {
 /**
  * Without a contract: the session's phase, when open in this zone, gates
  * file-tool writes to planning artifacts. Bash and Monitor pass (the exit
- * row counts what they changed); a subagent follows its session's phase.
+ * row counts what they changed); a subagent follows its session's phase. A
+ * target outside the zone directory passes before any mapping: a sibling
+ * worktree is a zone of its own (the one planning says to open when another
+ * run holds this zone), and the mapper would otherwise fold its paths onto
+ * this zone's; a unit worktree under <zone>/.claude/worktrees/ lies inside
+ * and is judged by its zone-relative path.
  */
 function runPhaseGate(input) {
     if (input.tool_name === 'Bash' || input.tool_name === 'Monitor')
@@ -180,8 +185,10 @@ function runPhaseGate(input) {
             messageOf(err) +
             '. Correct the patch and retry.');
     }
-    const resolved = zone.zoneRelativeAll(root, input.cwd, targets.map((target) => path.resolve(input.cwd || root, target)));
-    for (const { rel } of resolved) {
+    const inside = targets
+        .map((target) => path.resolve(input.cwd || root, target))
+        .filter((abs) => zone.insideZone(root, abs));
+    for (const { rel } of zone.zoneRelativeAll(root, input.cwd, inside)) {
         const verdict = phase.verdict(rel);
         if (verdict === 'state') {
             return deny(phase.stateDenyText(current, rel, text.RECORD_CLI));

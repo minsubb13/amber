@@ -160,6 +160,7 @@ function projectKey(cwd) {
     return path.basename(zoneRoot(cwd));
 }
 module.exports = {
+    insideZone,
     zoneRoot,
     worktreeTop,
     zoneRelative,
