@@ -65,9 +65,10 @@ function completionGuidance(contract) {
     ].join('\n');
 }
 /**
- * Contract awareness briefing: contract identity, the standing-rules section
- * verbatim, and the declaration/marker conventions. Injected by S0 at session
- * start and by S1 when a contract becomes active mid-session.
+ * Contract awareness briefing: contract identity, the completion-conditions
+ * and standing-rules sections verbatim, and the declaration/marker
+ * conventions. Injected by S0 at session start and by S1 when a contract
+ * becomes active mid-session.
  */
 function contractContext(contract) {
     if (contract.broken) {
@@ -86,6 +87,8 @@ function contractContext(contract) {
             ', ' +
             guards.toText(contract.ratifiedAt) +
             ').',
+        'Completion conditions:',
+        rules.completionConditions(contract.text),
         'Standing rules:',
         rules.standingRules(contract.text),
         completionGuidance(contract),
@@ -95,7 +98,10 @@ function contractContext(contract) {
         'args "hold - U<n> - <reason>"  (a legitimate stop while units are open: operator wait, budget, out-of-contract decision)',
     ].join('\n');
 }
-/** The run's progress lines and the unit conventions, or the broken-file note. */
+/**
+ * The run's progress lines, the verified-so-far block when there is one, and
+ * the unit conventions, or the broken-file note.
+ */
 function progressContext(p) {
     if (model.isBroken(p)) {
         return ('amber: ' +
@@ -115,8 +121,10 @@ function progressContext(p) {
             p.hold.reason +
             ' - every stop passes until that unit next starts, is verified, or fails, or a new hold replaces it.\n'
         : '';
+    const handoff = model.handoff(p);
     return (model.summary(p) +
         '\n' +
+        (handoff ? handoff + '\n' : '') +
         external +
         'Unit transitions go through `node ' +
         RECORD_CLI +

@@ -238,6 +238,7 @@ function unitCommand(name, rest) {
     // the changed files are compared with the write-scope; an undeclared
     // out-of-scope file refuses the transition.
     let scopeFields = {};
+    let files;
     const baseline = info.baseline !== undefined ? info.baseline : p.baseline;
     if (command === 'verified') {
         scope.checkContract({ cwd, baseline, boundaryPath: info.boundaryPath });
@@ -255,12 +256,18 @@ function unitCommand(name, rest) {
             throw new Error(scope.refusal(result, String(info.boundaryFile), info.writeScopes, 'unit verified ' + id));
         }
         scopeFields = scope.recordFields(result.declared);
+        // The paths this unit's verification is charged with: the run's changed
+        // set (committed and working tree alike) minus what earlier verified
+        // units already carry. Kept on the history entry; the ledger row carries
+        // only the count.
+        files = model.newFiles(p, id, result.changed.map((c) => c.path));
     }
     model.applyEvent(p, command, id, {
         by: sessionId,
         evidence: text,
         reason: text,
         out_of_scope: scopeFields.out_of_scope,
+        files,
     }, clock.isoNow);
     store.saveProgress(info.root, p, clock.isoNow);
     const fields = {
@@ -271,6 +278,8 @@ function unitCommand(name, rest) {
     if (command === 'verified' || command === 'failed') {
         fields['evidence'] = text.slice(0, 200);
     }
+    if (files)
+        fields['files_count'] = files.length;
     if (command === 'hold') {
         fields['reason'] = text.slice(0, 200);
         if (p.hold?.kind)

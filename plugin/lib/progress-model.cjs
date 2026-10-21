@@ -11,6 +11,11 @@
 const guards = require("./guards.cjs");
 const REENTRY_LIMIT = 10;
 const HISTORY_LIMIT = 50;
+// Changed paths kept on a verified entry; the count beside them is uncapped.
+const FILES_MAX = 50;
+// The handoff block: paths shown per unit, and where its evidence is cut.
+const HANDOFF_FILES = 12;
+const HANDOFF_NOTE = 160;
 // Every status is classified once, so a new status does not compile until
 // it is: whether it is open, and whether the summary line lists it (in this
 // order).
@@ -116,6 +121,38 @@ function focusUnit(p) {
 function readyUnits(p) {
     return openUnits(p).filter((id) => p.units[id]?.status !== 'running' && depsMet(p, id));
 }
+/**
+ * The changed paths a unit's verification is charged with: `paths` (the
+ * changed set the scope check established for the whole run) minus every
+ * path a verified entry of another unit already carries, each once, sorted.
+ * A later unit thus lists only what changed after the earlier ones; a path an
+ * earlier unit changed stays with that unit when a later one edits it again,
+ * and a unit verified again lists its own paths afresh. Paths an earlier
+ * entry dropped at its cap are not carried, so they fall to the next unit.
+ * The other units are read as found (the loader checks only the outer
+ * shape), so a hand-edited history there never refuses this transition.
+ */
+function newFiles(p, id, paths) {
+    const carried = new Set();
+    for (const other of Object.keys(p.units)) {
+        const unit = p.units[other];
+        if (other === id || !unit)
+            continue;
+        const history = guards.readField(unit, 'history');
+        if (!Array.isArray(history))
+            continue;
+        for (const entry of history) {
+            if (!guards.isObject(entry) || entry['event'] !== 'verified')
+                continue;
+            const files = entry['files'];
+            if (!Array.isArray(files))
+                continue;
+            for (const file of files)
+                carried.add(guards.toText(file));
+        }
+    }
+    return [...new Set(paths)].filter((file) => !carried.has(file)).sort();
+}
 function pushHistory(unit, entry, now) {
     unit.history.push({ ts: now(), ...entry });
     if (unit.history.length > HISTORY_LIMIT) {
@@ -187,6 +224,14 @@ function applyTransition(p, transition, id, unit, extra, by, now) {
                 by,
                 note: extra?.evidence || '',
                 ...(extra?.out_of_scope ? { out_of_scope: extra.out_of_scope } : {}),
+                // Only when the recorder ran the scope check (the keys stay absent
+                // otherwise, so an entry recorded without them keeps its shape).
+                ...(extra?.files
+                    ? {
+                        files: extra.files.slice(0, FILES_MAX),
+                        files_count: extra.files.length,
+                    }
+                    : {}),
             }, now);
             return;
         case 'failed':
@@ -287,6 +332,53 @@ function summary(p) {
     return lines.join('\n');
 }
 /**
+ * The "verified so far" block the briefings print under the summary: one
+ * line per verified unit in plan order - its id and title, the paths its
+ * verification charged to it (HANDOFF_FILES shown, the rest counted) and its
+ * evidence (the last verified entry's note, cut to HANDOFF_NOTE characters) -
+ * or '' when no unit is verified. An entry without files (recorded before
+ * they were kept, or under a contract without write-scope rows) prints no
+ * files part. The send-back directive does not print this block. Entries are
+ * read as found, so a hand-edited history cannot crash the briefing.
+ */
+function handoff(p) {
+    const lines = [];
+    for (const id of Object.keys(p.units)) {
+        const unit = p.units[id];
+        if (!unit || unit.status !== 'verified')
+            continue;
+        const history = guards.readField(unit, 'history');
+        const last = (Array.isArray(history) ? history : [])
+            .filter((h) => guards.isObject(h) && h['event'] === 'verified')
+            .slice(-1)[0];
+        const entry = guards.isObject(last) ? last : {};
+        let line = '- ' + id + ' ' + unit.title;
+        const files = entry['files'];
+        if (Array.isArray(files)) {
+            const shown = files.slice(0, HANDOFF_FILES).map(guards.toText);
+            const count = entry['files_count'];
+            const more = (typeof count === 'number' ? count : files.length) - shown.length;
+            line +=
+                ' - files: ' +
+                    (shown.length === 0
+                        ? 'none'
+                        : shown.join(', ') +
+                            (more > 0 ? ' (+' + String(more) + ' more)' : ''));
+        }
+        const rawNote = entry['note'];
+        const note = typeof rawNote === 'string' ? rawNote.replace(/\s+/g, ' ').trim() : '';
+        if (note) {
+            line +=
+                ' - evidence: ' +
+                    (note.length > HANDOFF_NOTE
+                        ? note.slice(0, HANDOFF_NOTE) + '...'
+                        : note);
+        }
+        lines.push(line);
+    }
+    return lines.length === 0 ? '' : 'verified so far:\n' + lines.join('\n');
+}
+/**
  * Whether loadProgress reported the file as unusable. Like the original, any
  * truthy `broken` field counts, so a hand-edited file with one reads as
  * broken too.
@@ -297,12 +389,15 @@ function isBroken(p) {
 module.exports = {
     isBroken,
     REENTRY_LIMIT,
+    FILES_MAX,
     holdKind,
     newProgress,
     openUnits,
     focusUnit,
     readyUnits,
+    newFiles,
     applyEvent,
     unitByAgent,
     summary,
+    handoff,
 };

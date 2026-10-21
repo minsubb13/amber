@@ -71,6 +71,13 @@ unit command a main session (not a subagent) runs registers it as a driver of
 the run: only driving sessions are sent back by the Stop hook while units are
 open or have their completion signal read. Sibling sessions in the zone receive
 the briefing and obey `write-scope` and `bash-deny`, but are not pulled into the loop.
+The session-opening briefing (S0; on both hosts - a Codex session leaves the
+same S0 state file - and on Claude Code at startup, resume, clear and compact)
+and a session's first S1 briefing print the contract's section
+`## Completion conditions` under the contract identity and, under the progress
+summary, a `verified so far:` block with one line per verified unit (its
+files, 12 at most, and its evidence cut to 160 characters), so a cleared or
+compacted session continues from its first turn.
 
 ```sh
 node "$amber_plugin_root/scripts/record.cjs" unit init <plan-path>          # once, after approval
@@ -108,6 +115,10 @@ baseline value that is not a git hash) refuses the command; declare legitimate
 exceptions with repeatable `--out-of-scope <path>=<reason>` (globs accepted,
 recorded in `progress.json` and the ledger as `out_of_scope`). E1 still blocks
 out-of-scope file-tool writes beforehand; shell writes are caught here.
+`unit verified` also keeps the paths the unit changed on its verified history
+entry in `progress.json` (`files`: the changed set minus what earlier
+verified units already carry, 50 at most, beside `files_count`) and puts
+`files_count` on its ledger row.
 
 ### Parallel unit worktrees
 
