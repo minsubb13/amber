@@ -19,6 +19,9 @@
 //
 // This module runs git and keeps the interface scripts/record.cjs uses; the
 // rules live in lib/scope.
+const fs = require("node:fs");
+const path = require("node:path");
+const clock = require("../lib/clock.cjs");
 const git = require("../lib/git.cjs");
 const scope = require("../lib/scope.cjs");
 function toplevel(cwd) {
@@ -91,6 +94,86 @@ function headCommit(cwd) {
         return null;
     }
 }
+/** Whether `file` names a regular file (a symbolic link to one included). */
+function isRegularFile(file) {
+    try {
+        return fs.statSync(file).isFile();
+    }
+    catch {
+        return false;
+    }
+}
+/**
+ * The blob SHA of each toplevel-relative path that names a regular file, from
+ * one `git hash-object --stdin-paths` run that writes nothing to the object
+ * store; a path naming anything else (deleted, a directory, a link to one)
+ * maps to null. A path holding a newline is hashed on its own, since the
+ * batch reads one path per line.
+ */
+function blobHashes(top, paths) {
+    const out = new Map();
+    const files = [];
+    for (const p of paths) {
+        if (isRegularFile(path.join(top, p)))
+            files.push(p);
+        else
+            out.set(p, null);
+    }
+    const batch = files.filter((p) => !p.includes('\n'));
+    if (batch.length > 0) {
+        const shas = git
+            .gitInput(top, ['hash-object', '--stdin-paths'], batch.join('\n') + '\n')
+            .split('\n')
+            .filter(Boolean);
+        if (shas.length !== batch.length) {
+            throw new Error('git hash-object returned ' +
+                String(shas.length) +
+                ' hashes for ' +
+                String(batch.length) +
+                ' paths');
+        }
+        batch.forEach((p, i) => out.set(p, shas[i] ?? null));
+    }
+    for (const p of files) {
+        if (p.includes('\n')) {
+            out.set(p, git.git(top, ['hash-object', '--', p]).trim() || null);
+        }
+    }
+    return out;
+}
+/**
+ * The content baseline of the tree cwd lies in: HEAD, the blob hash of every
+ * path `git status` reports (tracked changes and untracked files; `.amber/`
+ * excepted), and the blob hash of the contract file. Null when cwd is not
+ * inside a git repository; any other git failure throws (the caller decides
+ * whether that refuses). Reads only - no object, index entry or file is
+ * written.
+ */
+function takeBaseline(cwd, boundaryPath) {
+    let top;
+    try {
+        top = toplevel(cwd);
+    }
+    catch {
+        return null;
+    }
+    const paths = dirtyPaths(top).filter((p) => p !== '.amber' && !p.startsWith('.amber/'));
+    const hashes = blobHashes(top, paths);
+    const manifest = {};
+    for (const p of paths)
+        manifest[p] = hashes.get(p) ?? null;
+    let contractBlob = null;
+    if (boundaryPath) {
+        const rel = path.relative(top, boundaryPath).split(path.sep).join('/');
+        contractBlob = blobHashes(top, [rel]).get(rel) ?? null;
+    }
+    return {
+        commit: headCommit(cwd),
+        manifest,
+        contract_blob: contractBlob,
+        taken_at: clock.isoNow(),
+    };
+}
 function check(opts) {
     const { cwd, writeScopes, boundaryRel } = opts;
     const top = toplevel(cwd);
@@ -107,6 +190,7 @@ module.exports = {
     OUT_OF_SCOPE_MAX: scope.OUT_OF_SCOPE_MAX,
     snapshot,
     headCommit,
+    takeBaseline,
     parseDeclarations: scope.parseDeclarations,
     check,
     refusal: scope.refusal,

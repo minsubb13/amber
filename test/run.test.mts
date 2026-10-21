@@ -2662,6 +2662,17 @@ const sessionState = (home: string, sessionId: string): unknown => {
       'preexist.txt,top.txt',
     JSON.stringify(get(progress(), 'preexisting')),
   );
+  // The pointer was hand-written (no baseline), so init took the content
+  // baseline itself: the HEAD and the blob hash of each pre-run path.
+  check(
+    'unit init under a hand-written pointer records its own content baseline',
+    get(progress(), 'baseline', 'commit') === baseline &&
+      get(progress(), 'baseline', 'manifest', 'top.txt') ===
+        git('hash-object', 'top.txt') &&
+      get(progress(), 'baseline', 'manifest', 'preexist.txt') ===
+        git('hash-object', 'preexist.txt'),
+    JSON.stringify(get(progress(), 'baseline')),
+  );
   record(['unit', 'start', 'U1']);
   fs.writeFileSync(path.join(zone, 'plugin', 'new.cjs'), 'ok\n');
   const inScope = record([
@@ -2977,6 +2988,176 @@ const sessionState = (home: string, sessionId: string): unknown => {
       ),
       'baseline_commit',
     ),
+  );
+}
+
+// ---- activate: the pointer and the content baseline written by one command ----
+{
+  const RECORD = path.join(PLUGIN, 'scripts', 'record.cjs');
+  const zone = makeZone('activate', null, null);
+  fs.writeFileSync(path.join(zone, '.gitignore'), '.amber/\n');
+  fs.writeFileSync(
+    path.join(zone, 'contract.md'),
+    '- code [machine: write-scope src/**]\n',
+  );
+  fs.writeFileSync(path.join(zone, 'top.txt'), 'x\n');
+  fs.writeFileSync(path.join(zone, 'gone.txt'), 'g\n');
+  const git = (...args: string[]): string =>
+    execFileSync('git', ['-C', zone, ...args], { encoding: 'utf8' }).trim();
+  git('config', 'user.email', 't@t');
+  git('config', 'user.name', 't');
+  git('add', '-A');
+  git('commit', '-q', '-m', 'init');
+  const head = git('rev-parse', 'HEAD');
+  // Dirty before activation: a modified tracked file, an untracked file and
+  // a deleted file.
+  fs.appendFileSync(path.join(zone, 'top.txt'), 'pre-run edit\n');
+  fs.writeFileSync(path.join(zone, 'untracked.txt'), 'new\n');
+  fs.unlinkSync(path.join(zone, 'gone.txt'));
+  const objectsBefore = git('count-objects', '-v');
+  const home = freshHome('activate');
+  const record = (
+    args: readonly string[],
+    cwd = zone,
+  ): SpawnSyncReturns<string> =>
+    spawnSync('node', [RECORD, ...args], {
+      cwd,
+      encoding: 'utf8',
+      timeout: 10000,
+      env: {
+        ...process.env,
+        AMBER_HOME: home,
+        AMBER_SESSION_ID: 'activate-shell',
+      },
+    });
+  const pointerFile = path.join(zone, '.amber', 'active.json');
+  const pointer = (): unknown =>
+    parseJson(fs.readFileSync(pointerFile, 'utf8'));
+  const activated = record([
+    'activate',
+    'contract.md',
+    '--by',
+    'operator',
+    '--at',
+    '2026-10-21',
+  ]);
+  check(
+    'activate writes the pointer and exits 0',
+    activated.status === 0 && fs.existsSync(pointerFile),
+    activated.stderr,
+  );
+  check(
+    'the pointer keeps the schema-v1 fields',
+    get(pointer(), 'v') === 1 &&
+      get(pointer(), 'boundary') === 'contract.md' &&
+      get(pointer(), 'ratified_by') === 'operator' &&
+      get(pointer(), 'ratified_at') === '2026-10-21',
+    JSON.stringify(pointer()),
+  );
+  check(
+    'baseline.commit is the HEAD at activation',
+    get(pointer(), 'baseline', 'commit') === head,
+    JSON.stringify(get(pointer(), 'baseline')),
+  );
+  check(
+    'the manifest hashes the modified tracked file',
+    get(pointer(), 'baseline', 'manifest', 'top.txt') ===
+      git('hash-object', 'top.txt'),
+    JSON.stringify(get(pointer(), 'baseline', 'manifest')),
+  );
+  check(
+    'the manifest hashes the untracked file',
+    get(pointer(), 'baseline', 'manifest', 'untracked.txt') ===
+      git('hash-object', 'untracked.txt'),
+  );
+  check(
+    'the manifest records a deleted file as null',
+    has(get(pointer(), 'baseline', 'manifest'), 'gone.txt') &&
+      get(pointer(), 'baseline', 'manifest', 'gone.txt') === null,
+  );
+  check(
+    'contract_blob is the hash of the contract file',
+    get(pointer(), 'baseline', 'contract_blob') ===
+      git('hash-object', 'contract.md'),
+  );
+  check(
+    'activate writes no object and leaves the working tree as it was',
+    git('count-objects', '-v') === objectsBefore &&
+      git('status', '--porcelain').includes(' M top.txt'),
+    git('status', '--porcelain'),
+  );
+  const activateRows = ledger(home).filter(
+    (r) => get(r, 'trigger') === 'activate',
+  );
+  check(
+    'activate records one ledger row carrying the baseline commit',
+    activateRows.length === 1 &&
+      get(activateRows[0], 'baseline_commit') === head &&
+      get(activateRows[0], 'pre_run_paths') === 3,
+    JSON.stringify(activateRows),
+  );
+  const before = fs.readFileSync(pointerFile, 'utf8');
+  const again = record(['activate', 'contract.md', '--by', 'operator']);
+  check(
+    'a second activate refuses and leaves the pointer unchanged',
+    again.status !== 0 &&
+      /already exists/.test(again.stderr) &&
+      fs.readFileSync(pointerFile, 'utf8') === before,
+    again.stderr,
+  );
+  fs.unlinkSync(pointerFile);
+  const missing = record(['activate', 'nope.md', '--by', 'operator']);
+  check(
+    'activate refuses a missing contract file',
+    missing.status !== 0 &&
+      /not found/.test(missing.stderr) &&
+      !fs.existsSync(pointerFile),
+    missing.stderr,
+  );
+  const noBy = record(['activate', 'contract.md']);
+  check(
+    'activate refuses without --by',
+    noBy.status !== 0 &&
+      /--by/.test(noBy.stderr) &&
+      !fs.existsSync(pointerFile),
+    noBy.stderr,
+  );
+  const nogit = path.join(BASE, 'activate-nogit');
+  fs.mkdirSync(nogit, { recursive: true });
+  fs.writeFileSync(path.join(nogit, 'contract.md'), 'c\n');
+  const outside = record(
+    ['activate', 'contract.md', '--by', 'operator'],
+    nogit,
+  );
+  check(
+    'activate refuses outside a git repository',
+    outside.status !== 0 &&
+      /git repository/.test(outside.stderr) &&
+      !fs.existsSync(path.join(nogit, '.amber', 'active.json')),
+    outside.stderr,
+  );
+  // unit init under an activated pointer: the pointer's baseline applies and
+  // init records none of its own; the compatibility fields follow it.
+  fs.writeFileSync(
+    path.join(zone, 'plan.md'),
+    '## Work units\n- [ ] U1 one [unit: U1 scope=src/** oracle=true]\n',
+  );
+  record(['activate', 'contract.md', '--by', 'operator', '--at', '2026-10-21']);
+  record(['unit', 'init', 'plan.md']);
+  const progress = (): unknown =>
+    parseJson(
+      fs.readFileSync(path.join(zone, '.amber', 'progress.json'), 'utf8'),
+    );
+  check(
+    'unit init under an activated pointer stores no baseline of its own',
+    !has(progress(), 'baseline') && get(progress(), 'baseline_commit') === head,
+    JSON.stringify(progress()),
+  );
+  check(
+    "preexisting lists the pointer's pre-run paths (compatibility field)",
+    list(get(progress(), 'preexisting')).slice().sort().join() ===
+      'gone.txt,plan.md,top.txt,untracked.txt',
+    JSON.stringify(get(progress(), 'preexisting')),
   );
 }
 

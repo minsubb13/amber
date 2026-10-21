@@ -55,6 +55,26 @@ export interface Hold {
 }
 
 /**
+ * The content baseline of a run: the HEAD when the run began and the blob
+ * hash of every path that differed from it at that moment, so the scope check
+ * can tell a file the run changed from one that was already dirty when the
+ * run began. `record.cjs activate` records it in the pointer; `unit init`
+ * records one in progress.json only when the pointer carries none.
+ */
+export interface Baseline {
+  /** HEAD when the baseline was taken; null in a tree without a commit. */
+  commit: string | null;
+  /**
+   * Toplevel-relative path -> blob SHA of its content at that moment; null
+   * when the path named no regular file (deleted, a directory).
+   */
+  manifest: Record<string, string | null>;
+  /** The contract file's blob SHA at that moment; null without a file. */
+  contract_blob: string | null;
+  taken_at: string;
+}
+
+/**
  * .amber/progress.json. The CommonJS hook and recorder mutate the object they
  * get back (re-entry counts, registered sessions), so the fields stay
  * writable.
@@ -74,6 +94,8 @@ export interface Progress {
    * baseline for a contract file that was never committed.
    */
   baseline_commit?: string;
+  /** The baseline `unit init` took itself, only when the pointer carried none. */
+  baseline?: Baseline;
   units: Record<string, Unit>;
   updated_at?: string;
 }
@@ -187,6 +209,8 @@ export interface ActiveContract {
   /** As the pointer wrote it; 'unknown' when absent. */
   readonly ratifiedBy: unknown;
   readonly ratifiedAt: unknown;
+  /** The baseline the pointer carries; null for a pointer written without one. */
+  readonly baseline: Baseline | null;
   readonly text: string;
   readonly broken: false;
 }

@@ -3,6 +3,9 @@
 // completion signal (done). Every refusal is a message on stderr and exit
 // code 1, written before anything is recorded.
 
+import fs = require('node:fs');
+import path = require('node:path');
+
 import ledger = require('../lib/ledger.cjs');
 import args = require('../lib/record-args.cjs');
 import clock = require('../lib/clock.cjs');
@@ -15,7 +18,9 @@ import ownership = require('../lib/ownership.cjs');
 import store = require('../lib/progress-store.cjs');
 import scope = require('../hooks/scope-check.cjs');
 import skillRecorder = require('../lib/skill-recorder.cjs');
-import type { InvokedSkill } from '../lib/types.cjs';
+import state = require('../lib/state-store.cjs');
+import zone = require('../lib/zone.cjs');
+import type { Baseline, InvokedSkill } from '../lib/types.cjs';
 
 const { USAGE } = args;
 
@@ -34,6 +39,112 @@ function recordUnitEvent(
   );
 }
 
+/**
+ * The session id the environment names: AMBER_SESSION_ID, CODEX_THREAD_ID,
+ * then CLAUDE_CODE_SESSION_ID (Claude Code exports it to the tool shell, equal
+ * to the hooks' session_id, and subagents inherit it); '' when none is set.
+ */
+function envSessionId(): string {
+  return (
+    process.env['AMBER_SESSION_ID'] ||
+    process.env['CODEX_THREAD_ID'] ||
+    process.env['CLAUDE_CODE_SESSION_ID'] ||
+    process.env['PI_SESSION_ID'] ||
+    ''
+  ).trim();
+}
+
+/** Whether `file` names a regular file (a symbolic link to one included). */
+function isRegularFile(file: string): boolean {
+  try {
+    return fs.statSync(file).isFile();
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Activation: the pointer and the content baseline of the run written by one
+ * command, so the scope check always knows what the tree looked like when
+ * the run began. Refuses before writing anything: an existing pointer, a
+ * missing contract file or one outside the zone, a zone outside git.
+ */
+function activateCommand(
+  file: string | undefined,
+  rest: readonly string[],
+): void {
+  if (!file || file.startsWith('--')) {
+    throw new Error('activate needs the contract file path\n' + USAGE);
+  }
+  const by = args.optionText(rest, '--by');
+  if (!by) throw new Error('activate needs --by <operator>\n' + USAGE);
+  const at = args.optionText(rest, '--at') || clock.isoNow().slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(at)) {
+    throw new Error('--at needs a date like YYYY-MM-DD, got ' + at);
+  }
+  const cwd = process.cwd();
+  const root = zone.zoneRoot(cwd);
+  const pointerPath = path.join(root, '.amber', 'active.json');
+  if (fs.existsSync(pointerPath)) {
+    throw new Error(
+      'active contract pointer already exists: ' +
+        pointerPath +
+        ' - a run is active in this zone; a passed completion releases it',
+    );
+  }
+  const boundaryPath = path.resolve(root, file);
+  if (!boundaryPath.startsWith(root + path.sep)) {
+    throw new Error(
+      'contract file ' + file + ' lies outside the zone root ' + root,
+    );
+  }
+  if (!isRegularFile(boundaryPath)) {
+    throw new Error('contract file not found: ' + boundaryPath);
+  }
+  // A git failure here throws and refuses: the baseline is the command's
+  // purpose, so it is never written without one.
+  const baseline = scope.takeBaseline(cwd, boundaryPath);
+  if (!baseline) {
+    throw new Error(
+      root +
+        ' is not inside a git repository, so no baseline can be recorded ' +
+        '(Amber runs live in git)',
+    );
+  }
+  const boundary = contracts.boundaryRel(root, boundaryPath);
+  const contractFile = path.basename(boundaryPath);
+  fs.mkdirSync(path.dirname(pointerPath), { recursive: true });
+  state.writeStateAtomic(pointerPath, {
+    v: 1,
+    boundary,
+    ratified_by: by,
+    ratified_at: at,
+    baseline,
+  });
+  const preRun = Object.keys(baseline.manifest).length;
+  ledger.appendRecord(
+    { session_id: envSessionId() || 'shell', cwd },
+    'contract ' + contractFile + ' activated',
+    {
+      contract: contractFile,
+      ratified_by: by,
+      ratified_at: at,
+      baseline_commit: baseline.commit,
+      pre_run_paths: preRun,
+    },
+    'activate',
+  );
+  process.stdout.write(
+    'amber: ' +
+      contractFile +
+      ' activated; baseline ' +
+      (baseline.commit ? baseline.commit.slice(0, 7) : 'without a commit') +
+      ', ' +
+      String(preRun) +
+      ' pre-run path(s) recorded\n',
+  );
+}
+
 function unitCommand(name: string | undefined, rest: readonly string[]): void {
   const command = args.unitCommandOf(name);
   if (!command) throw new Error('invalid unit command\n' + USAGE);
@@ -44,33 +155,38 @@ function unitCommand(name: string | undefined, rest: readonly string[]): void {
       'active contract pointer is broken: ' + guards.toText(info.error),
     );
   }
-  // Session identity: an explicit environment id wins (AMBER_SESSION_ID,
-  // CODEX_THREAD_ID, then CLAUDE_CODE_SESSION_ID - Claude Code exports it to
-  // the tool shell, equal to the hooks' session_id, and subagents inherit it -
-  // then PI_SESSION_ID, which pi's bash tool exports, equal to the session id
-  // the pi extension records); otherwise the recorder reads back the driver E1 registered for this run
-  // just before the command.
-  const envSessionId = (
-    process.env['AMBER_SESSION_ID'] ||
-    process.env['CODEX_THREAD_ID'] ||
-    process.env['CLAUDE_CODE_SESSION_ID'] ||
-    process.env['PI_SESSION_ID'] ||
-    ''
-  ).trim();
-  const driver = envSessionId ? null : ownership.driverOfRun(info.boundaryFile);
-  const sessionId = envSessionId || driver?.sessionId || 'shell';
+  // Session identity: an explicit environment id wins; otherwise the recorder
+  // reads back the driver E1 registered for this run just before the command.
+  const fromEnv = envSessionId();
+  const driver = fromEnv ? null : ownership.driverOfRun(info.boundaryFile);
+  const sessionId = fromEnv || driver?.sessionId || 'shell';
   if (command === 'init') {
     const plan = rest.find((a) => !a.startsWith('--'));
     if (!plan) throw new Error('unit init needs the plan path\n' + USAGE);
-    const preexisting = scope.snapshot(cwd);
+    // The baseline the pointer carries (activate recorded it) applies; only
+    // a pointer written without one - the hand-written form - makes init take
+    // the snapshot itself and keep it in progress.json. preexisting and
+    // baseline_commit are filled from whichever applies; without git they
+    // stay what they always were (no paths, no commit).
+    let fallback: Baseline | null = null;
+    let warning = '';
+    if (!info.baseline) {
+      try {
+        fallback = scope.takeBaseline(cwd, info.boundaryPath);
+      } catch (err) {
+        warning = guards.toText(guards.isObject(err) ? err['message'] : err);
+      }
+    }
+    const applied = info.baseline ?? fallback;
     const p = store.initProgress(
       info.root,
       plan,
       info.boundaryFile,
       rest.includes('--force'),
-      preexisting,
+      applied ? Object.keys(applied.manifest) : scope.snapshot(cwd),
       clock.isoNow,
-      scope.headCommit(cwd),
+      applied ? applied.commit : scope.headCommit(cwd),
+      fallback,
     );
     const ids = Object.keys(p.units);
     recordUnitEvent(
@@ -87,6 +203,14 @@ function unitCommand(name: string | undefined, rest: readonly string[]): void {
         ids.join(', ') +
         '\n',
     );
+    if (warning) {
+      process.stdout.write(
+        'amber: warning - no baseline recorded (' +
+          warning +
+          '); the scope check falls back to the contract commit without ' +
+          'pre-run exclusions\n',
+      );
+    }
     return;
   }
   // A lowercase unit id is folded first (record-args prepareUnitArgs); the
@@ -374,6 +498,10 @@ function main(argv: readonly string[]): void {
   }
   if (command === 'done') {
     doneCommand(name === undefined ? [] : [name, ...rest]);
+    return;
+  }
+  if (command === 'activate') {
+    activateCommand(name, rest);
     return;
   }
   recordCall(command, name, rest);
