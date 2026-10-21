@@ -536,6 +536,59 @@ test('Codex recorder marks an external hold with kind external', () => {
   assert.equal(hasKey(holds()[1], 'kind'), false);
   assert.equal(hasKey(get(progress(), 'hold'), 'kind'), false);
 });
+// ---- argument preparation (record-args joinMarkWords, prepareUnitArgs) ----
+test('unit start folds a lowercase unit id', () => {
+  const f = fixture();
+  fs.writeFileSync(
+    path.join(f.root, 'docs', 'plan.md'),
+    '## Work units\n- [ ] U1 one [unit: U1 scope=plugin/** oracle=true]\n',
+  );
+  const init = record(f, ['unit', 'init', 'docs/plan.md']);
+  assert.equal(init.status, 0, init.stderr);
+  const start = record(f, ['unit', 'start', 'u1']);
+  assert.equal(start.status, 0, start.stderr);
+  assert.equal(start.stdout, 'amber: unit U1 -> running\n');
+  const progress = parseJson(
+    fs.readFileSync(path.join(f.root, '.amber', 'progress.json'), 'utf8'),
+  );
+  assert.equal(get(progress, 'units', 'U1', 'status'), 'running');
+  const starts = ledger(f).filter((r) => get(r, 'trigger') === 'unit-start');
+  assert.equal(starts.length, 1);
+  assert.equal(get(starts, 0, 'unit'), 'U1');
+});
+test('unit start refuses a bare number as before', () => {
+  const f = fixture();
+  const usage = record(f, ['--help']).stdout;
+  const result = record(f, ['unit', 'start', '1']);
+  assert.equal(result.status, 1);
+  assert.equal(
+    result.stderr,
+    'amber: unit start needs a unit id like U1\n' + usage,
+  );
+  assert.deepEqual(ledger(f), []);
+});
+test('mark finding joins two quoted phrases with a dash', () => {
+  const f = fixture(false);
+  const result = record(f, ['mark', 'finding', 'a b', 'c d']);
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(get(ledger(f), 0, 'summary'), 'a b - c d');
+});
+test('mark finding keeps a single phrase as is', () => {
+  const f = fixture(false);
+  const result = record(f, ['mark', 'finding', 'a - b']);
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(get(ledger(f), 0, 'summary'), 'a - b');
+});
+test('mark skip keeps unquoted words as is', () => {
+  const f = fixture(false);
+  const words = ['opening', 'verdict', '-', 'no', 'contract:', 'x'];
+  const result = record(f, ['mark', 'skip', ...words]);
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(
+    get(ledger(f), 0, 'summary'),
+    'opening verdict - no contract: x',
+  );
+});
 const invalidArgs: string[][] = [
   [],
   ['invoke'],

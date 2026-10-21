@@ -56,7 +56,10 @@ function unitCommand(name, rest) {
             '\n');
         return;
     }
-    const id = rest[0];
+    // A lowercase unit id is folded first (record-args prepareUnitArgs); the
+    // strict check below still refuses anything else, a bare number included.
+    const unitArgs = args.prepareUnitArgs(rest);
+    const id = unitArgs[0];
     if (!/^U\d+$/.test(id || '') || id === undefined) {
         throw new Error('unit ' + command + ' needs a unit id like U1\n' + USAGE);
     }
@@ -82,7 +85,7 @@ function unitCommand(name, rest) {
         }
         return;
     }
-    const text = args.optionText(rest.slice(1), command === 'hold' ? '--reason' : '--evidence');
+    const text = args.optionText(unitArgs.slice(1), command === 'hold' ? '--reason' : '--evidence');
     // verified and failed carry the evidence the ledger audits: a missing or
     // blank --evidence, or a flag the command does not read (its text would be
     // dropped silently), refuses the transition before anything is written.
@@ -90,7 +93,7 @@ function unitCommand(name, rest) {
         const accepted = command === 'verified'
             ? ['--evidence', '--out-of-scope']
             : ['--evidence'];
-        const unknown = rest
+        const unknown = unitArgs
             .slice(1)
             .filter((a) => a.startsWith('--') && !accepted.includes(a));
         const problems = [];
@@ -123,7 +126,7 @@ function unitCommand(name, rest) {
             boundaryRel: info.boundaryRel,
             preexisting: p.preexisting,
             baselineCommit: typeof p.baseline_commit === 'string' ? p.baseline_commit : null,
-            declarations: scope.parseDeclarations(rest.slice(1)),
+            declarations: scope.parseDeclarations(unitArgs.slice(1)),
         };
         const result = scope.check(options);
         if (result.undeclared.length > 0) {
@@ -234,6 +237,10 @@ function doneCommand(rest) {
 function recordCall(command, name, rest) {
     const invoked = command === 'invoke' ? args.invokedSkillOf(name) : null;
     const mark = command === 'mark' ? args.markKindOf(name) : null;
+    // Two quoted phrases become "<a> - <b>" (record-args joinMarkWords); S3
+    // then folds separator and unit-id variants with prepareMarkText, the same
+    // way as a Claude Code Skill call.
+    const markText = mark !== null ? args.joinMarkWords(rest) : '';
     let skill;
     let skillArgs;
     let recorded;
@@ -242,9 +249,9 @@ function recordCall(command, name, rest) {
         skillArgs = rest.join(' ').trim();
         recorded = 'invoke ' + invoked;
     }
-    else if (mark !== null && rest.join(' ').trim()) {
+    else if (mark !== null && markText) {
         skill = 'amber:mark';
-        skillArgs = mark + ' - ' + rest.join(' ').trim();
+        skillArgs = mark + ' - ' + markText;
         recorded = 'mark ' + mark;
     }
     else {

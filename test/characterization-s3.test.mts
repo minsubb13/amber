@@ -807,6 +807,72 @@ test('a hold still leaves its ledger row when progress.json has null units', () 
   );
 });
 
+// ---- mark argument preparation (record-args prepareMarkText) ----
+
+test('mark accepts a unicode dash as the kind separator', () => {
+  const f = fixture({ contract: false });
+  mark(f, 'finding — x — y');
+  assert.deepEqual(
+    rows(f.home).map((r) => [get(r, 'trigger'), get(r, 'summary')]),
+    [['finding', 'x — y']],
+  );
+});
+
+test('mark hold folds a lowercase unit id', () => {
+  const f = fixture();
+  writeProgress(f, progressFile({ U1: unit() }));
+  mark(f, 'hold – u1 – r');
+  const p = readJson(path.join(f.root, '.amber', 'progress.json'));
+  assert.deepEqual(
+    [get(p, 'hold', 'unit'), get(p, 'hold', 'reason')],
+    ['U1', 'r'],
+  );
+  assert.deepEqual(
+    rows(f.home).map((r) => [
+      get(r, 'trigger'),
+      get(r, 'unit'),
+      get(r, 'reason'),
+      get(r, 'summary'),
+    ]),
+    [['unit-hold', 'U1', 'r', 'u1 – r']],
+  );
+});
+
+test('a canonical mark leaves the ledger row unchanged', () => {
+  const f = fixture();
+  writeProgress(f, progressFile({ U1: unit() }));
+  mark(f, 'hold - U1 - r');
+  mark(f, 'skip - opening verdict - no contract: x');
+  assert.deepEqual(
+    rows(f.home).map((r) => [
+      get(r, 'trigger'),
+      get(r, 'unit'),
+      get(r, 'reason'),
+      get(r, 'summary'),
+    ]),
+    [
+      ['unit-hold', 'U1', 'r', 'U1 - r'],
+      ['skip', undefined, undefined, 'opening verdict - no contract: x'],
+    ],
+  );
+});
+
+test('a bare-number hold stays unitless as before', () => {
+  const f = fixture();
+  writeProgress(f, progressFile({ U1: unit() }));
+  mark(f, 'hold - 1 - r');
+  const p = readJson(path.join(f.root, '.amber', 'progress.json'));
+  assert.equal(get(p, 'hold', 'unit'), null);
+  assert.deepEqual(
+    rows(f.home).map((r) => [
+      get(r, 'trigger'),
+      get(r, 'unit'),
+      get(r, 'summary'),
+    ]),
+    [['unit-hold', null, '1 - r']],
+  );
+});
+
 // ---- crashes ----
 
 test('a crash that cannot be recorded stays silent', () => {
