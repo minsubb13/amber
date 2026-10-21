@@ -4094,3 +4094,237 @@ const sessionState = (home: string, sessionId: string): unknown => {
     fs.existsSync(log) ? fs.readFileSync(log, 'utf8') : 'no log',
   );
 }
+
+// ---- phase: planning and set open a session phase; skip, the pointer and the release close it ----
+{
+  const home = freshHome('phase');
+  const zone = makeZone('phase', null, null);
+  const zoneReal = fs.realpathSync(zone);
+  fs.mkdirSync(path.join(zone, 'docs'));
+  fs.writeFileSync(path.join(zone, 'notes.txt'), 'before planning\n');
+  const s0 = (id: string, source?: string, cwd = zone): unknown =>
+    contextOf(
+      runHook(
+        'S0',
+        {
+          session_id: id,
+          cwd,
+          model: 'm',
+          ...(source === undefined ? {} : { source }),
+        },
+        home,
+      ).out,
+    );
+  const s3 = (id: string, skill: string, args?: string, cwd = zone): HookRun =>
+    runHook(
+      'S3',
+      {
+        session_id: id,
+        cwd,
+        hook_event_name: 'PreToolUse',
+        tool_name: 'Skill',
+        tool_input: { skill, ...(args === undefined ? {} : { args }) },
+      },
+      home,
+    );
+  const phaseOf = (id: string): unknown => get(sessionState(home, id), 'phase');
+
+  s0('ph-1', 'startup');
+  s3('ph-1', 'amber:planning', 'phase gate');
+  let ph = phaseOf('ph-1');
+  check(
+    'planning record opens a planning phase in the zone with a status snapshot',
+    get(ph, 'state') === 'planning' &&
+      get(ph, 'zone') === zoneReal &&
+      /^\d{4}-\d{2}-\d{2}T/.test(stringAt(ph, 'since')) &&
+      joined(get(ph, 'snapshot')) === 'notes.txt',
+    JSON.stringify(ph),
+  );
+  check(
+    'planning record leaves one ledger row, the invocation itself',
+    ledger(home).length === 1 &&
+      get(ledger(home), 0, 'trigger') === 'skill-invocation',
+    JSON.stringify(ledger(home)),
+  );
+  const since = stringAt(ph, 'since');
+  fs.writeFileSync(path.join(zone, 'shell.txt'), 'written by a shell\n');
+  fs.writeFileSync(path.join(zone, 'docs', 'x-contract.md'), '# draft\n');
+  s3('ph-1', 'set');
+  ph = phaseOf('ph-1');
+  check(
+    "set record advances the phase and keeps planning's start and snapshot",
+    get(ph, 'state') === 'set' &&
+      get(ph, 'since') === since &&
+      joined(get(ph, 'snapshot')) === 'notes.txt',
+    JSON.stringify(ph),
+  );
+  const compact = stringOf(s0('ph-1', 'compact'));
+  check(
+    'S0 on compact carries the open phase and briefs it in one line',
+    get(phaseOf('ph-1'), 'state') === 'set' &&
+      /^amber: no active contract in this zone\./.test(compact) &&
+      /amber: set phase since \S+ is still open in this zone: file writes outside planning artifacts/.test(
+        compact,
+      ) &&
+      /stay blocked until a skip record \(amber:mark\) or an approved contract closes it\./.test(
+        compact,
+      ),
+    compact.slice(0, 700),
+  );
+  const elsewhere = stringOf(s0('ph-1', 'resume', zoneEmpty));
+  check(
+    'S0 in another zone carries the phase but briefs no phase line there',
+    get(phaseOf('ph-1'), 'zone') === zoneReal && !/phase since/.test(elsewhere),
+    elsewhere.slice(0, 300),
+  );
+  check(
+    'S0 without a phase briefs no phase line',
+    !/phase since/.test(stringOf(s0('ph-0', 'resume'))),
+  );
+  s3(
+    'ph-1',
+    'amber:mark',
+    'skip - opening verdict - no contract: a doc touch-up',
+  );
+  const recs = ledger(home);
+  const exit = recs[recs.length - 1];
+  check(
+    'skip record closes the phase and keeps the rest of the session state',
+    !has(sessionState(home, 'ph-1'), 'phase') &&
+      get(sessionState(home, 'ph-1'), 'model') === 'm',
+    JSON.stringify(sessionState(home, 'ph-1')),
+  );
+  check(
+    'skip leaves a phase-exit row after the skip row naming what changed outside planning artifacts',
+    recs.length === 4 &&
+      get(recs, 2, 'trigger') === 'skip' &&
+      get(exit, 'trigger') === 'phase-exit' &&
+      get(exit, 'phase') === 'set' &&
+      get(exit, 'since') === since &&
+      get(exit, 'exit') === 'skip' &&
+      joined(get(exit, 'changed')) === 'shell.txt' &&
+      get(exit, 'changed_count') === 1 &&
+      get(exit, 'summary') ===
+        'set phase exit (skip): 1 path(s) changed outside planning artifacts' &&
+      get(exit, 'model') === 'm',
+    JSON.stringify(recs),
+  );
+  s3('ph-1', 'amber:mark', 'skip - declined opening - operator says go');
+  check(
+    'a skip without an open phase records no phase-exit row',
+    ledger(home).length === 5 && get(ledger(home), 4, 'trigger') === 'skip',
+    JSON.stringify(ledger(home).slice(4)),
+  );
+  s3('ph-2', 'planning');
+  s3('ph-1', 'amber:mark', 'skip - opening verdict - no contract: again');
+  check(
+    "one session's skip leaves another session's phase open",
+    get(phaseOf('ph-2'), 'state') === 'planning' && ledger(home).length === 7,
+  );
+  s3(
+    'ph-2',
+    'amber:mark',
+    'skip - opening verdict - no contract: x',
+    zoneEmpty,
+  );
+  check(
+    'a skip recorded in another zone leaves the phase of this zone open',
+    get(phaseOf('ph-2'), 'state') === 'planning',
+  );
+  runHook(
+    'S1',
+    { session_id: 'ph-3', cwd: zone, prompt: '/amber:planning typed call' },
+    home,
+  );
+  check(
+    'typed /amber:planning opens the phase as the Skill record does',
+    get(phaseOf('ph-3'), 'state') === 'planning' &&
+      get(phaseOf('ph-3'), 'zone') === zoneReal,
+    JSON.stringify(phaseOf('ph-3')),
+  );
+  fs.writeFileSync(
+    path.join(home, 'state', 'session-ph-bad.json'),
+    JSON.stringify({ model: 'm', phase: { state: 'planning', zone: 7 } }),
+  );
+  s3('ph-bad', 'amber:mark', 'skip - opening verdict - no contract: y');
+  check(
+    'a malformed phase field is read as no phase',
+    get(ledger(home), ledger(home).length - 1, 'trigger') === 'skip' &&
+      !/phase since/.test(stringOf(s0('ph-bad', 'resume'))),
+  );
+
+  // S2: a phase still open when the contract is released ends with the run.
+  const released = makeZone('phase-release', BOUNDARY, {
+    v: 1,
+    boundary: 'test-boundary.md',
+    ratified_by: 'operator',
+    ratified_at: '2026-10-21',
+  });
+  runHook('S0', { session_id: 'ph-r', cwd: released, model: 'm' }, home);
+  register(released, home, 'ph-r');
+  s3('ph-r', 'set', undefined, released);
+  check(
+    'set record under a contract opens the phase in that zone',
+    get(phaseOf('ph-r'), 'state') === 'set' &&
+      get(phaseOf('ph-r'), 'zone') === fs.realpathSync(released),
+    JSON.stringify(phaseOf('ph-r')),
+  );
+  fs.writeFileSync(
+    path.join(released, '.amber', 'progress.json'),
+    JSON.stringify({
+      v: 1,
+      contract: 'test-boundary.md',
+      plan: 'plan.md',
+      units: {},
+    }),
+  );
+  const ok = done(released, home, OK_DONE);
+  const before = ledger(home).length;
+  const pass = runHook(
+    'S2',
+    {
+      session_id: 'ph-r',
+      cwd: released,
+      hook_event_name: 'Stop',
+      stop_hook_active: false,
+      last_assistant_message: 'completion report body',
+    },
+    home,
+  ).out;
+  const tail = ledger(home).slice(before);
+  check(
+    'a passed completion releases the contract and closes the phase with a release row',
+    ok.status === 0 &&
+      pass === null &&
+      !fs.existsSync(path.join(released, '.amber', 'active.json')) &&
+      !has(sessionState(home, 'ph-r'), 'phase') &&
+      tail.length === 2 &&
+      get(tail, 0, 'gate') === 'passed' &&
+      get(tail, 1, 'trigger') === 'phase-exit' &&
+      get(tail, 1, 'exit') === 'release' &&
+      get(tail, 1, 'phase') === 'set' &&
+      joined(get(tail, 1, 'changed')) === '' &&
+      get(tail, 1, 'cwd') === fs.realpathSync(released),
+    ok.stderr + JSON.stringify(tail),
+  );
+
+  // The audit reads a ledger with phase-exit rows as it reads any other.
+  const transcripts = path.join(home, 'no-transcripts');
+  fs.mkdirSync(transcripts, { recursive: true });
+  const audit = spawnSync(
+    'node',
+    [path.join(PLUGIN, 'scripts', 'audit.cjs'), 'summary'],
+    {
+      env: { ...process.env, AMBER_HOME: home, AMBER_TRANSCRIPTS: transcripts },
+      encoding: 'utf8',
+      timeout: 20000,
+    },
+  );
+  check(
+    'audit summary counts phase-exit rows and reports as before',
+    audit.status === 0 &&
+      /by_trigger: .*phase-exit=2/.test(audit.stdout) &&
+      /skips: /.test(audit.stdout),
+    audit.stdout + audit.stderr,
+  );
+}

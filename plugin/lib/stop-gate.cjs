@@ -15,18 +15,22 @@ const guards = require("./guards.cjs");
 const ledger = require("./ledger.cjs");
 const model = require("./progress-model.cjs");
 const ownership = require("./ownership.cjs");
+const phaseStore = require("./phase-store.cjs");
 const store = require("./progress-store.cjs");
 const state = require("./state-store.cjs");
 const text = require("./hook-text.cjs");
 const zone = require("./zone.cjs");
 const REQUEST_REVIEW_TARGET = 'request';
 /**
- * Release on a passed completion: the pointer and progress file go, and the
- * session forgets its briefing so a re-approved contract briefs again.
+ * Release on a passed completion: the pointer and progress file go, the
+ * session forgets its briefing so a re-approved contract briefs again, and a
+ * phase still open here (a set record never followed by a tool call that
+ * found the pointer) is closed with its phase-exit row.
  */
 function releaseContract(contract, sessionId) {
     state.tryUnlink(contract.pointerPath);
     state.tryUnlink(store.progressPath(contract.root));
+    phaseStore.exit({ session_id: sessionId, cwd: contract.root }, contract.root, 'release');
     const stateFile = state.sessionStatePath(sessionId);
     try {
         const sessionState = JSON.parse(fs.readFileSync(stateFile, 'utf8'));

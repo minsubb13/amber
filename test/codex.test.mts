@@ -903,3 +903,40 @@ test('hook configuration routes Codex apply_patch and resume to shared handlers'
     ),
   );
 });
+
+test('Codex invoke planning opens the phase and mark skip closes it with a phase-exit row', () => {
+  const f = fixture(false);
+  hook(f, 'SessionStart');
+  const invoked = record(f, ['invoke', 'planning', 'phase gate']);
+  assert.equal(invoked.status, 0, invoked.stderr);
+  const stateFile = path.join(
+    f.home,
+    'state',
+    'session-' + f.session + '.json',
+  );
+  const phase = get(parseJson(fs.readFileSync(stateFile, 'utf8')), 'phase');
+  assert.equal(get(phase, 'state'), 'planning');
+  assert.equal(get(phase, 'zone'), fs.realpathSync(f.root));
+  assert.deepEqual(get(phase, 'snapshot'), []);
+  assert.equal(ledger(f).length, 1);
+  fs.writeFileSync(path.join(f.root, 'plugin', 'shell.cjs'), 'shell\n');
+  const skipped = record(f, [
+    'mark',
+    'skip',
+    'opening verdict - no contract: fixture',
+  ]);
+  assert.equal(skipped.status, 0, skipped.stderr);
+  const rows = ledger(f);
+  assert.equal(rows.length, 3);
+  assert.equal(get(rows, 1, 'trigger'), 'skip');
+  assert.equal(get(rows, 2, 'trigger'), 'phase-exit');
+  assert.equal(get(rows, 2, 'phase'), 'planning');
+  assert.equal(get(rows, 2, 'exit'), 'skip');
+  assert.deepEqual(get(rows, 2, 'changed'), ['plugin/shell.cjs']);
+  assert.equal(get(rows, 2, 'session_id'), f.session);
+  assert.equal(get(rows, 2, 'model'), 'gpt-fixture-model');
+  assert.equal(
+    'phase' in (parseJson(fs.readFileSync(stateFile, 'utf8')) as object),
+    false,
+  );
+});
