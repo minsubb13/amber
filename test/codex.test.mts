@@ -903,3 +903,86 @@ test('hook configuration routes Codex apply_patch and resume to shared handlers'
     ),
   );
 });
+
+test('Codex invoke planning opens the phase and mark skip closes it with a phase-exit row', () => {
+  const f = fixture(false);
+  hook(f, 'SessionStart');
+  const invoked = record(f, ['invoke', 'planning', 'phase gate']);
+  assert.equal(invoked.status, 0, invoked.stderr);
+  const stateFile = path.join(
+    f.home,
+    'state',
+    'session-' + f.session + '.json',
+  );
+  const phase = get(parseJson(fs.readFileSync(stateFile, 'utf8')), 'phase');
+  assert.equal(get(phase, 'state'), 'planning');
+  assert.equal(get(phase, 'zone'), fs.realpathSync(f.root));
+  assert.deepEqual(get(phase, 'snapshot'), []);
+  assert.equal(ledger(f).length, 1);
+  fs.writeFileSync(path.join(f.root, 'plugin', 'shell.cjs'), 'shell\n');
+  const skipped = record(f, [
+    'mark',
+    'skip',
+    'opening verdict - no contract: fixture',
+  ]);
+  assert.equal(skipped.status, 0, skipped.stderr);
+  const rows = ledger(f);
+  assert.equal(rows.length, 3);
+  assert.equal(get(rows, 1, 'trigger'), 'skip');
+  assert.equal(get(rows, 2, 'trigger'), 'phase-exit');
+  assert.equal(get(rows, 2, 'phase'), 'planning');
+  assert.equal(get(rows, 2, 'exit'), 'skip');
+  assert.deepEqual(get(rows, 2, 'changed'), ['plugin/shell.cjs']);
+  assert.equal(get(rows, 2, 'session_id'), f.session);
+  assert.equal(get(rows, 2, 'model'), 'gpt-fixture-model');
+  assert.equal(
+    hasKey(parseJson(fs.readFileSync(stateFile, 'utf8')), 'phase'),
+    false,
+  );
+});
+
+test('Codex apply_patch is gated by the phase until mark skip', () => {
+  const f = fixture(false);
+  hook(f, 'SessionStart');
+  assert.equal(record(f, ['invoke', 'planning']).status, 0);
+  const source = wrapped('*** Add File: plugin/new.cjs\n+new');
+  const denied = patch(f, source);
+  assert.equal(at(denied, 'hookSpecificOutput', 'permissionDecision'), 'deny');
+  assert.match(
+    textAt(denied, 'hookSpecificOutput', 'permissionDecisionReason'),
+    /^amber: planning phase open since \S+: write target plugin\/new\.cjs is not a planning artifact/,
+  );
+  assert.equal(
+    patch(f, wrapped('*** Add File: docs/2026-10-21-x-contract.md\n+draft')),
+    null,
+  );
+  assert.equal(
+    patch(
+      f,
+      wrapped(
+        '*** Add File: ' + path.join(f.root, 'docs', 'x-plan.md') + '\n+p',
+      ),
+    ),
+    null,
+  );
+  const malformed = patch(f, wrapped('*** Unknown File: plugin/x\n+x'));
+  assert.match(
+    textAt(malformed, 'hookSpecificOutput', 'permissionDecisionReason'),
+    /cannot inspect apply_patch while the planning phase is open/,
+  );
+  assert.equal(
+    hook(f, 'PreToolUse', {
+      tool_name: 'Bash',
+      tool_use_id: 'call-shell',
+      tool_input: { command: 'echo new > plugin/new.cjs' },
+    }),
+    null,
+  );
+  assert.equal(
+    record(f, ['mark', 'skip', 'opening verdict - no contract: fixture'])
+      .status,
+    0,
+  );
+  assert.equal(patch(f, source), null);
+  assert.equal(ledger(f).length, 3);
+});

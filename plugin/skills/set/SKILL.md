@@ -15,6 +15,7 @@ understanding, waits for the operator's approval utterance (`protocol.md`
 
 - Edit the contract only before the pointer exists; the tamper guard freezes it
   afterward while the plan stays editable.
+- Until the pointer exists, file tools write only planning artifacts in this zone (the contract, plan, check script, review verdict and mission files; never `.amber/`), as during `planning`: keep drafts in `docs/`, and know that the pointer closes the phase with a ledger exit row listing what shell commands changed meanwhile.
 - After the pointer exists the contract is never edited, not even at completion: what is left behind, what waits on whose judgment, and the next action go to the plan's `## Progress log` during the run and to the completion report (`What you need to do`, `What this does not answer`) at the end; a plan-less contract uses the report alone.
 - The write list is scaffolding; the forbidden rows are the real boundary.
 
