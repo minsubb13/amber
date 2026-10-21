@@ -24,7 +24,9 @@
 //                           the run when it runs a unit command or the
 //                           completion signal
 // No active contract (no .amber/active.json at the zone root) means every
-// enforcement path is silent. Unexpected hook crashes fail open and leave a
+// enforcement path is silent, except the phase gate: a session that recorded
+// planning or set writes only planning artifacts in that zone until a skip
+// record or the pointer closes the phase. Unexpected hook crashes fail open and leave a
 // breadcrumb in sensor-failures.log; broken contract state fails closed with
 // an actionable reason.
 //

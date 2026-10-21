@@ -940,3 +940,49 @@ test('Codex invoke planning opens the phase and mark skip closes it with a phase
     false,
   );
 });
+
+test('Codex apply_patch is gated by the phase until mark skip', () => {
+  const f = fixture(false);
+  hook(f, 'SessionStart');
+  assert.equal(record(f, ['invoke', 'planning']).status, 0);
+  const source = wrapped('*** Add File: plugin/new.cjs\n+new');
+  const denied = patch(f, source);
+  assert.equal(at(denied, 'hookSpecificOutput', 'permissionDecision'), 'deny');
+  assert.match(
+    textAt(denied, 'hookSpecificOutput', 'permissionDecisionReason'),
+    /^amber: planning phase open since \S+: write target plugin\/new\.cjs is not a planning artifact/,
+  );
+  assert.equal(
+    patch(f, wrapped('*** Add File: docs/2026-10-21-x-contract.md\n+draft')),
+    null,
+  );
+  assert.equal(
+    patch(
+      f,
+      wrapped(
+        '*** Add File: ' + path.join(f.root, 'docs', 'x-plan.md') + '\n+p',
+      ),
+    ),
+    null,
+  );
+  const malformed = patch(f, wrapped('*** Unknown File: plugin/x\n+x'));
+  assert.match(
+    textAt(malformed, 'hookSpecificOutput', 'permissionDecisionReason'),
+    /cannot inspect apply_patch while the planning phase is open/,
+  );
+  assert.equal(
+    hook(f, 'PreToolUse', {
+      tool_name: 'Bash',
+      tool_use_id: 'call-shell',
+      tool_input: { command: 'echo new > plugin/new.cjs' },
+    }),
+    null,
+  );
+  assert.equal(
+    record(f, ['mark', 'skip', 'opening verdict - no contract: fixture'])
+      .status,
+    0,
+  );
+  assert.equal(patch(f, source), null);
+  assert.equal(ledger(f).length, 3);
+});

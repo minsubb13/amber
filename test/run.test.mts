@@ -4328,3 +4328,260 @@ const sessionState = (home: string, sessionId: string): unknown => {
     audit.stdout + audit.stderr,
   );
 }
+
+// ---- E1 phase gate: an open phase locks file-tool writes to planning artifacts until a skip or the pointer ----
+{
+  const home = freshHome('phase-e1');
+  const zone = makeZone('phase-e1', null, null);
+  for (const dir of ['src', 'docs/missions', 'contracts']) {
+    fs.mkdirSync(path.join(zone, dir), { recursive: true });
+  }
+  fs.writeFileSync(path.join(zone, '.gitignore'), '.amber/\n');
+  const call = (
+    id: string,
+    tool: string,
+    toolInput: unknown,
+    extra: Readonly<Record<string, unknown>> = {},
+    cwd = zone,
+  ): unknown =>
+    runHook(
+      'E1',
+      {
+        session_id: id,
+        cwd,
+        hook_event_name: 'PreToolUse',
+        tool_name: tool,
+        tool_input: toolInput,
+        ...extra,
+      },
+      home,
+    ).out;
+  const write = (
+    id: string,
+    rel: string,
+    extra: Readonly<Record<string, unknown>> = {},
+  ): unknown => call(id, 'Write', { file_path: path.join(zone, rel) }, extra);
+  // The reason of a refusal, or the answer's text when there is none, so a
+  // gate that lets a call through fails the check instead of the suite.
+  const reasonOf = (out: unknown): string =>
+    isDeny(out)
+      ? stringAt(out, 'hookSpecificOutput', 'permissionDecisionReason')
+      : JSON.stringify(out);
+  const s3 = (id: string, skill: string, args?: string, cwd = zone): HookRun =>
+    runHook(
+      'S3',
+      {
+        session_id: id,
+        cwd,
+        hook_event_name: 'PreToolUse',
+        tool_name: 'Skill',
+        tool_input: { skill, ...(args === undefined ? {} : { args }) },
+      },
+      home,
+    );
+  const wrapped = (body: string): string =>
+    '*** Begin Patch\n' + body + '\n*** End Patch';
+
+  runHook('S0', { session_id: 'g1', cwd: zone, model: 'm' }, home);
+  check(
+    'E1 without a phase lets a source write through',
+    write('g1', 'src/a.ts') === null,
+  );
+  s3('g1', 'amber:planning', 'gate');
+  const denied = write('g1', 'src/a.ts');
+  check(
+    'E1 refuses a source write while the planning phase is open',
+    isDeny(denied),
+    JSON.stringify(denied),
+  );
+  check(
+    'the refusal names the phase, its start, the target, the artifact patterns and both ways out',
+    /^amber: planning phase open since \d{4}-\d{2}-\d{2}T\S+: write target src\/a\.ts is not a planning artifact \(\*\*\/\*-contract\.md, \*\*\/\*-plan\.md, \*\*\/\*-check\.sh, \*\*\/\*-review\*\.md, \*\*\/missions\/\*\.md\)\./.test(
+      reasonOf(denied),
+    ) &&
+      /amber:mark skill \(`skip - opening verdict - no contract: <reason>`; on Codex `node \S+record\.cjs mark skip 'opening verdict - no contract: <reason>'`\)/.test(
+        reasonOf(denied),
+      ) &&
+      /or finish set and wait for the operator's approval - the pointer it creates releases this gate\.$/.test(
+        reasonOf(denied),
+      ),
+    reasonOf(denied),
+  );
+  const artifacts: [string, string][] = [
+    ['Write', 'docs/2026-10-21-x-contract.md'],
+    ['Edit', 'docs/x-plan.md'],
+    ['Write', 'contracts/x-check.sh'],
+    ['Write', 'docs/x-review.md'],
+    ['Write', 'docs/x-review-r2.md'],
+    ['Write', 'docs/missions/x.md'],
+    ['Write', 'x-contract.md'],
+  ];
+  check(
+    'E1 lets planning artifacts through anywhere in the zone',
+    artifacts.every(
+      ([tool, rel]) =>
+        call('g1', tool, { file_path: path.join(zone, rel) }) === null,
+    ),
+    JSON.stringify(
+      artifacts.map(([tool, rel]) =>
+        call('g1', tool, { file_path: path.join(zone, rel) }),
+      ),
+    ),
+  );
+  const others = [
+    'src/x-contract.ts',
+    'README.md',
+    'contracts/x-check.py',
+    'docs/notes.md',
+    'missions.md',
+    'docs/missions/sub/x.md',
+  ];
+  check(
+    "E1 refuses writes to the zone's other paths whatever their name",
+    others.every((rel) => isDeny(write('g1', rel))),
+    JSON.stringify(others.map((rel) => write('g1', rel))),
+  );
+  const stateDeny = write('g1', '.amber/active.json');
+  check(
+    'E1 refuses a .amber/ write during the phase with the state reason',
+    isDeny(stateDeny) &&
+      /^amber: planning phase open since \S+: \.amber\/active\.json is the run's state under \.amber\/, written only by `node \S+record\.cjs` and the hooks$/.test(
+        reasonOf(stateDeny),
+      ),
+    reasonOf(stateDeny),
+  );
+  check(
+    'E1 refuses a draft contract kept under .amber/ (the state check precedes the artifact patterns)',
+    isDeny(write('g1', '.amber/drafts/x-contract.md')) &&
+      /run's state under \.amber\//.test(
+        reasonOf(write('g1', '.amber/drafts/x-contract.md')),
+      ),
+  );
+  check(
+    'E1 lets a write outside the zone through',
+    call('g1', 'Write', { file_path: path.join(BASE, 'phase-outside.txt') }) ===
+      null &&
+      call('g1', 'Write', { file_path: '../phase-outside-2.txt' }) === null,
+  );
+  check(
+    'E1 lets Bash and Monitor through during the phase',
+    call('g1', 'Bash', { command: 'echo hi > src/a.ts' }) === null &&
+      call('g1', 'Monitor', { command: 'echo hi > src/a.ts' }) === null,
+  );
+  check(
+    'E1 applies the phase to the session that opened it only',
+    write('g2', 'src/a.ts') === null,
+  );
+  check(
+    "a subagent follows its session's phase",
+    isDeny(
+      write('g1', 'src/a.ts', {
+        agent_id: 'sub-1',
+        agent_type: 'general-purpose',
+      }),
+    ),
+  );
+  check(
+    'NotebookEdit is gated by its notebook path',
+    isDeny(
+      call('g1', 'NotebookEdit', {
+        notebook_path: path.join(zone, 'nb.ipynb'),
+      }),
+    ) &&
+      call('g1', 'NotebookEdit', {
+        notebook_path: path.join(zone, 'docs', 'nb-plan.md'),
+      }) === null,
+  );
+  const mixed = call('g1', 'apply_patch', {
+    command: wrapped(
+      '*** Add File: docs/y-contract.md\n+x\n*** Add File: src/b.ts\n+y',
+    ),
+  });
+  check(
+    'apply_patch with an artifact and a source file is refused for the source file',
+    isDeny(mixed) && /write target src\/b\.ts/.test(reasonOf(mixed)),
+    reasonOf(mixed),
+  );
+  check(
+    'apply_patch touching artifacts only passes',
+    call('g1', 'apply_patch', {
+      command: wrapped('*** Add File: docs/y-contract.md\n+x'),
+    }) === null,
+  );
+  const malformed = call('g1', 'apply_patch', { command: 'not a patch' });
+  check(
+    'a malformed apply_patch fails closed during the phase with its own reason',
+    isDeny(malformed) &&
+      /^amber: cannot inspect apply_patch while the planning phase is open: .*Correct the patch and retry\.$/.test(
+        reasonOf(malformed),
+      ),
+    reasonOf(malformed),
+  );
+  s3('g3', 'planning', undefined, zoneEmpty);
+  check(
+    'a phase opened in another zone does not gate this one',
+    write('g3', 'src/a.ts') === null,
+  );
+  s3('g1', 'set');
+  const setDenied = write('g1', 'src/a.ts');
+  check(
+    'the set phase gates the same way and says so',
+    isDeny(setDenied) &&
+      /^amber: set phase open since/.test(reasonOf(setDenied)),
+    reasonOf(setDenied),
+  );
+  s3('g1', 'amber:mark', 'skip - opening verdict - no contract: ok');
+  check(
+    'after the skip record the source write passes',
+    write('g1', 'src/a.ts') === null,
+  );
+
+  // The pointer is the approval: the next tool call closes the phase.
+  s3('g1', 'amber:planning', 'again');
+  fs.writeFileSync(path.join(zone, 'shell-during.txt'), 'by a shell\n');
+  fs.writeFileSync(path.join(zone, 'docs', 'phase-contract.md'), BOUNDARY);
+  fs.mkdirSync(path.join(zone, '.amber'), { recursive: true });
+  fs.writeFileSync(
+    path.join(zone, '.amber', 'active.json'),
+    JSON.stringify({
+      v: 1,
+      boundary: 'docs/phase-contract.md',
+      ratified_by: 'operator',
+      ratified_at: '2026-10-21',
+    }),
+  );
+  const before = ledger(home).length;
+  const underContract = write('g1', 'plugin/x.cjs');
+  const rows = ledger(home).slice(before);
+  check(
+    'the first tool call that finds the pointer closes the phase as an approval and records what changed meanwhile',
+    underContract === null &&
+      !has(sessionState(home, 'g1'), 'phase') &&
+      rows.length === 1 &&
+      get(rows, 0, 'trigger') === 'phase-exit' &&
+      get(rows, 0, 'exit') === 'approval' &&
+      get(rows, 0, 'phase') === 'planning' &&
+      joined(get(rows, 0, 'changed')) === 'shell-during.txt',
+    JSON.stringify([underContract, rows]),
+  );
+  const srcUnder = write('g1', 'src/a.ts');
+  check(
+    'under the contract the write-scope rules speak, not the phase',
+    isDeny(srcUnder) &&
+      /outside every write-scope/.test(reasonOf(srcUnder)) &&
+      !/phase open since/.test(reasonOf(srcUnder)),
+    reasonOf(srcUnder),
+  );
+  check(
+    'later calls under the contract record no further exit row',
+    ledger(home).length === before + 1,
+  );
+  s3('g1', 'set', undefined, zone);
+  const bashUnder = call('g1', 'Bash', { command: 'git status' });
+  check(
+    'a phase opened under the contract is closed by the next call of any tool',
+    bashUnder === null &&
+      !has(sessionState(home, 'g1'), 'phase') &&
+      get(ledger(home), ledger(home).length - 1, 'exit') === 'approval',
+  );
+}
