@@ -573,6 +573,12 @@ test('mark finding joins two quoted phrases with a dash', () => {
   assert.equal(result.status, 0, result.stderr);
   assert.equal(get(ledger(f), 0, 'summary'), 'a b - c d');
 });
+test('mark finding with an empty word among phrases is not joined', () => {
+  const f = fixture(false);
+  const result = record(f, ['mark', 'finding', 'a b', '', 'c d']);
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(get(ledger(f), 0, 'summary'), 'a b  c d');
+});
 test('mark finding keeps a single phrase as is', () => {
   const f = fixture(false);
   const result = record(f, ['mark', 'finding', 'a - b']);

@@ -38,7 +38,8 @@ const ENV = /(?:(?:env\s+(?:-\S+\s+)*)?(?:[A-Za-z_]\w*=(?:"[^"\n]*"|'[^'\n]*'|\S
     .source;
 const CLI = /(?:node|nodejs)\s+(?:"[^"\n]*record\.cjs"|'[^'\n]*record\.cjs'|\S*record\.cjs)\s+/
     .source;
-const UNIT_CLAIM = new RegExp(SEG + ENV + CLI + /unit\s+claim\s+(U\d+)\b/.source);
+// The claim's unit id is read case-insensitively, as the recorder reads it.
+const UNIT_CLAIM = new RegExp(SEG + ENV + CLI + /unit\s+claim\s+([Uu]\d+)\b/.source);
 // Any unit command or the completion signal, run by the session itself (no
 // agent id): the act that registers the session as a driver of the run.
 const UNIT_CMD = new RegExp(SEG +
@@ -95,8 +96,10 @@ function runBash(input, contract, bashDeny, agentId) {
     }
     if (agentId) {
         const claim = UNIT_CLAIM.exec(command);
-        if (claim)
-            return observeClaim(input, contract, agentId, claim[1] ?? '');
+        if (claim) {
+            const unitId = (claim[1] ?? '').toUpperCase();
+            return observeClaim(input, contract, agentId, unitId);
+        }
     }
     else if (UNIT_CMD.test(command)) {
         ownership.registerSession(input.session_id, contract);

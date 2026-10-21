@@ -2051,6 +2051,26 @@ const sessionState = (home: string, sessionId: string): unknown => {
     brief === null && !get(progress(), 'units', 'U2', 'agent_id'),
     JSON.stringify(brief),
   );
+  const lowerClaim = runHook(
+    'E1',
+    {
+      session_id: 'sub3',
+      cwd: zone,
+      hook_event_name: 'PreToolUse',
+      tool_name: 'Bash',
+      agent_id: 'a11',
+      agent_type: 'general-purpose',
+      tool_input: { command: 'node ' + RECORD_CLI + ' unit claim u2' },
+    },
+    home,
+  ).out;
+  check(
+    'a lowercase unit id in a subagent claim is observed as the unit',
+    lowerClaim === null && get(progress(), 'units', 'U2', 'agent_id') === 'a11',
+    JSON.stringify(lowerClaim) +
+      ' ' +
+      JSON.stringify(get(progress(), 'units', 'U2')),
+  );
 
   const talkStop = runHook(
     'S2',

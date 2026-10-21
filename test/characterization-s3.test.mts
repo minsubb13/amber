@@ -843,17 +843,67 @@ test('a canonical mark leaves the ledger row unchanged', () => {
   writeProgress(f, progressFile({ U1: unit() }));
   mark(f, 'hold - U1 - r');
   mark(f, 'skip - opening verdict - no contract: x');
+  // Whole rows, with the volatile values pinned to their sources: the
+  // timestamp to the ISO form, the rest to the fixture, the machine and the
+  // manifest.
+  const version = get(
+    parseJson(
+      fs.readFileSync(
+        path.join(PLUGIN, '.claude-plugin', 'plugin.json'),
+        'utf8',
+      ),
+    ),
+    'version',
+  );
+  const common = {
+    v: 1,
+    ts: '<iso>',
+    session_id: 's',
+    cwd: f.root,
+    project: path.basename(f.root),
+    host: os.hostname(),
+    model: 'unknown',
+    plugin_version: version,
+  };
+  const pinned = rows(f.home).map((r) => {
+    assert.match(
+      text(get(r, 'ts')),
+      /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/,
+    );
+    const row: Record<string, unknown> = {};
+    const keys = typeof r === 'object' && r !== null ? Object.keys(r) : [];
+    for (const k of keys) row[k] = k === 'ts' ? '<iso>' : get(r, k);
+    return row;
+  });
+  assert.deepEqual(pinned, [
+    {
+      ...common,
+      trigger: 'unit-hold',
+      summary: 'U1 - r',
+      unit: 'U1',
+      reason: 'r',
+      contract: 'boundary.md',
+    },
+    {
+      ...common,
+      trigger: 'skip',
+      summary: 'opening verdict - no contract: x',
+    },
+  ]);
+});
+
+test('a unit range in a hold is not read as a separator', () => {
+  const f = fixture();
+  writeProgress(f, progressFile({ U1: unit() }));
+  mark(f, 'hold - U1\u2013U3 blocked');
+  const p = readJson(path.join(f.root, '.amber', 'progress.json'));
   assert.deepEqual(
-    rows(f.home).map((r) => [
-      get(r, 'trigger'),
-      get(r, 'unit'),
-      get(r, 'reason'),
-      get(r, 'summary'),
-    ]),
-    [
-      ['unit-hold', 'U1', 'r', 'U1 - r'],
-      ['skip', undefined, undefined, 'opening verdict - no contract: x'],
-    ],
+    [get(p, 'hold', 'unit'), get(p, 'hold', 'reason')],
+    [null, 'U1\u2013U3 blocked'],
+  );
+  assert.deepEqual(
+    rows(f.home).map((r) => [get(r, 'unit'), get(r, 'summary')]),
+    [[null, 'U1\u2013U3 blocked']],
   );
 });
 

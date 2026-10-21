@@ -4,11 +4,13 @@
 // kinds and unit commands it accepts, reading an option's words, and the
 // preparation of model-written arguments before the strict checks.
 // The separator a mark text may carry between its parts: the hyphen or colon
-// the mark skill documents, and the Unicode hyphens and dashes (U+2010 to
-// U+2015) and minus sign (U+2212) that pi's edit tool folds to '-' as well.
-// Only the separator after the kind, and after a hold's unit id, is read;
-// the text keeps its own.
-const MARK_SEP = /\s*[-:‐-―−]\s*/;
+// the mark skill documents (spaces optional, as the strict parse allows), and
+// the Unicode hyphens and dashes (U+2010 to U+2015) and minus sign (U+2212)
+// that pi's edit tool folds to '-' as well, read only between spaces so that
+// a range such as "U1–U3" inside the text is not taken for a separator. Only
+// the separator after the kind, and after a hold's unit id, is read; the text
+// keeps its own.
+const MARK_SEP = /(?:\s*[-:]\s*|\s+[‐-―−]\s+)/;
 const MARK_KIND = new RegExp(/^(skip|finding|hold)/.source + MARK_SEP.source);
 const HOLD_UNIT = new RegExp(/^([Uu]\d+)/.source + MARK_SEP.source);
 const USAGE = [
@@ -149,13 +151,12 @@ function markText(text) {
  * given.
  */
 function joinMarkWords(rest) {
-    const words = rest.map((w) => w.trim()).filter((w) => w !== '');
-    const plain = words.join(' ');
-    const phrases = words.length >= 2 && words.every((w) => /\s/.test(w));
+    const plain = rest.join(' ').trim();
+    const phrases = rest.length >= 2 && rest.every((w) => w.trim() !== '' && /\s/.test(w));
     if (phrases && !/\s[-‐-―−]\s/.test(plain)) {
-        return words.join(' - ');
+        return rest.map((w) => w.trim()).join(' - ');
     }
-    return rest.join(' ').trim();
+    return plain;
 }
 /**
  * The arguments of a `record.cjs unit <command>` with a lowercase unit id
