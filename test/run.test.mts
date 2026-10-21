@@ -2693,6 +2693,18 @@ const sessionState = (home: string, sessionId: string): unknown => {
     rows('unit-verified').length === 1 &&
       !has(rows('unit-verified')[0], 'out_of_scope'),
   );
+  const u1Verified = list(get(progress(), 'units', 'U1', 'history')).slice(
+    -1,
+  )[0];
+  check(
+    'verified records the paths the unit changed on its history entry and their count in the ledger row',
+    JSON.stringify(get(u1Verified, 'files')) ===
+      JSON.stringify(['plugin/new.cjs']) &&
+      get(u1Verified, 'files_count') === 1 &&
+      get(rows('unit-verified')[0], 'files_count') === 1 &&
+      !has(rows('unit-verified')[0], 'files'),
+    JSON.stringify(u1Verified) + JSON.stringify(rows('unit-verified')[0]),
+  );
 
   record(['unit', 'start', 'U2']);
   fs.writeFileSync(path.join(zone, 'stray.md'), 'made through the shell\n');
@@ -2747,6 +2759,19 @@ const sessionState = (home: string, sessionId: string): unknown => {
         'path',
       ) === 'stray.md',
     (declared.stderr || '') + JSON.stringify(declRow),
+  );
+  const u2History = list(get(progress(), 'units', 'U2', 'history'));
+  const u2Failed = u2History.find((h) => get(h, 'event') === 'failed');
+  const u2Verified = u2History.slice(-1)[0];
+  check(
+    'a later unit is charged only with the paths changed since the earlier verified unit, and failed carries no files',
+    JSON.stringify(get(u2Verified, 'files')) === JSON.stringify(['stray.md']) &&
+      get(u2Verified, 'files_count') === 1 &&
+      get(declRow, 'files_count') === 1 &&
+      !!u2Failed &&
+      !has(u2Failed, 'files') &&
+      !has(u2Failed, 'files_count'),
+    JSON.stringify(u2History),
   );
 
   // done: a tracked file outside the scope modified through the shell, then reverted

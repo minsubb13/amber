@@ -1,5 +1,5 @@
-// What a boundary document says, without I/O: its machine-enforced rows and
-// its standing-rules section.
+// What a boundary document says, without I/O: its machine-enforced rows, its
+// standing-rules section and its completion-conditions section.
 
 import type { MachineRules } from './types.cjs';
 
@@ -19,14 +19,13 @@ function machineRules(text: string): MachineRules {
 }
 
 /**
- * The body of the `## Standing rules` section, trimmed, or '(none listed)'
- * when the section is missing or empty. The briefing hands it over verbatim.
+ * The body of the `## <title>` section (up to the next `## ` heading),
+ * trimmed, or '(none listed)' when the section is missing or empty. The
+ * briefing hands it over verbatim.
  */
-function standingRules(text: string): string {
+function section(text: string, title: RegExp): string {
   const lines = text.split('\n');
-  const start = lines.findIndex((l) =>
-    /^##\s*standing rules\b/i.test(l.trim()),
-  );
+  const start = lines.findIndex((l) => title.test(l.trim()));
   if (start === -1) return '(none listed)';
   const body: string[] = [];
   for (const line of lines.slice(start + 1)) {
@@ -36,4 +35,14 @@ function standingRules(text: string): string {
   return body.join('\n').trim() || '(none listed)';
 }
 
-export = { machineRules, standingRules };
+/** The `## Standing rules` section. */
+function standingRules(text: string): string {
+  return section(text, /^##\s*standing rules\b/i);
+}
+
+/** The `## Completion conditions` section: what the run has to make true. */
+function completionConditions(text: string): string {
+  return section(text, /^##\s*completion conditions\b/i);
+}
+
+export = { machineRules, standingRules, completionConditions };

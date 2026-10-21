@@ -33,6 +33,13 @@ export interface HistoryEntry {
   by: string;
   note?: string;
   out_of_scope?: unknown;
+  /**
+   * verified, when the scope check ran: the paths the run had changed that
+   * no earlier verified unit carries, sorted, FILES_MAX of them at most.
+   */
+  files?: string[];
+  /** The number of those paths before the cap. */
+  files_count?: number;
 }
 
 export interface Unit {
@@ -125,6 +132,8 @@ export interface EventExtra {
   readonly agent_id?: string;
   readonly evidence?: string;
   readonly out_of_scope?: unknown;
+  /** verified: the unit's new changed paths (newFiles); absent when no scope check ran. */
+  readonly files?: readonly string[] | undefined;
 }
 
 /** Returns the current time as an ISO string. */
