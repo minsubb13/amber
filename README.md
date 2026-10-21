@@ -52,6 +52,26 @@ Add `-l` to install for the current project only. The package loads one extensio
 
 All hosts install from the `release` branch; [RELEASING.md](RELEASING.md) describes how releases are cut.
 
+### Optional pi runtime controls
+
+Amber's enforcement works without runtime helpers. To opt in for one pi process, start:
+
+```sh
+pi --amber-runtime
+# Or try this checkout without installing it:
+pi -e ./plugin/pi/index.ts --amber-runtime
+```
+
+Without `--amber-runtime` (the default), Amber adds no model-switch tool, `/fast` command, fast status, priority payload, tier notices or recovery. No extra package or dependency is needed. This is a pi-only helper, not an enforcement policy; it does not change Claude Code or Codex.
+
+- `switch_model` hands the next response to `openai/gpt-6.1-sol` or `anthropic/claude-opus-5-5`, optionally selecting pi's thinking level. It asks no confirmation, records the switch in the session, and never changes startup defaults. The target must have usable credentials. Amber's contract still applies after a switch.
+- `/fast` reports state; `/fast on` and `/fast off` toggle OpenAI agent-loop priority requests. It starts on in each opted-in process and shows `fast` while on; toggles and the once-only tier notice survive `/reload`. It does not affect other providers, summaries or compaction.
+- The completed response's tier is authoritative. A downgrade or unknown tier warns at most once per process. An HTTP400 naming `service_tier` turns fast off and continues once at default tier, without duplicating pi's native retry. Other errors use normal pi handling. Recovery cannot complete unfinished Amber work.
+
+**Migrating from standalone pi-model-tools:** first run `pi list`, then remove its package with `pi remove <the exact source shown by pi list>` (add `-l` for a project install). If you loaded individual switch-model/fast extension files instead, remove those entries yourself. Restart pi before enabling `--amber-runtime`. Amber detects an existing `switch_model` or `/fast`, warns and disables its optional runtime rather than overriding either; it never edits your settings or uninstalls anything.
+
+**Priority is a request, not a speed guarantee.** Quoted standalone evidence at `814562b`: the corrected real request returned HTTP200 but its completed tier was `default`, not `priority`; an earlier HTTP400 concerned unsupported reasoning, not service tier. Priority execution, speed and quota impact remain unverified. Integration tests use loopback mocks only; see [the evidence](docs/2026-10-21-pi-runtime-evidence.md) and [development instructions](DEVELOPMENT.md#optional-pi-runtime-tests).
+
 ## Start
 
 In your git repository, run `/amber:init` (Claude Code and pi) or `$amber:init` (Codex) once.

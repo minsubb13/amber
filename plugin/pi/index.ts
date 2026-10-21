@@ -29,6 +29,8 @@ import { fileURLToPath } from "node:url";
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 
+import runtime from "./runtime/index.ts";
+
 type HookEvent = "S0" | "S1" | "S2" | "S3" | "E1";
 type HookOutput = Record<string, unknown> | null;
 type Handler = (input: unknown) => HookOutput;
@@ -115,6 +117,7 @@ function skillOfRead(abs: string): string | null {
 }
 
 export default function amber(pi: ExtensionAPI) {
+	runtime(pi);
 	/** Briefings (S0, S1) waiting for the next model request. */
 	let pending: string[] = [];
 	/** Claude's stop_hook_active: this stop follows a continuation S2 asked for. */

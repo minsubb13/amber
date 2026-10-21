@@ -1,0 +1,41 @@
+{
+  "provenance": "verified: single direct HTTPS request, existing ChatGPT OAuth bearer, no SDK retries or refresh",
+  "startedAt": "2026-10-20T23:49:40.385Z",
+  "endpoint": "https://api.openai.com/v1/responses",
+  "payload": {
+    "model": "gpt-6.1-sol",
+    "input": [
+      {
+        "role": "user",
+        "content": [
+          {
+            "type": "input_text",
+            "text": "Reply only OK."
+          }
+        ]
+      }
+    ],
+    "stream": true,
+    "store": false,
+    "reasoning": {
+      "effort": "none"
+    },
+    "service_tier": "priority"
+  },
+  "attempts": 1,
+  "state": "response-recorded",
+  "accepted": false,
+  "reportedTier": null,
+  "httpStatus": 400,
+  "requestId": null,
+  "events": [],
+  "error": {
+    "error": {
+      "message": "Unsupported value: 'none' is not supported with the 'gpt-6.1-sol' model. Supported values are: 'low', 'medium', 'high', 'xhigh', and 'max'.",
+      "type": "invalid_request_error",
+      "param": "reasoning.effort",
+      "code": "unsupported_value"
+    }
+  },
+  "finishedAt": "2026-10-20T23:49:41.326Z"
+}
