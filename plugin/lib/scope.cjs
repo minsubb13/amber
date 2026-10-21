@@ -51,9 +51,10 @@ function parseDeclarations(rest) {
 /**
  * Sorts the changed paths (committed first, then the working tree, each path
  * once; the contract file and .amber/ never count) against the write-scope
- * and the declarations.
+ * and the declarations. Paths in `preRun` were already dirty when the run
+ * began and have changed since; they are marked so the refusal can say so.
  */
-function classify(baseline, lists, writeScopes, boundaryRel, declarations) {
+function classify(baseline, lists, writeScopes, boundaryRel, declarations, preRun) {
     const changed = [];
     const seen = new Set();
     for (const [kind, list] of lists) {
@@ -65,7 +66,7 @@ function classify(baseline, lists, writeScopes, boundaryRel, declarations) {
                 continue;
             }
             seen.add(p);
-            changed.push({ path: p, kind });
+            changed.push(preRun?.has(p) ? { path: p, kind, preRun: true } : { path: p, kind });
         }
     }
     const outside = changed.filter((c) => !glob.inScopes(c.path, writeScopes));
@@ -92,7 +93,11 @@ function refusal(result, contractFile, writeScopes, command) {
             ':',
     ];
     for (const c of result.undeclared) {
-        lines.push('  ' + c.kind.padEnd(12) + ' ' + c.path);
+        lines.push('  ' +
+            c.kind.padEnd(12) +
+            ' ' +
+            c.path +
+            (c.preRun ? '  (already modified before the run began)' : ''));
     }
     lines.push('write-scope: ' + writeScopes.join(', '));
     lines.push('Revert them (`git checkout -- <path>` for tracked changes, delete untracked files, ' +
@@ -101,6 +106,13 @@ function refusal(result, contractFile, writeScopes, command) {
         command +
         '` again. Declared paths are recorded in progress.json and ' +
         'the ledger; whether the change was legitimate stays with you and the operator.');
+    const preRun = result.undeclared.filter((c) => c.preRun).map((c) => c.path);
+    if (preRun.length > 0) {
+        lines.push('Already modified before the run began: ' +
+            preRun.join(', ') +
+            '. Do not `git checkout` these - that would also discard the edit that ' +
+            'was there before the run; restore each to its pre-run content instead.');
+    }
     return lines.join('\n');
 }
 /** Ledger/signal fields for declared out-of-scope files (capped per row). */

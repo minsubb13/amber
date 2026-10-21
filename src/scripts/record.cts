@@ -292,9 +292,8 @@ function unitCommand(name: string | undefined, rest: readonly string[]): void {
       cwd,
       writeScopes: info.writeScopes,
       boundaryRel: info.boundaryRel,
-      preexisting: p.preexisting,
-      baselineCommit:
-        typeof p.baseline_commit === 'string' ? p.baseline_commit : null,
+      boundaryPath: info.boundaryPath,
+      baseline: info.baseline ?? p.baseline ?? null,
       declarations: scope.parseDeclarations(unitArgs.slice(1)),
     };
     const result = scope.check(options);
@@ -408,9 +407,8 @@ function doneCommand(rest: readonly string[]): void {
         cwd,
         writeScopes: info.writeScopes,
         boundaryRel: info.boundaryRel,
-        preexisting: p ? p.preexisting : [],
-        baselineCommit:
-          p && typeof p.baseline_commit === 'string' ? p.baseline_commit : null,
+        boundaryPath: info.boundaryPath,
+        baseline: info.baseline ?? p?.baseline ?? null,
         declarations: scope.parseDeclarations(rest),
       };
       const result = scope.check(options);

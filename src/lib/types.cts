@@ -130,6 +130,8 @@ export type ChangeKind = 'committed' | 'working-tree';
 export interface ChangedPath {
   readonly path: string;
   readonly kind: ChangeKind;
+  /** Set when the path was already dirty when the run began and changed since. */
+  readonly preRun?: boolean;
 }
 
 export interface DeclaredPath {
@@ -149,9 +151,10 @@ export interface ScopeCheckOptions {
   readonly cwd: string;
   readonly writeScopes: string[];
   readonly boundaryRel?: string | null;
-  readonly preexisting?: unknown[] | null;
-  /** progress.json's baseline_commit, the baseline when no commit added the contract file. */
-  readonly baselineCommit?: string | null;
+  /** The contract file's absolute path, for the contract-blob comparison. */
+  readonly boundaryPath?: string | null;
+  /** The run's baseline (pointer first, then progress.json); null when none was recorded. */
+  readonly baseline?: Baseline | null;
   readonly declarations?: Declaration[];
 }
 
