@@ -27,7 +27,7 @@ During U2, an additional strict typecheck against installed pi declarations foun
 
 ## Remaining verification
 
-Full package regressions, fresh-build equality, independent pinned-commit review, final remote push and existing PR #22 verification are recorded in subsequent sections before completion. Raw standalone receipts were copied byte-for-byte under `docs/pi-runtime/` with SHA-256 equality and quoted provenance.
+Full package regressions, fresh-build equality, independent pinned-commit review, normal remote push and existing PR #22 verification are recorded in the subsequent sections and review file. Raw standalone receipts were copied byte-for-byte under `docs/pi-runtime/` with SHA-256 equality and quoted provenance.
 
 ## Full regression verification (U2)
 
@@ -71,6 +71,23 @@ c9843226974419f05b4f1a128314cb257af3fff52213d7351c629b232999d2cc build
 ```
 
 Source checkout remains `814562bccfad5627df342e00678e6763a5d22c1e` with clean git status. No source-repository writes or real probes. Review E3 is dispositioned in the updated plan: supported gh REST head.sha is the same remote-head oracle as unavailable headRefOid. Review E4 is closed only by the delivery receipt below, not by the code-review PASS.
+
+## Delivery receipt and required-condition recheck
+
+Verified normal `git push origin pi-port` (no force) advanced the existing branch from b6b37a3 to `4c97e315d63fe306d1d5008e5cc56ebe50f12f47`. Existing PR https://github.com/minsubb13/amber/pull/22 remained OPEN, head branch pi-port. GitHub REST `pulls/22` head.sha, `git ls-remote origin refs/heads/pi-port`, and local HEAD all returned that same SHA. The final bookkeeping documentation commit is pushed normally afterward; equality to the final HEAD is rechecked before the completion signal.
+
+PR body update used PATCH of the **existing** PR only. The original full pi-port description was retained as the body prefix, mechanically asserted from before/after JSON. Appended sections describe opt-in/default-off behavior, fixed switch interface, /fast recovery and migration, actual **412/412** and **34/34** checks, strict handwritten typechecking, review pin/PASS and the completed-default real-tier limitation. No PR was created, merged or released. No settings were edited or standalone package uninstalled.
+
+Semantic recheck matrix against contract conditions:
+
+1. Flag/default-off: factory advertises boolean false; session_start-only initialization; real-pi registration/payload/error negative controls pass. Dedicated runtime modules, no new dependency, no other-host/shared edits.
+2. Handoff: fixed allowlist/thinking schema; credential-first pi.setModel; transcript/next-request/takeover/defaults assertions in both directions, failures preserve state, model_select attribution checked.
+3. Fast: process defaults/reload/toggle, OpenAI agent-loop injection, completed-tier notice, HTTP400-only one-shot recovery and native retry consumption all pass; historical retry message preserved; no summary/compaction path changed.
+4. Coexistence/enforcement: pre-registration conflict refusal in both load orders; no auto migration. Forbidden writes after both switches remain blocked. Premature done command is refused with units open; S2 incomplete-work continuation and native/non-native recovery do not release the contract or duplicate fast continuation.
+5. Verification/docs: all required package checks and 34 isolated runtime cases pass, strict handwritten adapter/runtime types pass, full-tree fresh build is unchanged. README/DEVELOPMENT describe migration/prerequisites and unverified priority; raw quoted receipts retain byte equality and provenance. No real-provider verification request was sent.
+6. Review/delivery: independent Claude read the pinned source, contract, actual tests, pi internals and evidence read-only; PASS with no MUST-FIX, dispositions in review file. Normal push extends existing PR22 and body is preserved/updated. All unit transitions are verified through record.cjs. Final HEAD/remote equality and clean tree are required again after this documentation commit, immediately before done.
+
+All implementation and test artifacts remain exactly those reviewed at `00be0e0`; subsequent edits are documentation only. Review E1–E4 are addressed by the full-tree build receipt, pinned rerun, equivalent remote oracle, review artifact and delivery receipt above. Optional implementation suggestions were dispositioned without changing source; no re-review of source fixes was needed after PASS.
 
 ## Real-provider limitation (quoted provenance)
 
