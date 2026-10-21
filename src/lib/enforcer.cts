@@ -25,17 +25,20 @@ import zone = require('./zone.cjs');
 import type { ActiveContract, HookInput, HookOutput, Unit } from './types.cjs';
 
 // A unit command or the completion signal at a command position: the start
-// of a shell segment (string start, newline, `;`, `&`, `|`, `(`, a backtick,
-// `{`, `$(`, or a keyword such as `do`, `then`, `exec`), optional `env` and
-// NAME=value prefixes, then node running a path that ends in record.cjs,
-// quoted or not. The former substring match also hit the same words inside
-// prose: contract heredocs, grep arguments, commit messages and, on
-// 2026-10-19, a reviewer session's `node -e` probe of set's step 3 (its
-// bash-deny negative controls quote `--evidence "..."`), which registered
-// that session as a driver and consumed another run's completion signal.
-// A heredoc body line that starts with the command remains a regex limit,
-// as for bash-deny rows. Exported for the tests and the corpus probe.
-const SEG = /(?:^|[\n;&|(`{]|\$\(|\b(?:do|then|else|exec|time)\s)\s*/.source;
+// of a shell segment (string start, newline, `;`, `&`, `|`, `(`, `$(`, or a
+// keyword such as `do`, `then`, `exec`), optional `env` and NAME=value
+// prefixes, then node running a path that ends in record.cjs, quoted or not.
+// A backtick is not a segment start: Markdown inline code in a document
+// heredoc is the common prose form of the command, and backtick command
+// substitution is not a recorded way of running it. The former substring
+// match also hit the same words inside prose: contract heredocs, grep
+// arguments, commit messages and, on 2026-10-19, a reviewer session's
+// `node -e` probe of set's step 3 (its bash-deny negative controls quote
+// `--evidence "..."`), which registered that session as a driver and
+// consumed another run's completion signal. A heredoc body line that starts
+// with the command, and `;` or `(` inside a quoted argument, remain regex
+// limits, as for bash-deny rows. Exported for the tests and the corpus probe.
+const SEG = /(?:^|[\n;&|(]|\$\(|\b(?:do|then|else|exec|time)\s)\s*/.source;
 const ENV =
   /(?:(?:env\s+(?:-\S+\s+)*)?(?:[A-Za-z_]\w*=(?:"[^"\n]*"|'[^'\n]*'|\S*)\s+)*)/
     .source;

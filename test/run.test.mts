@@ -1999,6 +1999,12 @@ const sessionState = (home: string, sessionId: string): unknown => {
       'node -e \'const cases=[[false,"node record.cjs unit verified U1 ' +
         '--evidence \\"x\\""]];console.log(cases)\'',
     ],
+    [
+      'inline code in a heredoc naming the command does not register',
+      "cat > docs/x.md <<'EOF'\n# contract\n- then run `node " +
+        RECORD_CLI +
+        ' unit start U1` once\nEOF',
+    ],
   ];
   prose.forEach(([label, command], i) => {
     const id = 'prose' + String(i);
@@ -2070,6 +2076,30 @@ const sessionState = (home: string, sessionId: string): unknown => {
     JSON.stringify(lowerClaim) +
       ' ' +
       JSON.stringify(get(progress(), 'units', 'U2')),
+  );
+  const inlineBrief = runHook(
+    'E1',
+    {
+      session_id: 'sub4',
+      cwd: zone,
+      hook_event_name: 'PreToolUse',
+      tool_name: 'Bash',
+      agent_id: 'a12',
+      agent_type: 'general-purpose',
+      tool_input: {
+        command:
+          "cat > docs/brief2.md <<'EOF'\nYour first action is `node " +
+          RECORD_CLI +
+          ' unit claim U2`.\nEOF',
+      },
+    },
+    home,
+  ).out;
+  check(
+    'inline code in a heredoc brief naming unit claim does not claim',
+    inlineBrief === null &&
+      get(progress(), 'units', 'U2', 'agent_id') === 'a11',
+    JSON.stringify(inlineBrief),
   );
 
   const talkStop = runHook(
