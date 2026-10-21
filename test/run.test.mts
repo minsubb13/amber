@@ -1975,6 +1975,132 @@ const sessionState = (home: string, sessionId: string): unknown => {
     'an ordinary command does not register',
     !get(sessionState(home, 'talk'), 'run'),
   );
+  // The regexes anchor to the command position: the same words inside prose
+  // (a commit message, a grep argument, a document heredoc, a node -e probe)
+  // register nothing, while the command behind a loop keyword, an env
+  // prefix, a quoted path or a shell variable still does.
+  const prose: [string, string][] = [
+    [
+      'a commit message naming record.cjs does not register',
+      'git commit -m "fix record.cjs done" docs/x.md',
+    ],
+    [
+      'a grep for the unit command does not register',
+      'grep -rn "record.cjs unit init" docs/',
+    ],
+    [
+      'a heredoc quoting a unit command does not register',
+      "cat > docs/x.md <<'EOF'\n# contract\n- the main agent runs node " +
+        RECORD_CLI +
+        ' unit start U1 first\nEOF',
+    ],
+    [
+      'a node -e probe quoting a unit command does not register',
+      'node -e \'const cases=[[false,"node record.cjs unit verified U1 ' +
+        '--evidence \\"x\\""]];console.log(cases)\'',
+    ],
+    [
+      'inline code in a heredoc naming the command does not register',
+      "cat > docs/x.md <<'EOF'\n# contract\n- then run `node " +
+        RECORD_CLI +
+        ' unit start U1` once\nEOF',
+    ],
+  ];
+  prose.forEach(([label, command], i) => {
+    const id = 'prose' + String(i);
+    register(zone, home, id, command);
+    check(label, !get(sessionState(home, id), 'run'));
+  });
+  const commands: [string, string][] = [
+    [
+      'a for loop running the unit command registers',
+      'for u in U1 U2; do node ' + RECORD_CLI + ' unit start $u; done',
+    ],
+    [
+      'an env prefix before node registers',
+      'env GIT_OPTIONAL_LOCKS=0 node ' + RECORD_CLI + ' unit start U1',
+    ],
+    [
+      'a quoted record.cjs path registers',
+      'node "' + RECORD_CLI + '" unit start U1',
+    ],
+    [
+      'a plugin-root variable path registers',
+      'AMBER_HOME=/tmp/h node "$amber_plugin_root/scripts/record.cjs" unit start U1',
+    ],
+  ];
+  commands.forEach(([label, command], i) => {
+    const id = 'cmd' + String(i);
+    register(zone, home, id, command);
+    check(label, get(sessionState(home, id), 'run') === 'test-boundary.md');
+  });
+  const brief = runHook(
+    'E1',
+    {
+      session_id: 'sub2',
+      cwd: zone,
+      hook_event_name: 'PreToolUse',
+      tool_name: 'Bash',
+      agent_id: 'a10',
+      agent_type: 'general-purpose',
+      tool_input: {
+        command:
+          "cat > docs/brief.md <<'EOF'\nFirst run: node " +
+          RECORD_CLI +
+          ' unit claim U2\nEOF',
+      },
+    },
+    home,
+  ).out;
+  check(
+    'a heredoc brief quoting unit claim does not claim',
+    brief === null && !get(progress(), 'units', 'U2', 'agent_id'),
+    JSON.stringify(brief),
+  );
+  const lowerClaim = runHook(
+    'E1',
+    {
+      session_id: 'sub3',
+      cwd: zone,
+      hook_event_name: 'PreToolUse',
+      tool_name: 'Bash',
+      agent_id: 'a11',
+      agent_type: 'general-purpose',
+      tool_input: { command: 'node ' + RECORD_CLI + ' unit claim u2' },
+    },
+    home,
+  ).out;
+  check(
+    'a lowercase unit id in a subagent claim is observed as the unit',
+    lowerClaim === null && get(progress(), 'units', 'U2', 'agent_id') === 'a11',
+    JSON.stringify(lowerClaim) +
+      ' ' +
+      JSON.stringify(get(progress(), 'units', 'U2')),
+  );
+  const inlineBrief = runHook(
+    'E1',
+    {
+      session_id: 'sub4',
+      cwd: zone,
+      hook_event_name: 'PreToolUse',
+      tool_name: 'Bash',
+      agent_id: 'a12',
+      agent_type: 'general-purpose',
+      tool_input: {
+        command:
+          "cat > docs/brief2.md <<'EOF'\nYour first action is `node " +
+          RECORD_CLI +
+          ' unit claim U2`.\nEOF',
+      },
+    },
+    home,
+  ).out;
+  check(
+    'inline code in a heredoc brief naming unit claim does not claim',
+    inlineBrief === null &&
+      get(progress(), 'units', 'U2', 'agent_id') === 'a11',
+    JSON.stringify(inlineBrief),
+  );
 
   const talkStop = runHook(
     'S2',

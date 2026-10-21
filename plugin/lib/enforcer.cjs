@@ -22,10 +22,33 @@ const rules = require("./contract-rules.cjs");
 const store = require("./progress-store.cjs");
 const text = require("./hook-text.cjs");
 const zone = require("./zone.cjs");
-const UNIT_CLAIM = /\brecord\.cjs["']?\s+unit\s+claim\s+(U\d+)\b/;
+// A unit command or the completion signal at a command position: the start
+// of a shell segment (string start, newline, `;`, `&`, `|`, `(`, `$(`, or a
+// keyword such as `do`, `then`, `exec`), optional `env` and NAME=value
+// prefixes, then node running a path that ends in record.cjs, quoted or not.
+// A backtick is not a segment start: Markdown inline code in a document
+// heredoc is the common prose form of the command, and backtick command
+// substitution is not a recorded way of running it. The former substring
+// match also hit the same words inside prose: contract heredocs, grep
+// arguments, commit messages and, on 2026-10-19, a reviewer session's
+// `node -e` probe of set's step 3 (its bash-deny negative controls quote
+// `--evidence "..."`), which registered that session as a driver and
+// consumed another run's completion signal. A heredoc body line that starts
+// with the command, and `;` or `(` inside a quoted argument, remain regex
+// limits, as for bash-deny rows. Exported for the tests and the corpus probe.
+const SEG = /(?:^|[\n;&|(]|\$\(|\b(?:do|then|else|exec|time)\s)\s*/.source;
+const ENV = /(?:(?:env\s+(?:-\S+\s+)*)?(?:[A-Za-z_]\w*=(?:"[^"\n]*"|'[^'\n]*'|\S*)\s+)*)/
+    .source;
+const CLI = /(?:node|nodejs)\s+(?:"[^"\n]*record\.cjs"|'[^'\n]*record\.cjs'|\S*record\.cjs)\s+/
+    .source;
+// The claim's unit id is read case-insensitively, as the recorder reads it.
+const UNIT_CLAIM = new RegExp(SEG + ENV + CLI + /unit\s+claim\s+([Uu]\d+)\b/.source);
 // Any unit command or the completion signal, run by the session itself (no
 // agent id): the act that registers the session as a driver of the run.
-const UNIT_CMD = /\brecord\.cjs["']?\s+(?:unit\s+(?:init|claim|start|verified|failed|hold)|done)\b/;
+const UNIT_CMD = new RegExp(SEG +
+    ENV +
+    CLI +
+    /(?:unit\s+(?:init|claim|start|verified|failed|hold)|done)\b/.source);
 const deny = text.denyOutput;
 function messageOf(err) {
     return guards.toText(guards.isObject(err) ? err['message'] : undefined);
@@ -76,8 +99,10 @@ function runBash(input, contract, bashDeny, agentId) {
     }
     if (agentId) {
         const claim = UNIT_CLAIM.exec(command);
-        if (claim)
-            return observeClaim(input, contract, agentId, claim[1] ?? '');
+        if (claim) {
+            const unitId = (claim[1] ?? '').toUpperCase();
+            return observeClaim(input, contract, agentId, unitId);
+        }
     }
     else if (UNIT_CMD.test(command)) {
         ownership.registerSession(input.session_id, contract);
@@ -204,4 +229,4 @@ function runE1(input) {
     }
     return null;
 }
-module.exports = { runE1 };
+module.exports = { runE1, UNIT_CMD, UNIT_CLAIM };
