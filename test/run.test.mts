@@ -3397,6 +3397,112 @@ const sessionState = (home: string, sessionId: string): unknown => {
     iOk.status === 0,
     iOk.stderr,
   );
+  // The integrity check does not depend on the contract's rows: a contract
+  // whose write-scope rows were removed through the shell still refuses.
+  const j = flow('scope-rows');
+  j.record(['activate', 'contract.md', '--by', 'operator']);
+  fs.writeFileSync(
+    path.join(j.zone, 'contract.md'),
+    '- no machine rows left\n',
+  );
+  const jRefused = j.record(['done', ...CONTENT_DONE]);
+  check(
+    'done refuses a contract whose write-scope rows were removed after activation',
+    jRefused.status !== 0 && /frozen/.test(jRefused.stderr),
+    jRefused.stderr,
+  );
+  const k = started('scope-rows-unit');
+  fs.writeFileSync(
+    path.join(k.zone, 'contract.md'),
+    '- no machine rows left\n',
+  );
+  const kRefused = verify(k);
+  check(
+    'verified refuses a contract whose write-scope rows were removed after the run began',
+    kRefused.status !== 0 && /frozen/.test(kRefused.stderr),
+    kRefused.stderr,
+  );
+  // A path named like an Object property is a change like any other.
+  const l = started('proto');
+  fs.writeFileSync(path.join(l.zone, 'constructor'), 'c\n');
+  const lRefused = verify(l);
+  check(
+    'verified refuses a new out-of-scope file named constructor',
+    lRefused.status !== 0 && /working-tree\s+constructor/.test(lRefused.stderr),
+    lRefused.stderr,
+  );
+  // A baseline that is present but not the recorded shape refuses as
+  // malformed instead of counting as none.
+  const m = flow('manifest-null');
+  m.record(['activate', 'contract.md', '--by', 'operator']);
+  const mPointer = path.join(m.zone, '.amber', 'active.json');
+  fs.mkdirSync(path.dirname(mPointer), { recursive: true });
+  fs.writeFileSync(
+    mPointer,
+    JSON.stringify({
+      v: 1,
+      boundary: 'contract.md',
+      ratified_by: 'operator',
+      ratified_at: '2026-10-21',
+      baseline: {
+        commit: null,
+        manifest: null,
+        contract_blob: null,
+        taken_at: 'x',
+      },
+    }),
+  );
+  const mRefused = m.record(['done', ...CONTENT_DONE]);
+  check(
+    'a baseline whose manifest is not an object refuses as malformed instead of counting as none',
+    mRefused.status !== 0 && /malformed/.test(mRefused.stderr),
+    mRefused.stderr,
+  );
+  // A pre-run edit committed as it was is reported as committed and still
+  // marked as a pre-run file.
+  const o = started('committed-pre-run');
+  o.git('add', 'top.txt');
+  o.git('commit', '-q', '-m', 'commit the pre-run edit');
+  const oRefused = verify(o);
+  check(
+    'a pre-run edit committed unchanged is reported as committed and marked as pre-run',
+    oRefused.status !== 0 &&
+      /committed\s+top\.txt\s+\(already modified before the run began\)/.test(
+        oRefused.stderr,
+      ),
+    oRefused.stderr,
+  );
+  // A baseline recorded before the first commit: every path committed since
+  // counts, instead of falling back to the commit that added the contract.
+  const nZone = makeZone('content-nocommit', null, null);
+  fs.writeFileSync(path.join(nZone, '.gitignore'), '.amber/\n');
+  fs.writeFileSync(path.join(nZone, 'contract.md'), CONTRACT);
+  const nGit = (...a: string[]): string =>
+    execFileSync('git', ['-C', nZone, ...a], { encoding: 'utf8' }).trim();
+  nGit('config', 'user.email', 't@t');
+  nGit('config', 'user.name', 't');
+  const nHome = freshHome('content-nocommit');
+  const nRecord = (a: readonly string[]): SpawnSyncReturns<string> =>
+    spawnSync('node', [RECORD, ...a], {
+      cwd: nZone,
+      encoding: 'utf8',
+      timeout: 10000,
+      env: {
+        ...process.env,
+        AMBER_HOME: nHome,
+        AMBER_SESSION_ID: 'content-shell',
+      },
+    });
+  nRecord(['activate', 'contract.md', '--by', 'operator']);
+  fs.writeFileSync(path.join(nZone, 'outside.txt'), 'o\n');
+  nGit('add', 'outside.txt');
+  nGit('commit', '-q', '-m', 'first commit, past the scope');
+  const nRefused = nRecord(['done', ...CONTENT_DONE]);
+  check(
+    'a baseline recorded before the first commit counts every path committed since',
+    nRefused.status !== 0 && /committed\s+outside\.txt/.test(nRefused.stderr),
+    nRefused.stderr,
+  );
 }
 
 // ---- CLAUDE_CODE_SESSION_ID attribution: the Claude Code tool shell carries the hooks' session id ----

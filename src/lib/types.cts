@@ -75,6 +75,17 @@ export interface Baseline {
 }
 
 /**
+ * A recorded Baseline read back and checked (hooks/scope-check readBaseline):
+ * the manifest is a Map so a path named like an Object property is an entry
+ * like any other.
+ */
+export interface CheckedBaseline {
+  readonly commit: string | null;
+  readonly manifest: ReadonlyMap<string, string | null>;
+  readonly contractBlob: string | null;
+}
+
+/**
  * .amber/progress.json. The CommonJS hook and recorder mutate the object they
  * get back (re-entry counts, registered sessions), so the fields stay
  * writable.
@@ -151,11 +162,18 @@ export interface ScopeCheckOptions {
   readonly cwd: string;
   readonly writeScopes: string[];
   readonly boundaryRel?: string | null;
-  /** The contract file's absolute path, for the contract-blob comparison. */
-  readonly boundaryPath?: string | null;
-  /** The run's baseline (pointer first, then progress.json); null when none was recorded. */
-  readonly baseline?: Baseline | null;
+  /** The run's recorded baseline as found (pointer first, then progress.json); undefined when none. */
+  readonly baseline?: unknown;
   readonly declarations?: Declaration[];
+}
+
+/** What the contract-integrity check needs. */
+export interface ContractCheckOptions {
+  readonly cwd: string;
+  /** The run's recorded baseline as found; undefined when none. */
+  readonly baseline: unknown;
+  /** The contract file's absolute path. */
+  readonly boundaryPath?: string | null;
 }
 
 /** The hook events hooks.json passes to the entry. */
@@ -212,8 +230,11 @@ export interface ActiveContract {
   /** As the pointer wrote it; 'unknown' when absent. */
   readonly ratifiedBy: unknown;
   readonly ratifiedAt: unknown;
-  /** The baseline the pointer carries; null for a pointer written without one. */
-  readonly baseline: Baseline | null;
+  /**
+   * The pointer's `baseline` as found - undefined for a pointer written
+   * without one; the scope check reads and validates it.
+   */
+  readonly baseline: unknown;
   readonly text: string;
   readonly broken: false;
 }

@@ -57,7 +57,8 @@ function parseDeclarations(rest: readonly string[]): Declaration[] {
  * Sorts the changed paths (committed first, then the working tree, each path
  * once; the contract file and .amber/ never count) against the write-scope
  * and the declarations. Paths in `preRun` were already dirty when the run
- * began and have changed since; they are marked so the refusal can say so.
+ * began (the baseline's manifest); a listed one is marked so the refusal can
+ * say so, whether it changed again or was committed as it was.
  */
 function classify(
   baseline: string | null,

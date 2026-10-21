@@ -9,24 +9,11 @@ import path = require('node:path');
 import guards = require('./guards.cjs');
 import rules = require('./contract-rules.cjs');
 import zone = require('./zone.cjs');
-import type { Baseline, Contract } from './types.cjs';
+import type { Contract } from './types.cjs';
 
 function errorText(err: unknown): string {
   const message = guards.isObject(err) ? err['message'] : undefined;
   return guards.toText(message || err);
-}
-
-/**
- * The pointer's baseline when it has the recorded shape (an object whose
- * manifest is an object); the scope check validates the values themselves.
- */
-function isBaseline(value: unknown): value is Baseline {
-  return guards.isObject(value) && guards.isObject(value['manifest']);
-}
-
-function readBaseline(pointer: unknown): Baseline | null {
-  const b = guards.readField(pointer, 'baseline');
-  return isBaseline(b) ? b : null;
 }
 
 function loadContract(cwd: string | undefined): Contract | null {
@@ -52,7 +39,9 @@ function loadContract(cwd: string | undefined): Contract | null {
       boundaryFile: path.basename(boundaryPath),
       ratifiedBy: guards.readField(pointer, 'ratified_by') || 'unknown',
       ratifiedAt: guards.readField(pointer, 'ratified_at') || 'unknown',
-      baseline: readBaseline(pointer),
+      // As found: a present but malformed baseline must refuse later, not
+      // quietly count as none.
+      baseline: guards.readField(pointer, 'baseline'),
       text,
       broken: false,
     };
@@ -83,7 +72,7 @@ function contractInfo(cwd: string | undefined): {
   writeScopes: string[];
   boundaryRel: string | null;
   boundaryPath: string | null;
-  baseline: Baseline | null;
+  baseline: unknown;
 } {
   const c = loadContract(cwd);
   if (!c) {
@@ -94,7 +83,7 @@ function contractInfo(cwd: string | undefined): {
       writeScopes: [],
       boundaryRel: null,
       boundaryPath: null,
-      baseline: null,
+      baseline: undefined,
     };
   }
   return {
@@ -105,7 +94,7 @@ function contractInfo(cwd: string | undefined): {
     writeScopes: c.broken ? [] : rules.machineRules(c.text).writeScopes,
     boundaryRel: c.broken ? null : boundaryRel(c.root, c.boundaryPath),
     boundaryPath: c.broken ? null : c.boundaryPath,
-    baseline: c.broken ? null : c.baseline,
+    baseline: c.broken ? undefined : c.baseline,
   };
 }
 

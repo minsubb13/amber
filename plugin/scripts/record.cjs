@@ -135,9 +135,11 @@ function unitCommand(name, rest) {
         // the snapshot itself and keep it in progress.json. preexisting and
         // baseline_commit are filled from whichever applies; without git they
         // stay what they always were (no paths, no commit).
+        // A present but malformed pointer baseline refuses here (fail closed).
+        const recorded = scope.readBaseline(info.baseline);
         let fallback = null;
         let warning = '';
-        if (!info.baseline) {
+        if (!recorded) {
             try {
                 fallback = scope.takeBaseline(cwd, info.boundaryPath);
             }
@@ -145,8 +147,17 @@ function unitCommand(name, rest) {
                 warning = guards.toText(guards.isObject(err) ? err['message'] : err);
             }
         }
-        const applied = info.baseline ?? fallback;
-        const p = store.initProgress(info.root, plan, info.boundaryFile, rest.includes('--force'), applied ? Object.keys(applied.manifest) : scope.snapshot(cwd), clock.isoNow, applied ? applied.commit : scope.headCommit(cwd), fallback);
+        const preexisting = recorded
+            ? [...recorded.manifest.keys()]
+            : fallback
+                ? Object.keys(fallback.manifest)
+                : scope.snapshot(cwd);
+        const baselineCommit = recorded
+            ? recorded.commit
+            : fallback
+                ? fallback.commit
+                : scope.headCommit(cwd);
+        const p = store.initProgress(info.root, plan, info.boundaryFile, rest.includes('--force'), preexisting, clock.isoNow, baselineCommit, fallback);
         const ids = Object.keys(p.units);
         recordUnitEvent(sessionId, cwd, 'init', String(ids.length) + ' unit(s) from ' + p.plan, { contract: info.boundaryFile, units: ids.length });
         process.stdout.write('amber: progress.json initialized with ' +
@@ -222,16 +233,21 @@ function unitCommand(name, rest) {
                 '; nothing was recorded.');
         }
     }
-    // verified advances the run, so the changed files are compared with the
-    // write-scope first; an undeclared out-of-scope file refuses the transition.
+    // verified advances the run, so the contract file is checked against the
+    // recorded baseline first (whatever the contract's rows now say) and then
+    // the changed files are compared with the write-scope; an undeclared
+    // out-of-scope file refuses the transition.
     let scopeFields = {};
+    const baseline = info.baseline !== undefined ? info.baseline : p.baseline;
+    if (command === 'verified') {
+        scope.checkContract({ cwd, baseline, boundaryPath: info.boundaryPath });
+    }
     if (command === 'verified' && info.writeScopes.length > 0) {
         const options = {
             cwd,
             writeScopes: info.writeScopes,
             boundaryRel: info.boundaryRel,
-            boundaryPath: info.boundaryPath,
-            baseline: info.baseline ?? p.baseline ?? null,
+            baseline,
             declarations: scope.parseDeclarations(unitArgs.slice(1)),
         };
         const result = scope.check(options);
@@ -309,15 +325,18 @@ function doneCommand(rest) {
                 open.join(', ') +
                 ' - verify them (or record a hold and stop) before signalling completion');
         }
-        // The changed files of the whole run against the write-scope; declared
-        // out-of-scope files ride in the signal and S2 records them.
+        // The contract file against the recorded baseline first (whatever the
+        // contract's rows now say), then the changed files of the whole run
+        // against the write-scope; declared out-of-scope files ride in the signal
+        // and S2 records them.
+        const baseline = info.baseline !== undefined ? info.baseline : p?.baseline;
+        scope.checkContract({ cwd, baseline, boundaryPath: info.boundaryPath });
         if (info.writeScopes.length > 0) {
             const options = {
                 cwd,
                 writeScopes: info.writeScopes,
                 boundaryRel: info.boundaryRel,
-                boundaryPath: info.boundaryPath,
-                baseline: info.baseline ?? p?.baseline ?? null,
+                baseline,
                 declarations: scope.parseDeclarations(rest),
             };
             const result = scope.check(options);

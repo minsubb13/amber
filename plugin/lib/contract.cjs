@@ -13,17 +13,6 @@ function errorText(err) {
     const message = guards.isObject(err) ? err['message'] : undefined;
     return guards.toText(message || err);
 }
-/**
- * The pointer's baseline when it has the recorded shape (an object whose
- * manifest is an object); the scope check validates the values themselves.
- */
-function isBaseline(value) {
-    return guards.isObject(value) && guards.isObject(value['manifest']);
-}
-function readBaseline(pointer) {
-    const b = guards.readField(pointer, 'baseline');
-    return isBaseline(b) ? b : null;
-}
 function loadContract(cwd) {
     const root = zone.zoneRoot(cwd);
     const pointerPath = path.join(root, '.amber', 'active.json');
@@ -45,7 +34,9 @@ function loadContract(cwd) {
             boundaryFile: path.basename(boundaryPath),
             ratifiedBy: guards.readField(pointer, 'ratified_by') || 'unknown',
             ratifiedAt: guards.readField(pointer, 'ratified_at') || 'unknown',
-            baseline: readBaseline(pointer),
+            // As found: a present but malformed baseline must refuse later, not
+            // quietly count as none.
+            baseline: guards.readField(pointer, 'baseline'),
             text,
             broken: false,
         };
@@ -77,7 +68,7 @@ function contractInfo(cwd) {
             writeScopes: [],
             boundaryRel: null,
             boundaryPath: null,
-            baseline: null,
+            baseline: undefined,
         };
     }
     return {
@@ -88,7 +79,7 @@ function contractInfo(cwd) {
         writeScopes: c.broken ? [] : rules.machineRules(c.text).writeScopes,
         boundaryRel: c.broken ? null : boundaryRel(c.root, c.boundaryPath),
         boundaryPath: c.broken ? null : c.boundaryPath,
-        baseline: c.broken ? null : c.baseline,
+        baseline: c.broken ? undefined : c.baseline,
     };
 }
 module.exports = { loadContract, boundaryRel, contractInfo };

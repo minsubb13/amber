@@ -99,7 +99,9 @@ and manifest paths whose content (blob hash) is no longer the recorded one -
 so a pre-run edit is excused only while it stays what it was, and the refusal
 marks such paths (do not `git checkout` them; restore the pre-run content). A
 contract file whose hash differs from `contract_blob` refuses outright and
-cannot be declared away (the contract is frozen while active). Without any
+cannot be declared away (the contract is frozen while active; this check runs
+before the scope comparison and even when the contract has no write-scope
+rows left). Without any
 recorded baseline the commit that added the contract file is the baseline and
 nothing is excused. Any undeclared file outside scope (or any git failure, or a
 baseline value that is not a git hash) refuses the command; declare legitimate
