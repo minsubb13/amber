@@ -129,7 +129,7 @@ function artifactList(): string {
 function waysOut(recordCli: string): string {
   return (
     'To close the cycle: record the no-contract verdict with the amber:mark ' +
-    'skill (`skip - opening verdict - no contract: <reason>`; on Codex `node ' +
+    'skill (`skip - opening verdict - no contract: <reason>`; on Codex and pi `node ' +
     recordCli +
     " mark skip 'opening verdict - no contract: <reason>'`), or finish set " +
     "and wait for the operator's approval - the pointer it creates releases " +

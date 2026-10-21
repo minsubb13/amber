@@ -207,6 +207,7 @@ export async function harness(
     provider = 'anthropic',
     extensions = options.extensions ?? ['plugin/pi/index.ts'],
     selectStartupModel = true,
+    extraArgs: string[] = [],
   ) {
     const env = {
       PATH: process.env.PATH,
@@ -252,6 +253,7 @@ export async function harness(
       ...(options.builtinTools ? [] : ['--no-builtin-tools']),
       ...loaded.flatMap((e) => ['-e', resolve(e)]),
       ...(options.runtime === false ? [] : ['--amber-runtime']),
+      ...extraArgs,
       '--mode',
       'rpc',
     ];

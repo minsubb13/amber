@@ -4399,7 +4399,7 @@ const sessionState = (home: string, sessionId: string): unknown => {
     /^amber: planning phase open since \d{4}-\d{2}-\d{2}T\S+: write target src\/a\.ts is not a planning artifact \(\*\*\/\*-contract\.md, \*\*\/\*-plan\.md, \*\*\/\*-check\.sh, \*\*\/\*-review\*\.md, \*\*\/missions\/\*\.md\)\./.test(
       reasonOf(denied),
     ) &&
-      /amber:mark skill \(`skip - opening verdict - no contract: <reason>`; on Codex `node \S+record\.cjs mark skip 'opening verdict - no contract: <reason>'`\)/.test(
+      /amber:mark skill \(`skip - opening verdict - no contract: <reason>`; on Codex and pi `node \S+record\.cjs mark skip 'opening verdict - no contract: <reason>'`\)/.test(
         reasonOf(denied),
       ) &&
       /or finish set and wait for the operator's approval - the pointer it creates releases this gate\.$/.test(

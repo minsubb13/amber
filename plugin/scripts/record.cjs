@@ -34,7 +34,7 @@ function envSessionId() {
     return (process.env['AMBER_SESSION_ID'] ||
         process.env['CODEX_THREAD_ID'] ||
         process.env['CLAUDE_CODE_SESSION_ID'] ||
-      process.env['PI_SESSION_ID'] ||
+        process.env['PI_SESSION_ID'] ||
         '').trim();
 }
 /** Whether `file` names a regular file (a symbolic link to one included). */
