@@ -1041,3 +1041,32 @@ test('an empty standing-rules section briefs as none listed', () => {
   );
   assert.ok(brief.includes('Standing rules:\n(none listed)\n'));
 });
+
+// ---- the completion-conditions excerpt ----
+
+test('the briefing carries the completion conditions between the identity line and the standing rules', () => {
+  const f = fixture();
+  fs.writeFileSync(
+    path.join(f.root, 'boundary.md'),
+    BOUNDARY +
+      '\n## Completion conditions\n\n1. first\n2. second\n\n## Budget\n- none\n',
+  );
+  const brief = context(
+    hook('S0', { session_id: 's', cwd: f.root }, { home: f.home }),
+  );
+  assert.match(
+    brief,
+    /^amber: an active contract governs[^\n]*\nCompletion conditions:\n1\. first\n2\. second\nStanding rules:\n\(none listed\)\n/,
+  );
+});
+
+test('a contract without a completion-conditions section briefs as none listed', () => {
+  const f = fixture();
+  const brief = context(
+    hook('S0', { session_id: 's', cwd: f.root }, { home: f.home }),
+  );
+  assert.ok(
+    brief.includes('Completion conditions:\n(none listed)\nStanding rules:\n'),
+    brief,
+  );
+});

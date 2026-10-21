@@ -84,9 +84,10 @@ function completionGuidance(contract: ActiveContract | null): string {
 }
 
 /**
- * Contract awareness briefing: contract identity, the standing-rules section
- * verbatim, and the declaration/marker conventions. Injected by S0 at session
- * start and by S1 when a contract becomes active mid-session.
+ * Contract awareness briefing: contract identity, the completion-conditions
+ * and standing-rules sections verbatim, and the declaration/marker
+ * conventions. Injected by S0 at session start and by S1 when a contract
+ * becomes active mid-session.
  */
 function contractContext(contract: Contract): string {
   if (contract.broken) {
@@ -107,6 +108,8 @@ function contractContext(contract: Contract): string {
       ', ' +
       guards.toText(contract.ratifiedAt) +
       ').',
+    'Completion conditions:',
+    rules.completionConditions(contract.text),
     'Standing rules:',
     rules.standingRules(contract.text),
     completionGuidance(contract),
