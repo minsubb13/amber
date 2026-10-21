@@ -89,6 +89,7 @@ the completion signal runs as the last tool call:
 5. **What you need to do** *(when any)* - numbered actions with who does what
    and exact commands when needed.
 6. **What this does not answer** - limits of the result.
+   Carry-over goes in parts 5 and 6, never into the contract: what waits on whose judgment and the next action under 5, what was left behind under 6.
 
 ## Stop report
 
