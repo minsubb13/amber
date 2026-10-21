@@ -2,7 +2,8 @@
 // run (plugin/lib), driven by pi extension events instead of hook processes.
 //
 //   S0 (SessionStart)     <- session_start (startup/new/resume/fork, passed on
-//                            as source startup/clear/resume/resume) and
+//                            as source startup/clear/resume/resume; a startup
+//                            that continues a saved session as resume) and
 //                            session_compact (compact); the briefing is held and handed
 //                            to the model as a hidden `amber` message before
 //                            the next model request
@@ -128,6 +129,11 @@ function skillOfRead(abs: string): string | null {
 	return m && m[1] && AMBER_SKILLS.has(m[1]) ? m[1] : null;
 }
 
+/** Whether the session already holds messages (a fresh one holds only settings entries). */
+function hasConversation(ctx: ExtensionContext): boolean {
+	return ctx.sessionManager.getBranch().some((entry) => entry.type === "message");
+}
+
 export default function amber(pi: ExtensionAPI) {
 	runtime(pi);
 	/** Briefings (S0, S1) waiting for the next model request. */
@@ -181,7 +187,10 @@ export default function amber(pi: ExtensionAPI) {
 		pending = [];
 		continued = false;
 		// A reload keeps the conversation that already holds the briefing.
-		if (event.reason !== "reload") sessionStart(ctx, SESSION_SOURCE[event.reason]);
+		// pi reports a launch that continues a saved session (`pi -c`,
+		// `pi --session`) as startup; Claude Code calls that a resume.
+		if (event.reason === "startup" && hasConversation(ctx)) sessionStart(ctx, "resume");
+		else if (event.reason !== "reload") sessionStart(ctx, SESSION_SOURCE[event.reason]);
 		else updateStatus(ctx);
 	});
 
