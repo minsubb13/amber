@@ -167,15 +167,21 @@ function readyUnits(p: Progress): string[] {
  * earlier unit changed stays with that unit when a later one edits it again,
  * and a unit verified again lists its own paths afresh. Paths an earlier
  * entry dropped at its cap are not carried, so they fall to the next unit.
+ * The other units are read as found (the loader checks only the outer
+ * shape), so a hand-edited history there never refuses this transition.
  */
 function newFiles(p: Progress, id: string, paths: readonly string[]): string[] {
   const carried = new Set<string>();
   for (const other of Object.keys(p.units)) {
     const unit = p.units[other];
     if (other === id || !unit) continue;
-    for (const entry of unit.history) {
-      if (entry.event !== 'verified' || !entry.files) continue;
-      for (const file of entry.files) carried.add(file);
+    const history = guards.readField(unit, 'history');
+    if (!Array.isArray(history)) continue;
+    for (const entry of history) {
+      if (!guards.isObject(entry) || entry['event'] !== 'verified') continue;
+      const files = entry['files'];
+      if (!Array.isArray(files)) continue;
+      for (const file of files) carried.add(guards.toText(file));
     }
   }
   return [...new Set(paths)].filter((file) => !carried.has(file)).sort();

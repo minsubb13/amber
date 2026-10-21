@@ -1088,8 +1088,6 @@ test('the S0 and first S1 briefings list the verified units with files and evide
       { home: f.home },
     ),
   );
-  assert.ok(s0.includes(block), s0);
-  assert.ok(s0.indexOf('amber progress (') < s0.indexOf('verified so far:'));
   const s1 = context(
     hook(
       'S1',
@@ -1097,6 +1095,8 @@ test('the S0 and first S1 briefings list the verified units with files and evide
       { home: f.home },
     ),
   );
+  assert.ok(s0.includes(block), s0);
+  assert.ok(s0.indexOf('amber progress (') < s0.indexOf('verified so far:'));
   assert.ok(s1.includes(block), s1);
 });
 
@@ -1167,9 +1167,20 @@ test('the briefing carries the completion conditions between the identity line a
   );
 });
 
-test('a contract without a completion-conditions section briefs as none listed', () => {
+test('a contract without a completion-conditions section, or with an empty one, briefs as none listed', () => {
   const f = fixture();
-  const brief = context(
+  let brief = context(
+    hook('S0', { session_id: 's', cwd: f.root }, { home: f.home }),
+  );
+  assert.ok(
+    brief.includes('Completion conditions:\n(none listed)\nStanding rules:\n'),
+    brief,
+  );
+  fs.writeFileSync(
+    path.join(f.root, 'boundary.md'),
+    BOUNDARY + '\n## Completion conditions\n\n## Budget\n- none\n',
+  );
+  brief = context(
     hook('S0', { session_id: 's', cwd: f.root }, { home: f.home }),
   );
   assert.ok(

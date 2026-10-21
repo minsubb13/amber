@@ -39,9 +39,15 @@ const scopeCheck = loadModule<typeof import('../src/hooks/scope-check.cjs')>(
   'hooks/scope-check.cjs',
   ['snapshot', 'check', 'parseDeclarations'],
 );
-const progressModel = loadModule<
-  typeof import('../src/lib/progress-model.cjs')
->('lib/progress-model.cjs', ['newFiles', 'FILES_MAX', 'handoff']);
+// Loaded inside the tests that use it, so a build without these exports
+// still runs every other test of this suite (the parity run compares the
+// suite's product calls one by one).
+function progressModel(): typeof import('../src/lib/progress-model.cjs') {
+  return loadModule<typeof import('../src/lib/progress-model.cjs')>(
+    'lib/progress-model.cjs',
+    ['newFiles', 'FILES_MAX', 'handoff'],
+  );
+}
 const { codexEvents, commandEvents } = loadModule<
   typeof import('../src/scripts/audit-codex.cjs')
 >('scripts/audit-codex.cjs', ['codexEvents', 'commandEvents']);
@@ -311,9 +317,10 @@ test('verified and failed without evidence record an empty note', () => {
 });
 
 test('verified keeps the files it is given, capped, beside their uncapped count', () => {
+  const pm = progressModel();
   const p = fresh();
   const many = Array.from(
-    { length: progressModel.FILES_MAX + 10 },
+    { length: pm.FILES_MAX + 10 },
     (_, i) => 'f' + String(i).padStart(2, '0'),
   );
   progress.applyEvent(p, 'verified', 'U1', { files: many });
@@ -323,7 +330,7 @@ test('verified keeps the files it is given, capped, beside their uncapped count'
       event: 'verified',
       by: 'shell',
       note: '',
-      files: many.slice(0, progressModel.FILES_MAX),
+      files: many.slice(0, pm.FILES_MAX),
       files_count: many.length,
     },
   ]);
@@ -333,25 +340,61 @@ test('verified keeps the files it is given, capped, beside their uncapped count'
 });
 
 test('newFiles charges a unit with the paths no other verified unit carries, once and sorted', () => {
+  const pm = progressModel();
   const p = fresh();
   progress.applyEvent(p, 'verified', 'U1', { files: ['b', 'a'] });
-  assert.deepEqual(progressModel.newFiles(p, 'U2', ['c', 'a', 'd', 'c', 'b']), [
-    'c',
-    'd',
-  ]);
+  assert.deepEqual(pm.newFiles(p, 'U2', ['c', 'a', 'd', 'c', 'b']), ['c', 'd']);
+  // Every verified entry of the other unit counts, not only its last.
+  progress.applyEvent(p, 'verified', 'U1', { files: ['e'] });
+  assert.deepEqual(pm.newFiles(p, 'U2', ['a', 'e', 'f']), ['f']);
   // A unit verified again lists its own paths afresh.
-  assert.deepEqual(progressModel.newFiles(p, 'U1', ['b', 'z']), ['b', 'z']);
+  assert.deepEqual(pm.newFiles(p, 'U1', ['b', 'z']), ['b', 'z']);
   // failed never carries files, whatever it is given.
   progress.applyEvent(p, 'failed', 'U2', { files: ['q'] });
   assert.deepEqual(strip(unitOf(p, 'U2').history), [
     { event: 'failed', by: 'shell', note: '' },
   ]);
-  assert.deepEqual(progressModel.newFiles(p, 'U1', ['q']), ['q']);
+  assert.deepEqual(pm.newFiles(p, 'U1', ['q']), ['q']);
+});
+
+test('newFiles reads a hand-edited history of another unit as found', () => {
+  const pm = progressModel();
+  const histories: unknown[] = [
+    null,
+    'x',
+    [null, 1, 'verified'],
+    [{ event: 'verified', files: {} }],
+    [{ event: 'verified', files: null }],
+    [{ event: 'start', files: ['a'] }],
+  ];
+  for (const history of histories) {
+    assert.deepEqual(
+      callLoose(
+        pm.newFiles,
+        { units: { U1: { history }, U2: { history: [] } } },
+        'U2',
+        ['b', 'a'],
+      ),
+      ['a', 'b'],
+      JSON.stringify(history),
+    );
+  }
+  // A path that is not a string is read as text, as the briefing prints it.
+  assert.deepEqual(
+    callLoose(
+      pm.newFiles,
+      { units: { U1: { history: [{ event: 'verified', files: ['b', 1] }] } } },
+      'U2',
+      ['a', 'b', '1'],
+    ),
+    ['a'],
+  );
 });
 
 test('handoff lists the verified units in plan order with their files and evidence', () => {
+  const pm = progressModel();
   const p = fresh();
-  assert.equal(progressModel.handoff(p), '');
+  assert.equal(pm.handoff(p), '');
   const files = Array.from(
     { length: 14 },
     (_, i) => 'f' + String(i + 1).padStart(2, '0'),
@@ -365,7 +408,7 @@ test('handoff lists the verified units in plan order with their files and eviden
     files,
   });
   assert.equal(
-    progressModel.handoff(p),
+    pm.handoff(p),
     'verified so far:\n' +
       '- U1 one - files: ' +
       files.slice(0, 12).join(', ') +
@@ -379,15 +422,14 @@ test('handoff lists the verified units in plan order with their files and eviden
   unitOf(p, 'U2').history = [
     { ts: 't', event: 'verified', by: 's', note: 'old' },
   ];
-  assert.equal(
-    progressModel.handoff(p).split('\n')[2],
-    '- U2 two - evidence: old',
-  );
+  assert.equal(pm.handoff(p).split('\n')[2], '- U2 two - evidence: old');
   progress.applyEvent(p, 'verified', 'U2', { files: [] });
-  assert.equal(
-    progressModel.handoff(p).split('\n')[2],
-    '- U2 two - files: none',
-  );
+  assert.equal(pm.handoff(p).split('\n')[2], '- U2 two - files: none');
+  // The count beside a capped list is what the "more" part reports.
+  progress.applyEvent(p, 'verified', 'U2', {
+    files: Array.from({ length: 60 }, (_, i) => 'g' + String(i)),
+  });
+  assert.match(pm.handoff(p).split('\n')[2] ?? '', / \(\+48 more\)$/);
 });
 
 test('an unknown unit or event is refused', () => {
