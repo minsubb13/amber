@@ -1042,7 +1042,114 @@ test('an empty standing-rules section briefs as none listed', () => {
   assert.ok(brief.includes('Standing rules:\n(none listed)\n'));
 });
 
-// ---- the completion-conditions excerpt ----
+// ---- handoff: the verified-so-far block and the completion-conditions excerpt ----
+
+function verifiedEntry(fields: Readonly<Record<string, unknown>>): unknown {
+  return { ts: 't', event: 'verified', by: 's', note: 'ok', ...fields };
+}
+
+test('the S0 and first S1 briefings list the verified units with files and evidence under the summary', () => {
+  const f = fixture();
+  const files = Array.from(
+    { length: 14 },
+    (_, i) => 'f' + String(i + 1).padStart(2, '0'),
+  );
+  writeProgress(
+    f,
+    progressFile(
+      {
+        U1: unit({
+          title: 'one',
+          status: 'verified',
+          history: [
+            { ts: 't', event: 'start', by: 's' },
+            verifiedEntry({
+              note: 'E' + 'x'.repeat(199),
+              files,
+              files_count: 14,
+            }),
+          ],
+        }),
+        U2: unit({ title: 'two', status: 'running', after: ['U1'] }),
+      },
+      { current: 'U2' },
+    ),
+  );
+  const block =
+    'verified so far:\n- U1 one - files: ' +
+    files.slice(0, 12).join(', ') +
+    ' (+2 more) - evidence: E' +
+    'x'.repeat(159) +
+    '...\n';
+  const s0 = context(
+    hook(
+      'S0',
+      { session_id: 's', cwd: f.root, source: 'compact' },
+      { home: f.home },
+    ),
+  );
+  assert.ok(s0.includes(block), s0);
+  assert.ok(s0.indexOf('amber progress (') < s0.indexOf('verified so far:'));
+  const s1 = context(
+    hook(
+      'S1',
+      { session_id: 's1', cwd: f.root, prompt: 'hi' },
+      { home: f.home },
+    ),
+  );
+  assert.ok(s1.includes(block), s1);
+});
+
+test('an entry without files prints no files part, and no verified unit prints no block', () => {
+  const f = fixture();
+  writeProgress(
+    f,
+    progressFile({
+      U1: unit({
+        title: 'one',
+        status: 'verified',
+        history: [verifiedEntry({})],
+      }),
+    }),
+  );
+  let brief = context(
+    hook('S0', { session_id: 's', cwd: f.root }, { home: f.home }),
+  );
+  assert.ok(
+    brief.includes('verified so far:\n- U1 one - evidence: ok\n'),
+    brief,
+  );
+  assert.ok(!brief.includes('files:'));
+  writeProgress(f, progressFile({ U1: unit({ status: 'running' }) }));
+  brief = context(
+    hook('S0', { session_id: 's', cwd: f.root }, { home: f.home }),
+  );
+  assert.ok(!brief.includes('verified so far'), brief);
+  assert.ok(brief.includes('amber progress ('));
+});
+
+test('the send-back directive keeps the summary and leaves the block out', () => {
+  const f = fixture();
+  writeState(f.home, 's', { run: 'boundary.md' });
+  writeProgress(
+    f,
+    progressFile(
+      {
+        U1: unit({
+          title: 'one',
+          status: 'verified',
+          history: [verifiedEntry({ files: ['a'], files_count: 1 })],
+        }),
+        U2: unit({ status: 'running', after: ['U1'] }),
+      },
+      { current: 'U2', session_ids: ['s'] },
+    ),
+  );
+  const out = hook('S2', { session_id: 's', cwd: f.root }, { home: f.home });
+  const reason = text(get(out, 'reason'));
+  assert.ok(reason.includes('amber progress ('), reason);
+  assert.ok(!reason.includes('verified so far'), reason);
+});
 
 test('the briefing carries the completion conditions between the identity line and the standing rules', () => {
   const f = fixture();

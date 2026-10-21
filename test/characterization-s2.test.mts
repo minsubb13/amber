@@ -41,7 +41,7 @@ const scopeCheck = loadModule<typeof import('../src/hooks/scope-check.cjs')>(
 );
 const progressModel = loadModule<
   typeof import('../src/lib/progress-model.cjs')
->('lib/progress-model.cjs', ['newFiles', 'FILES_MAX']);
+>('lib/progress-model.cjs', ['newFiles', 'FILES_MAX', 'handoff']);
 const { codexEvents, commandEvents } = loadModule<
   typeof import('../src/scripts/audit-codex.cjs')
 >('scripts/audit-codex.cjs', ['codexEvents', 'commandEvents']);
@@ -347,6 +347,47 @@ test('newFiles charges a unit with the paths no other verified unit carries, onc
     { event: 'failed', by: 'shell', note: '' },
   ]);
   assert.deepEqual(progressModel.newFiles(p, 'U1', ['q']), ['q']);
+});
+
+test('handoff lists the verified units in plan order with their files and evidence', () => {
+  const p = fresh();
+  assert.equal(progressModel.handoff(p), '');
+  const files = Array.from(
+    { length: 14 },
+    (_, i) => 'f' + String(i + 1).padStart(2, '0'),
+  );
+  progress.applyEvent(p, 'verified', 'U2', {
+    evidence: 'two  ok',
+    files: ['b'],
+  });
+  progress.applyEvent(p, 'verified', 'U1', {
+    evidence: 'E' + 'x'.repeat(199),
+    files,
+  });
+  assert.equal(
+    progressModel.handoff(p),
+    'verified so far:\n' +
+      '- U1 one - files: ' +
+      files.slice(0, 12).join(', ') +
+      ' (+2 more) - evidence: E' +
+      'x'.repeat(159) +
+      '...\n' +
+      '- U2 two - files: b - evidence: two ok',
+  );
+  // An entry without files prints no files part; the last verified entry
+  // counts; no changed path prints as none.
+  unitOf(p, 'U2').history = [
+    { ts: 't', event: 'verified', by: 's', note: 'old' },
+  ];
+  assert.equal(
+    progressModel.handoff(p).split('\n')[2],
+    '- U2 two - evidence: old',
+  );
+  progress.applyEvent(p, 'verified', 'U2', { files: [] });
+  assert.equal(
+    progressModel.handoff(p).split('\n')[2],
+    '- U2 two - files: none',
+  );
 });
 
 test('an unknown unit or event is refused', () => {
