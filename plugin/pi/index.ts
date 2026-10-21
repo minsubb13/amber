@@ -1,8 +1,9 @@
 // Amber for pi: the same sensors and enforcers the Claude Code and Codex hooks
 // run (plugin/lib), driven by pi extension events instead of hook processes.
 //
-//   S0 (SessionStart)     <- session_start (startup/new/resume/fork) and
-//                            session_compact; the briefing is held and handed
+//   S0 (SessionStart)     <- session_start (startup/new/resume/fork, passed on
+//                            as source startup/clear/resume/resume) and
+//                            session_compact (compact); the briefing is held and handed
 //                            to the model as a hidden `amber` message before
 //                            the next model request
 //   S1 (UserPromptSubmit) <- input (typed /amber:<name> or /skill:amber-<name>)
@@ -65,6 +66,17 @@ const SKILL_COMMAND = /^\/skill:amber-([a-z]+)\b/;
 /** Typed /amber:<name>, which pi itself does not know: rewritten to the skill command. */
 const AMBER_COMMAND = /^\/amber:([a-z]+)\b/;
 const AMBER_SKILLS = new Set(["planning", "set", "init", "status", "mark", "audit"]);
+
+/** The SessionStart source Claude Code would report; S0 briefs the full
+ *  no-contract procedure on resume and compact, an index on startup and clear.
+ *  A fork carries the conversation it was taken from, so it reads as a resume. */
+type SessionSource = "startup" | "clear" | "resume" | "compact";
+const SESSION_SOURCE: Record<"startup" | "new" | "resume" | "fork", SessionSource> = {
+	startup: "startup",
+	new: "clear",
+	resume: "resume",
+	fork: "resume",
+};
 
 function recordCrash(event: string, err: unknown): void {
 	try {
@@ -158,9 +170,9 @@ export default function amber(pi: ExtensionAPI) {
 		}
 	};
 
-	const sessionStart = (ctx: ExtensionContext): void => {
+	const sessionStart = (ctx: ExtensionContext, source: SessionSource): void => {
 		if (AGENT_ID) return;
-		queueContext(run("S0", { ...base(ctx), model: ctx.model?.id }));
+		queueContext(run("S0", { ...base(ctx), model: ctx.model?.id, source }));
 		updateStatus(ctx);
 	};
 
@@ -169,13 +181,13 @@ export default function amber(pi: ExtensionAPI) {
 		pending = [];
 		continued = false;
 		// A reload keeps the conversation that already holds the briefing.
-		if (event.reason !== "reload") sessionStart(ctx);
+		if (event.reason !== "reload") sessionStart(ctx, SESSION_SOURCE[event.reason]);
 		else updateStatus(ctx);
 	});
 
 	// Claude Code re-runs SessionStart after compaction; so does Amber on pi.
 	pi.on("session_compact", async (_event, ctx) => {
-		sessionStart(ctx);
+		sessionStart(ctx, "compact");
 	});
 
 	// The ledger reads the model from the session state S0 wrote.
