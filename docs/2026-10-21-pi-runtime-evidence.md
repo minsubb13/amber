@@ -42,6 +42,36 @@ Verified on 2026-10-21, Node v24.13.1 and pi 1.3.0:
 
 Raw local command outputs: `docs/pi-runtime/{package-test,runtime-test,typecheck,lint,format,build}.log`. These contain local mock verification only. Existing installed gh does not support the planned `headRefOid` JSON field; final verification will use the equivalent GitHub REST `pulls/22` head.sha plus `gh pr view` branch/body and `git ls-remote`, not weaken remote-head equality.
 
+## Final validation receipt (U4)
+
+Verified clean committed HEAD `fdd8ab33c2adaff62a64ebd54767e3619585e158`, tree `ed7389e1ef3212ce03e785b8eca8c1aa996ebe49`, on 2026-10-21. This includes the independently reviewed implementation plus review documentation; no runtime/source/test changes since pinned review `00be0e0`.
+
+Serial command chain (every command exited 0): `npm test`, `npm run typecheck`, `npm run lint`, `npm run format:check`, `npm run test:pi-runtime`, `npm run build`, **`git diff --exit-code` over the entire tree**. Clean `git status --porcelain` before and after the build. This closes reviewer E1: fresh build changed no tracked artifact, not merely the selected generated directories.
+
+Raw final terminal receipt (selected result lines, not an author estimate):
+
+```text
+VALIDATED_HEAD=fdd8ab33c2adaff62a64ebd54767e3619585e158
+VALIDATED_TREE=ed7389e1ef3212ce03e785b8eca8c1aa996ebe49
+FULL_TREE_FRESH_BUILD_DIFF_EXIT=0
+package: tests 412; pass 412; fail 0; cancelled 0; skipped 0; todo 0
+Handwritten pi adapter/runtime strict typecheck passed
+runtime: tests 34; pass 34; fail 0; cancelled 0; skipped 0; todo 0
+```
+
+Full earlier raw outputs remain committed under `docs/pi-runtime/`; final rerun raw logs were captured in `/tmp/amber-runtime-final-{package,types,lint,format,runtime,build}.log`. Final log SHA-256 receipts, closing E2 by identifying the validated committed tree and exact captured outputs:
+
+```text
+5e0b9d9262a37c0dba5f8ab4c616050a204b7b8559c862a234987df615ad7832 package
+037be3153c6d85e2d4562c63579c82ed503ebf549adfbb2db18745a5e6eb8c7c types
+38da703b3edcb307e9c8aa5b4e485db1889b7441588aadeae7034943c87b6e02 lint
+75288df76faa94502cc2c309485151c70d9b6d8b0508e238e68e73a2e5887718 format
+dd6d872b30a62d1d0ab2866bfead7478d4c1cd926215d3d0179186e1819b7f47 runtime
+c9843226974419f05b4f1a128314cb257af3fff52213d7351c629b232999d2cc build
+```
+
+Source checkout remains `814562bccfad5627df342e00678e6763a5d22c1e` with clean git status. No source-repository writes or real probes. Review E3 is dispositioned in the updated plan: supported gh REST head.sha is the same remote-head oracle as unavailable headRefOid. Review E4 is closed only by the delivery receipt below, not by the code-review PASS.
+
 ## Real-provider limitation (quoted provenance)
 
 Source `814562b`, `docs/findings.md`: two authorized requests were consumed. Original HTTP400 rejected unsupported reasoning.effort=none, not service_tier. Corrected HTTP200 accepted a priority payload but response.completed reported **service_tier=default**, not priority. These are quoted reference observations, not an integrated live-provider test. Priority execution, speed and quota impact remain **unverified**. No further real probes are authorized.
