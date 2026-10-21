@@ -235,6 +235,18 @@ function noContractGuidance(): string {
   );
 }
 
+/**
+ * What a fresh contract-less session gets instead of noContractGuidance():
+ * the signal command and where the full procedure loads from. S0 sends it on
+ * a startup or clear and the full text on a compaction or resume.
+ */
+const NO_CONTRACT_INDEX =
+  'Completion index: the signal command is `' +
+  doneCommandText(null) +
+  '`, run as the last tool call only when a governed work unit is genuinely ' +
+  'complete; the full procedure loads with the amber:planning skill ' +
+  '(protocol.md, Completion) and returns after a compaction or resume.';
+
 function sensorFailures(count: number, file: string): string {
   return (
     'amber: ' + String(count) + ' sensor failure(s) recorded - see ' + file
@@ -356,6 +368,7 @@ export = {
   WAITING_SIGNAL,
   linkedWorktreeContext,
   NO_CONTRACT,
+  NO_CONTRACT_INDEX,
   noContractGuidance,
   sensorFailures,
   continuationDirective,

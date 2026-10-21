@@ -1,7 +1,8 @@
 // S0 (SessionStart): record the session's model and start time, sweep state
 // files idle past the TTL, and brief the session - the active contract with
-// its progress, ownership and waiting signal, or the one-line arming note when
-// there is none - plus any sensor failures.
+// its progress, ownership and waiting signal, or the arming note with the
+// completion procedure (its index on a startup or clear, its full text on a
+// compaction or resume) when there is none - plus any sensor failures.
 
 import fs = require('node:fs');
 import path = require('node:path');
@@ -47,9 +48,27 @@ function sensorFailureCount(): number {
   }
 }
 
+/**
+ * Whether a contract-less session gets the full completion procedure or only
+ * its index. A compaction or resume lost the planning skill's copy (or never
+ * had it), so it gets the full text; a startup or clear gets the index, since
+ * planning loads the procedure when work begins. Without a source field, a
+ * state file already present for this session stands in for a resume.
+ */
+function briefsFullProcedure(
+  source: string | undefined,
+  hadState: boolean,
+): boolean {
+  if (source === 'compact' || source === 'resume') return true;
+  if (source === 'startup' || source === 'clear') return false;
+  return hadState;
+}
+
 function runS0(input: HookInput): HookOutput {
   state.ensureDirs();
   const contract = contracts.loadContract(input.cwd);
+  const statePath = state.sessionStatePath(input.session_id);
+  const hadState = fs.existsSync(statePath);
   const sessionState: SessionState = {
     model: input.model || null,
     started_at: clock.isoNow(),
@@ -63,10 +82,7 @@ function runS0(input: HookInput): HookOutput {
     'run',
   );
   if (previousRun) sessionState.run = previousRun;
-  state.writeStateAtomic(
-    state.sessionStatePath(input.session_id),
-    sessionState,
-  );
+  state.writeStateAtomic(statePath, sessionState);
   sweepIdleState();
   const failures = sensorFailureCount();
   const parts: string[] = [];
@@ -86,7 +102,11 @@ function runS0(input: HookInput): HookOutput {
     parts.push(text.NO_CONTRACT);
     const worktreeCtx = briefing.linkedWorktreeContextFor(input.cwd);
     if (worktreeCtx) parts.push(worktreeCtx);
-    parts.push(text.noContractGuidance());
+    parts.push(
+      briefsFullProcedure(input.source, hadState)
+        ? text.noContractGuidance()
+        : text.NO_CONTRACT_INDEX,
+    );
   }
   if (failures > 0) {
     parts.push(text.sensorFailures(failures, state.FAILURES_FILE));

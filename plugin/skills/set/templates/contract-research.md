@@ -63,9 +63,4 @@ Per claim: time, number of sources, citation depth. On reaching it, dispose that
 ## Assumptions
 - <assumption> (confidence: high / medium / low; disposition: unverified / verified / rejected) - an accepted claim must not rest on an undisposed load-bearing assumption.
 
-## Carry-over (filled at completion)
-- Left behind:
-- Waiting (what waits on whose judgment):
-- Next action:
-
 `--goal` = "promote / hold / reject against criteria vN + evidence summary". Hold (no conclusion) is a legitimate completion: the pass closes, the mission stays open.
