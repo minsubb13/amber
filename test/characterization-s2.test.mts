@@ -432,6 +432,33 @@ test('handoff lists the verified units in plan order with their files and eviden
   assert.match(pm.handoff(p).split('\n')[2] ?? '', / \(\+48 more\)$/);
 });
 
+test('handoff reads a hand-edited history as found', () => {
+  const pm = progressModel();
+  const verified = (history: unknown): unknown => ({
+    units: { U1: { title: 'one', status: 'verified', history } },
+  });
+  // A null entry is skipped; a note that is not a string prints no
+  // evidence part; a count that is not a number falls back to the list.
+  assert.equal(
+    callLoose(
+      pm.handoff,
+      verified([
+        null,
+        { event: 'verified', note: 5, files: ['a'], files_count: 'x' },
+      ]),
+    ),
+    'verified so far:\n- U1 one - files: a',
+  );
+  for (const history of [null, 'x', [], [1, 'verified']]) {
+    assert.equal(
+      callLoose(pm.handoff, verified(history)),
+      'verified so far:\n- U1 one',
+      JSON.stringify(history),
+    );
+  }
+  assert.equal(callLoose(pm.handoff, { units: { U1: null } }), '');
+});
+
 test('an unknown unit or event is refused', () => {
   assert.throws(() => progress.applyEvent(fresh(), 'start', 'U9', {}), {
     message: 'unknown unit U9 (known: U1, U2)',
