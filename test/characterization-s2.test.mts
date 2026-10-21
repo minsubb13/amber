@@ -39,6 +39,9 @@ const scopeCheck = loadModule<typeof import('../src/hooks/scope-check.cjs')>(
   'hooks/scope-check.cjs',
   ['snapshot', 'check', 'parseDeclarations'],
 );
+const progressModel = loadModule<
+  typeof import('../src/lib/progress-model.cjs')
+>('lib/progress-model.cjs', ['newFiles', 'FILES_MAX']);
 const { codexEvents, commandEvents } = loadModule<
   typeof import('../src/scripts/audit-codex.cjs')
 >('scripts/audit-codex.cjs', ['codexEvents', 'commandEvents']);
@@ -305,6 +308,45 @@ test('verified and failed without evidence record an empty note', () => {
     { event: 'failed', by: 'shell', note: '' },
     { event: 'verified', by: 'shell', note: '' },
   ]);
+});
+
+test('verified keeps the files it is given, capped, beside their uncapped count', () => {
+  const p = fresh();
+  const many = Array.from(
+    { length: progressModel.FILES_MAX + 10 },
+    (_, i) => 'f' + String(i).padStart(2, '0'),
+  );
+  progress.applyEvent(p, 'verified', 'U1', { files: many });
+  progress.applyEvent(p, 'verified', 'U2', { files: [] });
+  assert.deepEqual(strip(unitOf(p, 'U1').history), [
+    {
+      event: 'verified',
+      by: 'shell',
+      note: '',
+      files: many.slice(0, progressModel.FILES_MAX),
+      files_count: many.length,
+    },
+  ]);
+  assert.deepEqual(strip(unitOf(p, 'U2').history), [
+    { event: 'verified', by: 'shell', note: '', files: [], files_count: 0 },
+  ]);
+});
+
+test('newFiles charges a unit with the paths no other verified unit carries, once and sorted', () => {
+  const p = fresh();
+  progress.applyEvent(p, 'verified', 'U1', { files: ['b', 'a'] });
+  assert.deepEqual(progressModel.newFiles(p, 'U2', ['c', 'a', 'd', 'c', 'b']), [
+    'c',
+    'd',
+  ]);
+  // A unit verified again lists its own paths afresh.
+  assert.deepEqual(progressModel.newFiles(p, 'U1', ['b', 'z']), ['b', 'z']);
+  // failed never carries files, whatever it is given.
+  progress.applyEvent(p, 'failed', 'U2', { files: ['q'] });
+  assert.deepEqual(strip(unitOf(p, 'U2').history), [
+    { event: 'failed', by: 'shell', note: '' },
+  ]);
+  assert.deepEqual(progressModel.newFiles(p, 'U1', ['q']), ['q']);
 });
 
 test('an unknown unit or event is refused', () => {

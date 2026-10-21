@@ -11,6 +11,8 @@
 const guards = require("./guards.cjs");
 const REENTRY_LIMIT = 10;
 const HISTORY_LIMIT = 50;
+// Changed paths kept on a verified entry; the count beside them is uncapped.
+const FILES_MAX = 50;
 // Every status is classified once, so a new status does not compile until
 // it is: whether it is open, and whether the summary line lists it (in this
 // order).
@@ -116,6 +118,30 @@ function focusUnit(p) {
 function readyUnits(p) {
     return openUnits(p).filter((id) => p.units[id]?.status !== 'running' && depsMet(p, id));
 }
+/**
+ * The changed paths a unit's verification is charged with: `paths` (the
+ * changed set the scope check established for the whole run) minus every
+ * path a verified entry of another unit already carries, each once, sorted.
+ * A later unit thus lists only what changed after the earlier ones; a path an
+ * earlier unit changed stays with that unit when a later one edits it again,
+ * and a unit verified again lists its own paths afresh. Paths an earlier
+ * entry dropped at its cap are not carried, so they fall to the next unit.
+ */
+function newFiles(p, id, paths) {
+    const carried = new Set();
+    for (const other of Object.keys(p.units)) {
+        const unit = p.units[other];
+        if (other === id || !unit)
+            continue;
+        for (const entry of unit.history) {
+            if (entry.event !== 'verified' || !entry.files)
+                continue;
+            for (const file of entry.files)
+                carried.add(file);
+        }
+    }
+    return [...new Set(paths)].filter((file) => !carried.has(file)).sort();
+}
 function pushHistory(unit, entry, now) {
     unit.history.push({ ts: now(), ...entry });
     if (unit.history.length > HISTORY_LIMIT) {
@@ -187,6 +213,14 @@ function applyTransition(p, transition, id, unit, extra, by, now) {
                 by,
                 note: extra?.evidence || '',
                 ...(extra?.out_of_scope ? { out_of_scope: extra.out_of_scope } : {}),
+                // Only when the recorder ran the scope check (the keys stay absent
+                // otherwise, so an entry recorded without them keeps its shape).
+                ...(extra?.files
+                    ? {
+                        files: extra.files.slice(0, FILES_MAX),
+                        files_count: extra.files.length,
+                    }
+                    : {}),
             }, now);
             return;
         case 'failed':
@@ -297,11 +331,13 @@ function isBroken(p) {
 module.exports = {
     isBroken,
     REENTRY_LIMIT,
+    FILES_MAX,
     holdKind,
     newProgress,
     openUnits,
     focusUnit,
     readyUnits,
+    newFiles,
     applyEvent,
     unitByAgent,
     summary,
