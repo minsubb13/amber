@@ -1,0 +1,4 @@
+
+> build
+> tsc -p . && npm run --silent build:tools && node build/tools/header/main.mjs
+

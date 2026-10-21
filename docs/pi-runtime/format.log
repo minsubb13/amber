@@ -1,0 +1,6 @@
+
+> format:check
+> prettier --check src tools test
+
+Checking formatting...
+All matched files use Prettier code style!
