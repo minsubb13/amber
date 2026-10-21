@@ -73,8 +73,8 @@ open or have their completion signal read. Sibling sessions in the zone receive
 the briefing and obey `write-scope` and `bash-deny`, but are not pulled into the loop.
 The session-opening briefing (S0; on both hosts - a Codex session leaves the
 same S0 state file - and on Claude Code at startup, resume, clear and compact)
-and a session's first S1 briefing print the contract's `## Completion
-conditions` section under the contract identity and, under the progress
+and a session's first S1 briefing print the contract's section
+`## Completion conditions` under the contract identity and, under the progress
 summary, a `verified so far:` block with one line per verified unit (its
 files, 12 at most, and its evidence cut to 160 characters), so a cleared or
 compacted session continues from its first turn.
