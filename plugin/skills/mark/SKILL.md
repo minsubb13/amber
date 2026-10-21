@@ -1,6 +1,6 @@
 ---
 name: mark
-description: Record one Amber cycle event in the ledger, from anywhere in a turn. Invoke with skip arguments for a declined gate or a no-contract opening verdict, finding arguments for a verification finding whose disposition is settled, or hold arguments to announce a legitimate stop while plan units are still open. Claude Code records the Skill invocation automatically; Codex executes the recorder described here. Not for completion - that is the `record.cjs done` completion signal on both hosts.
+description: Record one Amber cycle event in the ledger, from anywhere in a turn. Invoke with skip arguments for a declined gate or a no-contract opening verdict, finding arguments for a verification finding whose disposition is settled, or hold arguments to announce a legitimate stop while plan units are still open. Claude Code records the Skill invocation automatically; Codex and pi execute the recorder described here. Not for completion - that is the `record.cjs done` completion signal on every host.
 ---
 
 # mark - cycle event record
