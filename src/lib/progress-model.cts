@@ -9,6 +9,7 @@
 
 import guards = require('./guards.cjs');
 import type {
+  Baseline,
   BrokenProgress,
   Clock,
   EventExtra,
@@ -74,6 +75,7 @@ function newProgress(
   preexisting: unknown[],
   now: Clock,
   baselineCommit?: string | null,
+  baseline?: Baseline | null,
 ): Progress {
   const p: Progress = {
     v: 1,
@@ -91,6 +93,8 @@ function newProgress(
   // The HEAD when the run began, when the tree had one: the scope-check
   // baseline for a contract file that was never committed.
   if (baselineCommit) p.baseline_commit = baselineCommit;
+  // The content baseline init took itself (only when the pointer had none).
+  if (baseline) p.baseline = baseline;
   for (const u of units) {
     p.units[u.id] = {
       title: u.title,

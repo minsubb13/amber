@@ -7,7 +7,7 @@ import path = require('node:path');
 import guards = require('./guards.cjs');
 import model = require('./progress-model.cjs');
 import plan = require('./plan.cjs');
-import type { BrokenProgress, Clock, Progress } from './types.cjs';
+import type { Baseline, BrokenProgress, Clock, Progress } from './types.cjs';
 
 function progressPath(root: string): string {
   return path.join(root, '.amber', 'progress.json');
@@ -64,6 +64,7 @@ function initProgress(
   preexisting: unknown,
   now: Clock,
   baselineCommit?: string | null,
+  baseline?: Baseline | null,
 ): Progress {
   const file = progressPath(root);
   if (fs.existsSync(file) && !force) {
@@ -83,6 +84,7 @@ function initProgress(
     Array.isArray(preexisting) ? preexisting : [],
     now,
     baselineCommit ?? null,
+    baseline ?? null,
   );
   saveProgress(root, p, now);
   return p;

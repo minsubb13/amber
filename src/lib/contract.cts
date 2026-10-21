@@ -39,6 +39,9 @@ function loadContract(cwd: string | undefined): Contract | null {
       boundaryFile: path.basename(boundaryPath),
       ratifiedBy: guards.readField(pointer, 'ratified_by') || 'unknown',
       ratifiedAt: guards.readField(pointer, 'ratified_at') || 'unknown',
+      // As found: a present but malformed baseline must refuse later, not
+      // quietly count as none.
+      baseline: guards.readField(pointer, 'baseline'),
       text,
       broken: false,
     };
@@ -68,6 +71,8 @@ function contractInfo(cwd: string | undefined): {
   error?: string | undefined;
   writeScopes: string[];
   boundaryRel: string | null;
+  boundaryPath: string | null;
+  baseline: unknown;
 } {
   const c = loadContract(cwd);
   if (!c) {
@@ -77,6 +82,8 @@ function contractInfo(cwd: string | undefined): {
       broken: false,
       writeScopes: [],
       boundaryRel: null,
+      boundaryPath: null,
+      baseline: undefined,
     };
   }
   return {
@@ -86,6 +93,8 @@ function contractInfo(cwd: string | undefined): {
     error: c.broken ? c.error : undefined,
     writeScopes: c.broken ? [] : rules.machineRules(c.text).writeScopes,
     boundaryRel: c.broken ? null : boundaryRel(c.root, c.boundaryPath),
+    boundaryPath: c.broken ? null : c.boundaryPath,
+    baseline: c.broken ? undefined : c.baseline,
   };
 }
 

@@ -15,6 +15,17 @@ function git(cwd: string, args: readonly string[]): string {
     .toString();
 }
 
+/** The stdout of `git -C <cwd> <args>` fed `input` on stdin; throws as git does. */
+function gitInput(cwd: string, args: readonly string[], input: string): string {
+  return childProcess
+    .execFileSync('git', ['-C', cwd, ...args], {
+      timeout: 5000,
+      input,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    })
+    .toString();
+}
+
 /** A child_process output field: a Buffer, or a string with an encoding. */
 function outputText(value: unknown): string {
   if (typeof value === 'string') return value;
@@ -33,4 +44,4 @@ function firstLine(err: unknown): string {
   return text.split('\n')[0] ?? '';
 }
 
-export = { git, firstLine };
+export = { git, gitInput, firstLine };
