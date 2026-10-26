@@ -68,9 +68,9 @@ Without `--amber-runtime` (the default), Amber adds no model-switch tool, `/fast
 - `/fast` reports state; `/fast on` and `/fast off` toggle OpenAI agent-loop priority requests. It starts on in each opted-in process and shows `fast` while on; toggles and the once-only tier notice survive `/reload`. It does not affect other providers, summaries or compaction.
 - The completed response's tier is authoritative. A downgrade or unknown tier warns at most once per process. An HTTP400 naming `service_tier` turns fast off and continues once at default tier, without duplicating pi's native retry. Other errors use normal pi handling. Recovery cannot complete unfinished Amber work.
 
-**Migrating from standalone pi-model-tools:** first run `pi list`, then remove its package with `pi remove <the exact source shown by pi list>` (add `-l` for a project install). If you loaded individual switch-model/fast extension files instead, remove those entries yourself. Restart pi before enabling `--amber-runtime`. Amber detects an existing `switch_model` or `/fast`, warns and disables its optional runtime rather than overriding either; it never edits your settings or uninstalls anything.
+If another extension already provides `switch_model` or `/fast` (such as the standalone pi-model-tools package), Amber warns and leaves its runtime off rather than overriding it; remove that package (`pi list`, then `pi remove <source>`) and restart pi. Amber never edits your settings or uninstalls anything.
 
-**Priority is a request, not a speed guarantee.** Quoted standalone evidence at `814562b`: the corrected real request returned HTTP200 but its completed tier was `default`, not `priority`; an earlier HTTP400 concerned unsupported reasoning, not service tier. Priority execution, speed and quota impact remain unverified. Integration tests use loopback mocks only; see the [development instructions](DEVELOPMENT.md#optional-pi-runtime-tests).
+**Priority is a request, not a speed guarantee.** Actual priority execution, speed and quota impact are unverified; integration tests use loopback mocks only (see the [development instructions](DEVELOPMENT.md#optional-pi-runtime-tests)).
 
 ## Start
 
