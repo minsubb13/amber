@@ -315,6 +315,11 @@ export interface SessionState {
   run?: unknown;
   /** The session's open phase (a SessionPhase), carried like `runs`. */
   phase?: unknown;
+  /**
+   * The sorted roots of the other zones whose driven runs S0 or S1 last
+   * announced; S1 announces them again only when the set changes.
+   */
+  driven_briefed?: unknown;
 }
 
 /** A session's registration in one zone, under its `runs` map. */

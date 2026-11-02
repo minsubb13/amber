@@ -70,9 +70,14 @@ function readJsonOrEmpty(file) {
         return {};
     }
 }
-/** The session's state as found (any JSON value), or {} without one. */
+/**
+ * The session's state object, or {} without one: a state file holding JSON
+ * that is not an object (null, a number, a string, an array) reads as {}, so
+ * no reader or registration fails on it.
+ */
 function readSessionState(sessionId) {
-    return readJsonOrEmpty(sessionStatePath(sessionId));
+    const found = readJsonOrEmpty(sessionStatePath(sessionId));
+    return guards.isObject(found) && !Array.isArray(found) ? found : {};
 }
 module.exports = {
     STATE_DIR,

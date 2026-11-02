@@ -22,20 +22,27 @@ const state = require("./state-store.cjs");
 function runKey(root) {
     return path.resolve(root);
 }
+/** A JSON object that is not an array: the shape of `runs` and its entries. */
+function isRecord(value) {
+    return guards.isObject(value) && !Array.isArray(value);
+}
 /** Whether the session drives the run; without a sound contract, every session does. */
 function ownsRun(sessionId, contract) {
     if (!contract || contract.broken)
         return true;
     const sessionState = state.readSessionState(sessionId);
-    const runs = guards.readField(sessionState, 'runs');
-    if (guards.isObject(runs)) {
+    if ('runs' in sessionState) {
+        // A present `runs` alone decides; a malformed one owns nothing.
+        const runs = sessionState['runs'];
+        if (!isRecord(runs))
+            return false;
         const entry = runs[runKey(contract.root)];
-        return guards.isObject(entry) && entry['run'] === contract.boundaryFile;
+        return isRecord(entry) && entry['run'] === contract.boundaryFile;
     }
     // A state file written before `runs` existed names one boundary file and
     // no zone, so it owns any run with that file. It is never written again
     // and lapses with the state file, 48 hours after the session's last use.
-    return guards.readField(sessionState, 'run') === contract.boundaryFile;
+    return sessionState['run'] === contract.boundaryFile;
 }
 /**
  * Registers the session as a driver of the zone's run: records the boundary
@@ -45,14 +52,14 @@ function ownsRun(sessionId, contract) {
  */
 function registerSession(sessionId, contract) {
     const sessionState = state.readSessionState(sessionId);
-    const found = guards.readField(sessionState, 'runs');
-    const runs = guards.isObject(found) ? found : {};
+    const found = sessionState['runs'];
+    const runs = isRecord(found) ? found : {};
     const entry = {
         run: contract.boundaryFile,
         at: clock.isoNow(),
     };
     runs[runKey(contract.root)] = entry;
-    guards.writeField(sessionState, 'runs', runs);
+    sessionState['runs'] = runs;
     state.ensureDirs();
     state.writeStateAtomic(state.sessionStatePath(sessionId), sessionState);
     const p = store.loadProgress(contract.root);
@@ -68,16 +75,16 @@ function registerSession(sessionId, contract) {
 /**
  * The zones the session's `runs` registers, newest `at` first: each zone
  * root with the boundary file and time recorded there. A zone whose .amber
- * directory is gone (a removed worktree) is left out; a pre-upgrade single
- * `run` names no zone and is not listed.
+ * directory is gone (a removed worktree) is left out, and so is a malformed
+ * `runs` or entry; a pre-upgrade single `run` names no zone and is not listed.
  */
 function registeredRuns(sessionId) {
-    const runs = guards.readField(state.readSessionState(sessionId), 'runs');
-    if (!guards.isObject(runs))
+    const runs = state.readSessionState(sessionId)['runs'];
+    if (!isRecord(runs))
         return [];
     const out = [];
     for (const [root, entry] of Object.entries(runs)) {
-        if (!guards.isObject(entry))
+        if (!isRecord(entry))
             continue;
         const run = entry['run'];
         if (typeof run !== 'string' || !run)

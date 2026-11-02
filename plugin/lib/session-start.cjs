@@ -77,16 +77,23 @@ function runS0(input) {
     // phase it opened: the gate outlives the context that opened it. A
     // pre-upgrade single `run` is carried as found, a read-only fallback while
     // the state file lives; nothing creates or updates it.
+    // A present `runs` is carried even when malformed: it alone decides
+    // ownership (a malformed one owns nothing), and dropping it would hand the
+    // decision back to the pre-upgrade `run`.
     const previous = state.readSessionState(input.session_id);
-    const previousRuns = guards.readField(previous, 'runs');
-    if (previousRuns)
-        sessionState.runs = previousRuns;
+    if ('runs' in previous)
+        sessionState.runs = previous['runs'];
     const previousRun = guards.readField(previous, 'run');
     if (previousRun)
         sessionState.run = previousRun;
     const previousPhase = guards.readField(previous, 'phase');
     if (previousPhase)
         sessionState.phase = previousPhase;
+    // The other driven zones announced below; S1 repeats them only when the
+    // set changes. Read from the previous state, whose runs are carried as is.
+    const driven = briefing.drivenZonesFor(input.cwd, input.session_id);
+    if (driven.length > 0)
+        sessionState.driven_briefed = briefing.drivenKey(driven);
     state.writeStateAtomic(statePath, sessionState);
     sweepIdleState();
     const failures = sensorFailureCount();
@@ -117,9 +124,8 @@ function runS0(input) {
             ? text.noContractGuidance()
             : text.NO_CONTRACT_INDEX);
     }
-    const drivenCtx = briefing.drivenZonesContextFor(input.cwd, input.session_id);
-    if (drivenCtx)
-        parts.push(drivenCtx);
+    if (driven.length > 0)
+        parts.push(driven.map((z) => z.line).join('\n'));
     if (failures > 0) {
         parts.push(text.sensorFailures(failures, state.FAILURES_FILE));
     }

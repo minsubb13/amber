@@ -50,24 +50,31 @@ function releaseContract(contract, sessionId) {
  * The zone the loop body sends a stop back for: among the zones the session
  * registered (newest `at` first) and then the hook cwd's zone, the first
  * whose sound contract the session drives and whose progress has open units.
+ * A zone whose progress, contract or ownership cannot be read (a malformed
+ * file) is skipped, so it never hides the zones after it.
  */
 function continuationZone(input, cwdRoot) {
     const roots = ownership.registeredRuns(input.session_id).map((r) => r.root);
     if (!roots.includes(cwdRoot))
         roots.push(cwdRoot);
     for (const root of roots) {
-        // Progress first: a file read, before the contract's git queries.
-        const p = store.loadProgress(root);
-        if (!p || model.isBroken(p))
-            continue;
-        if (model.openUnits(p).length === 0)
-            continue;
-        const contract = contracts.loadContract(root);
-        if (!contract || contract.broken)
-            continue;
-        if (!ownership.ownsRun(input.session_id, contract))
-            continue;
-        return { contract, p };
+        try {
+            // Progress first: a file read, before the contract's git queries.
+            const p = store.loadProgress(root);
+            if (!p || model.isBroken(p))
+                continue;
+            if (model.openUnits(p).length === 0)
+                continue;
+            const contract = contracts.loadContract(root);
+            if (!contract || contract.broken)
+                continue;
+            if (!ownership.ownsRun(input.session_id, contract))
+                continue;
+            return { contract, p };
+        }
+        catch {
+            // This zone's state is malformed; the next zone may still continue.
+        }
     }
     return null;
 }
@@ -112,7 +119,8 @@ function continuation(input, cwdRoot) {
     store.saveProgress(contract.root, p, clock.isoNow);
     state.ensureDirs();
     state.writeStateAtomic(loopFile, { blocked_at: clock.isoNow(), unit: id });
-    return text.blockOutput(text.continuationDirective(contract.boundaryFile, p, id, unit.reentries));
+    const root = path.resolve(contract.root);
+    return text.blockOutput(text.continuationDirective(contract.boundaryFile, p, id, unit.reentries, root === cwdRoot ? null : root));
 }
 /** The gate's rejection counter for this session; a non-number reads as 0. */
 function gateAttempts(gateFile) {
@@ -130,7 +138,8 @@ function gateAttempts(gateFile) {
  * newest `at` first; the first signal claimed is consumed and the search
  * ends there, even when it turns out stale or malformed. A signal is claimed
  * when it names this session; one that names no session (an older recorder)
- * when the session drives that zone's run, as before signals named one.
+ * when the session drives that zone's run, as before signals named one. A
+ * zone whose state cannot be read is passed over.
  */
 function takeOwnSignal(input, cwdRoot) {
     const roots = [cwdRoot];
@@ -139,17 +148,22 @@ function takeOwnSignal(input, cwdRoot) {
             roots.push(r.root);
     }
     for (const root of roots) {
-        const { taken, signal } = done.takeDoneSignal(root, (sessionId) => {
-            if (sessionId !== null)
-                return sessionId === input.session_id;
-            const contract = contracts.loadContract(root);
-            // Outside the cwd's zone only a run the session drives is its own.
-            if (!contract && root !== cwdRoot)
-                return false;
-            return ownership.ownsRun(input.session_id, contract);
-        });
-        if (taken)
-            return { root, signal };
+        try {
+            const { taken, signal } = done.takeDoneSignal(root, (sessionId) => {
+                if (sessionId !== null)
+                    return sessionId === input.session_id;
+                const contract = contracts.loadContract(root);
+                // Outside the cwd's zone only a run the session drives is its own.
+                if (!contract && root !== cwdRoot)
+                    return false;
+                return ownership.ownsRun(input.session_id, contract);
+            });
+            if (taken)
+                return { root, signal };
+        }
+        catch {
+            // A zone whose state cannot be read keeps its signal; search on.
+        }
     }
     return null;
 }

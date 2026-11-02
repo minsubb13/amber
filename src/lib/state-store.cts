@@ -79,9 +79,14 @@ function readJsonOrEmpty(file: string): unknown {
   }
 }
 
-/** The session's state as found (any JSON value), or {} without one. */
-function readSessionState(sessionId: unknown): unknown {
-  return readJsonOrEmpty(sessionStatePath(sessionId));
+/**
+ * The session's state object, or {} without one: a state file holding JSON
+ * that is not an object (null, a number, a string, an array) reads as {}, so
+ * no reader or registration fails on it.
+ */
+function readSessionState(sessionId: unknown): Record<string, unknown> {
+  const found = readJsonOrEmpty(sessionStatePath(sessionId));
+  return guards.isObject(found) && !Array.isArray(found) ? found : {};
 }
 
 export = {

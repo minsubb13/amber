@@ -2774,6 +2774,70 @@ const amberFiles = (zone: string): string =>
       sessionState(home, 'legacy'),
     ]),
   );
+  // A present `runs` alone decides ownership, even when it is malformed.
+  fs.writeFileSync(
+    path.join(home, 'state', 'session-nullruns.json'),
+    JSON.stringify({ run: 'test-boundary.md', runs: null }),
+  );
+  check(
+    'a state file with run and a null runs owns neither A nor B',
+    !owns(home, 'nullruns', zoneA) && !owns(home, 'nullruns', zoneB),
+  );
+  runHook(
+    'S0',
+    { session_id: 'nullruns', cwd: zoneA, model: 'm', source: 'resume' },
+    home,
+  );
+  check(
+    'S0 on resume carries the null runs, so the run beside it still owns nothing',
+    has(sessionState(home, 'nullruns'), 'runs') &&
+      !owns(home, 'nullruns', zoneA) &&
+      !owns(home, 'nullruns', zoneB),
+    JSON.stringify(sessionState(home, 'nullruns')),
+  );
+  // A session state that is JSON but not an object reads as an empty state.
+  const malformed = ['null', '5', '"text"', '[1, 2]'];
+  malformed.forEach((json, i) => {
+    fs.writeFileSync(
+      path.join(home, 'state', 'session-bad' + String(i) + '.json'),
+      json,
+    );
+  });
+  check(
+    'ownsRun reads a non-object session state as owning nothing, without throwing',
+    malformed.every(
+      (_, i) =>
+        !owns(home, 'bad' + String(i), zoneA) &&
+        !owns(home, 'bad' + String(i), zoneB),
+    ),
+  );
+  const badBefore = JSON.stringify(progressOf(zoneB));
+  const badStart = rec(zoneB, 'bad0', ['unit', 'start', 'U2']);
+  check(
+    'a unit command over a null session state passes and registers the session',
+    badStart.status === 0 &&
+      JSON.stringify(progressOf(zoneB)) !== badBefore &&
+      runAt(home, 'bad0', zoneB) === 'test-boundary.md' &&
+      list(get(progressOf(zoneB), 'session_ids')).includes('bad0'),
+    (badStart.stderr || '') + JSON.stringify(sessionState(home, 'bad0')),
+  );
+  fs.writeFileSync(
+    path.join(home, 'state', 'session-badruns.json'),
+    JSON.stringify({ runs: { [fs.realpathSync(zoneB)]: 7, x: null } }),
+  );
+  const badRuns = rec(zoneB, 'badruns', [
+    'unit',
+    'hold',
+    'U2',
+    '--reason',
+    'r',
+  ]);
+  check(
+    'malformed runs entries are skipped and replaced by the registration',
+    badRuns.status === 0 &&
+      runAt(home, 'badruns', zoneB) === 'test-boundary.md',
+    (badRuns.stderr || '') + JSON.stringify(sessionState(home, 'badruns')),
+  );
 }
 
 // ---- zone link: the completion signal names its session, and a stop follows the zones the session drives ----
@@ -2926,6 +2990,17 @@ const amberFiles = (zone: string): string =>
       get(next.out, 'decision') === 'block' && blocksOf(zoneA) === 1,
       JSON.stringify(next.out),
     );
+    check(
+      'a send-back for the zone the session stands in keeps the plain commands',
+      stringAt(next.out, 'reason').startsWith(
+        'amber loop (contract test-boundary.md): ',
+      ) &&
+        stringAt(next.out, 'reason').includes(
+          'run `node ' + RECORD_CLI + ' unit start U1`',
+        ) &&
+        !stringAt(next.out, 'reason').includes('cd '),
+      stringAt(next.out, 'reason'),
+    );
     check('no sensor failure in the signal pair', noFailures(home));
   }
 
@@ -2947,14 +3022,176 @@ const amberFiles = (zone: string): string =>
       JSON.stringify(pass),
     );
     const back = stopIn(home, 'w', zoneA);
+    const reason = stringAt(back.out, 'reason');
+    const inB = 'cd ' + realB(zoneB) + ' && node ';
     check(
       'the next stop in A is sent back for B, the zone with open units',
       get(back.out, 'decision') === 'block' &&
-        /amber loop \(contract test-boundary\.md\)/.test(
-          stringAt(back.out, 'reason'),
+        reason.startsWith(
+          'amber loop (contract test-boundary.md in ' + realB(zoneB) + '): ',
         ) &&
         blocksOf(zoneB) === 1,
       JSON.stringify(back.out),
+    );
+    check(
+      "the send-back for B gives every command with B's directory, in one line",
+      reason.includes(inB + RECORD_CLI + ' unit start U1`') &&
+        reason.includes(inB + RECORD_CLI + ' unit verified U1 --evidence') &&
+        reason.includes(inB + RECORD_CLI + ' unit hold U1 --reason') &&
+        !reason.includes('amber:mark') &&
+        !reason.includes('`node '),
+      reason,
+    );
+  }
+
+  // A signal replaced between its owner's read and the unlink: the owner
+  // takes what it read, and the replacement stays for its own session.
+  {
+    const { zoneB, home, rec } = linkPair('race');
+    rec(zoneB, 'r1', ['unit', 'init', 'docs/plan.md']);
+    finish(rec, zoneB, 'r1');
+    rec(zoneB, 'r1', ['done', ...OK_DONE]);
+    const doneSignal = loadModule<typeof import('../src/lib/done-signal.cjs')>(
+      'lib/done-signal.cjs',
+      ['takeDoneSignal', 'writeDoneSignal'],
+    );
+    let replacement = '';
+    const first = doneSignal.takeDoneSignal(zoneB, (sessionId) => {
+      // r2's recorder writes its signal while r1's stop decides.
+      doneSignal.writeDoneSignal(zoneB, {
+        session_id: 'r2',
+        target: 'test-boundary.md',
+        review: 'r2 review',
+        goal: 'r2 goal',
+        summary: 'r2 complete',
+      });
+      replacement = signalText(zoneB);
+      return sessionId === 'r1';
+    });
+    check(
+      'a signal replaced while its owner reads it is taken, and the replacement survives byte-identical',
+      first.taken &&
+        get(first.signal, 'session_id') === 'r1' &&
+        replacement !== '' &&
+        get(parseJson(replacement), 'session_id') === 'r2' &&
+        signalText(zoneB) === replacement,
+      JSON.stringify([first, replacement, signalText(zoneB)]),
+    );
+    const own = stopIn(home, 'r2', zoneB);
+    check(
+      "the replacement is consumed by its own session's stop",
+      own.out === null &&
+        !signalExists(zoneB) &&
+        passedRows(home).some(
+          (r) =>
+            get(r, 'summary') === 'r2 complete' &&
+            get(r, 'session_id') === 'r2',
+        ),
+      JSON.stringify([own, ledger(home)]),
+    );
+  }
+
+  // Two sessions submit in B before the first one stops.
+  {
+    const { zoneA, zoneB, home, rec } = linkPair('concur');
+    rec(zoneB, 'c1', ['unit', 'init', 'docs/plan.md']);
+    finish(rec, zoneB, 'c1');
+    const doneC1 = rec(zoneB, 'c1', ['done', ...OK_DONE]);
+    const doneC2 = rec(zoneB, 'c2', ['done', ...OK_DONE]);
+    const c2Signal = signalText(zoneB);
+    const c1Stop = stopIn(home, 'c1', zoneA);
+    check(
+      "the first session's stop leaves the second session's replacement in place",
+      doneC1.status === 0 &&
+        doneC2.status === 0 &&
+        get(parseJson(c2Signal), 'session_id') === 'c2' &&
+        c1Stop.out === null &&
+        signalText(zoneB) === c2Signal &&
+        passedRows(home).length === 0 &&
+        fs.existsSync(path.join(zoneB, '.amber', 'active.json')),
+      JSON.stringify([doneC1.stderr, doneC2.stderr, c1Stop]),
+    );
+    const c2Stop = stopIn(home, 'c2', zoneB);
+    check(
+      "the second session's stop consumes its own signal and releases B",
+      c2Stop.out === null &&
+        !signalExists(zoneB) &&
+        passedRows(home).length === 1 &&
+        get(passedRows(home)[0], 'session_id') === 'c2' &&
+        !fs.existsSync(path.join(zoneB, '.amber', 'active.json')),
+      JSON.stringify([c2Stop, ledger(home)]),
+    );
+  }
+
+  // Malformed progress in the newest registered zone does not hide A.
+  {
+    const { zoneA, zoneB, home, rec } = linkPair('badprog');
+    rec(zoneA, 'bp', ['unit', 'init', 'docs/plan.md']);
+    rec(zoneA, 'bp', ['unit', 'start', 'U1']);
+    rec(zoneB, 'bp', ['unit', 'init', 'docs/plan.md']);
+    rec(zoneB, 'bp', ['unit', 'start', 'U1']);
+    fs.writeFileSync(
+      path.join(zoneB, '.amber', 'progress.json'),
+      JSON.stringify({ units: null }),
+    );
+    const back = stopIn(home, 'bp', zoneA);
+    check(
+      'a stop is sent back for A when the newer zone B holds units: null',
+      back.exit === 0 &&
+        back.out !== null &&
+        get(back.out, 'decision') === 'block' &&
+        stringAt(back.out, 'reason').startsWith(
+          'amber loop (contract test-boundary.md): ',
+        ) &&
+        blocksOf(zoneA) === 1 &&
+        noFailures(home),
+      JSON.stringify(back),
+    );
+  }
+
+  // S1 names the other driven zones once per change of their set.
+  {
+    const { zoneA, zoneB, home, rec } = linkPair('brief');
+    const s1 = (sessionId: string, cwd: string): string =>
+      stringOf(
+        contextOf(
+          runHook('S1', { session_id: sessionId, cwd, prompt: 'go' }, home).out,
+        ),
+      );
+    runHook('S0', { session_id: 'f6', cwd: zoneEmpty, model: 'm' }, home);
+    rec(zoneB, 'f6', ['unit', 'init', 'docs/plan.md']);
+    const firstLine = s1('f6', zoneEmpty);
+    const again = s1('f6', zoneEmpty);
+    check(
+      'in a zone without a contract, the prompt after driving B names B once',
+      DRIVEN_LINE.test(firstLine) &&
+        firstLine.includes(' in ' + realB(zoneB) + ' ') &&
+        !DRIVEN_LINE.test(again),
+      JSON.stringify([firstLine, again]),
+    );
+    rec(zoneA, 'f6', ['unit', 'init', 'docs/plan.md']);
+    const grown = s1('f6', zoneEmpty);
+    const after = s1('f6', zoneEmpty);
+    check(
+      'a new registration names the driven zones again, then falls silent',
+      grown.split('also drives').length === 3 &&
+        grown.includes(' in ' + realB(zoneA) + ' ') &&
+        grown.includes(' in ' + realB(zoneB) + ' ') &&
+        !DRIVEN_LINE.test(after),
+      JSON.stringify([grown, after]),
+    );
+    runHook('S0', { session_id: 'f6a', cwd: zoneA, model: 'm' }, home);
+    const briefedOnly = s1('f6a', zoneA);
+    rec(zoneB, 'f6a', ['unit', 'start', 'U1']);
+    const withB = s1('f6a', zoneA);
+    const quiet = s1('f6a', zoneA);
+    check(
+      'a session already briefed in A is told about B once, without the contract briefing',
+      !DRIVEN_LINE.test(briefedOnly) &&
+        DRIVEN_LINE.test(withB) &&
+        !/an active contract governs/.test(withB) &&
+        !DRIVEN_LINE.test(quiet),
+      JSON.stringify([briefedOnly, withB, quiet]),
     );
   }
 

@@ -50,17 +50,18 @@ function waitingSignalContextFor(contract, sessionId) {
     return text.WAITING_SIGNAL;
 }
 /**
- * One line per run the session drives in a zone other than the cwd's (a
- * linked worktree outside it): its stops and completion signal follow that
- * zone. Only registrations that still name the zone's active contract count;
- * a removed zone is skipped.
+ * The runs the session drives in zones other than the cwd's (a linked
+ * worktree outside it), newest registration first, each with its briefing
+ * line: its stops and completion signal follow that zone. Only
+ * registrations that still name the zone's active contract count; a removed
+ * zone is skipped.
  */
-function drivenZonesContextFor(cwd, sessionId) {
+function drivenZonesFor(cwd, sessionId) {
     const runs = ownership.registeredRuns(sessionId);
     if (runs.length === 0)
-        return null;
+        return [];
     const cwdRoot = path.resolve(zone.zoneRoot(cwd));
-    const lines = [];
+    const out = [];
     for (const r of runs) {
         if (r.root === cwdRoot)
             continue;
@@ -69,9 +70,20 @@ function drivenZonesContextFor(cwd, sessionId) {
             continue;
         if (!ownership.ownsRun(sessionId, contract))
             continue;
-        lines.push(text.drivenZoneLine(contract.boundaryFile, r.root));
+        out.push({
+            root: r.root,
+            line: text.drivenZoneLine(contract.boundaryFile, r.root),
+        });
     }
-    return lines.length > 0 ? lines.join('\n') : null;
+    return out;
+}
+/**
+ * The key S0 and S1 keep in the session state as `driven_briefed`: the
+ * sorted roots of the other driven zones last announced, so the lines are
+ * sent once per change of that set.
+ */
+function drivenKey(zones) {
+    return zones.map((z) => z.root).sort();
 }
 function linkedWorktreeContextFor(cwd) {
     const main = zone.linkedWorktreeMain(cwd);
@@ -84,6 +96,7 @@ module.exports = {
     progressContextFor,
     ownershipContextFor,
     waitingSignalContextFor,
-    drivenZonesContextFor,
+    drivenZonesFor,
+    drivenKey,
     linkedWorktreeContextFor,
 };

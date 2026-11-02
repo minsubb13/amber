@@ -68,6 +68,21 @@ function peekSignalSession(root: string): { sessionId: string | null } | null {
   return { sessionId: signalSession(readSignalFile(file)) };
 }
 
+/** Whether `file` is still the very file `seen` was taken from. */
+function sameFile(file: string, seen: fs.Stats): boolean {
+  try {
+    const now = fs.statSync(file);
+    return (
+      now.dev === seen.dev &&
+      now.ino === seen.ino &&
+      now.size === seen.size &&
+      now.mtimeMs === seen.mtimeMs
+    );
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Reads the zone's completion signal and consumes it when `accepts` claims
  * it, given the session the signal names (null when it names none). A signal
@@ -75,6 +90,12 @@ function peekSignalSession(root: string): { sessionId: string | null } | null {
  * consumed on every path so a rejected signal never fires twice, and a
  * malformed or stale one is dropped. `taken` says whether the file was
  * consumed.
+ *
+ * The file is read through one descriptor and unlinked only while the path
+ * still names that file: a recorder that replaced it in the meantime (an
+ * atomic rename, so a new inode) leaves the replacement for its own session,
+ * and the signal read here still counts as taken. The window left is the
+ * moment between that last check and the unlink.
  */
 function takeDoneSignal(
   root: string,
@@ -82,9 +103,21 @@ function takeDoneSignal(
 ): { taken: boolean; signal: DoneSignal | null } {
   const file = donePath(root);
   if (!fs.existsSync(file)) return { taken: false, signal: null };
-  const signal = readSignalFile(file);
+  let seen: fs.Stats | null = null;
+  let signal: unknown = null;
+  try {
+    const fd = fs.openSync(file, 'r');
+    try {
+      seen = fs.fstatSync(fd);
+      signal = JSON.parse(fs.readFileSync(fd, 'utf8'));
+    } finally {
+      fs.closeSync(fd);
+    }
+  } catch {
+    // Unreadable or not JSON: signal stays null, which names no session.
+  }
   if (!accepts(signalSession(signal))) return { taken: false, signal: null };
-  state.tryUnlink(file);
+  if (!seen || sameFile(file, seen)) state.tryUnlink(file);
   if (!isDoneSignal(signal)) return { taken: true, signal: null };
   const age = clock.nowMs() - Date.parse(guards.toText(signal.ts || 0));
   if (!(age <= DONE_TTL_MS)) return { taken: true, signal: null };
