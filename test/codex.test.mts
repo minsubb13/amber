@@ -753,6 +753,35 @@ test('Codex Stop leaves a signal alone for a session that does not drive the run
     false,
   );
 });
+test('Codex done names its thread in the signal and only that thread takes it', () => {
+  const f = fixture();
+  hook(f, 'SessionStart');
+  const written = record(f, DONE);
+  assert.equal(written.status, 0, written.stderr);
+  const signalFile = path.join(f.root, '.amber', 'done.json');
+  const before = fs.readFileSync(signalFile, 'utf8');
+  assert.equal(get(parseJson(before), 'session_id'), f.session);
+  assert.equal(
+    hook(f, 'Stop', {
+      session_id: 'another-thread',
+      last_assistant_message: 'Finished.',
+      stop_hook_active: false,
+    }),
+    null,
+  );
+  assert.equal(fs.readFileSync(signalFile, 'utf8'), before, 'left untouched');
+  assert.deepEqual(ledger(f), []);
+  assert.equal(
+    hook(f, 'Stop', {
+      last_assistant_message: 'Finished.',
+      stop_hook_active: false,
+    }),
+    null,
+  );
+  assert.equal(signalExists(f), false);
+  assert.equal(get(ledger(f), 0, 'gate'), 'passed');
+  assert.equal(get(ledger(f), 0, 'session_id'), f.session);
+});
 for (const outcome of ['exhausted', 'withdrawn']) {
   test('Codex Stop lifecycle under a broken pointer: ' + outcome, () => {
     const f = fixture();

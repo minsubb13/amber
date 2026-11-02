@@ -2001,9 +2001,17 @@ const registersAny = (home: string, sessionId: string): boolean => {
       /U1/.test(stringOf(ctx1)),
     String(ctx1).slice(0, 300),
   );
+  // A session registered nowhere: s2-test drives this block's loop zone,
+  // whose open units its stops would follow.
   const quiet = runHook(
     'S2',
-    stopEvent(zoneContract, 'plain turn without progress', false),
+    {
+      session_id: 's2-quiet',
+      cwd: zoneContract,
+      hook_event_name: 'Stop',
+      stop_hook_active: false,
+      last_assistant_message: 'plain turn without progress',
+    },
     home,
   ).out;
   check(
@@ -2550,28 +2558,41 @@ const registersAny = (home: string, sessionId: string): boolean => {
 }
 
 // ---- zone link: a session in zone A drives the run of a linked worktree B outside it ----
-{
-  const PLAN = [
-    '## Work units',
-    '- [ ] U1 one [unit: U1 scope=plugin/** oracle=true]',
-    '- [ ] U2 two [unit: U2 scope=docs/*.md oracle=true]',
-  ].join('\n');
-  const POINTER = {
-    v: 1,
-    boundary: 'test-boundary.md',
-    ratified_by: 'operator',
-    ratified_at: '2026-11-02',
-  };
-  // A and B share their contract file name, test-boundary.md, from the commit.
-  const zoneA = makeZone('link-a', BOUNDARY, POINTER);
+const LINK_PLAN = [
+  '## Work units',
+  '- [ ] U1 one [unit: U1 scope=plugin/** oracle=true]',
+  '- [ ] U2 two [unit: U2 scope=docs/*.md oracle=true]',
+].join('\n');
+const LINK_POINTER = {
+  v: 1,
+  boundary: 'test-boundary.md',
+  ratified_by: 'operator',
+  ratified_at: '2026-11-02',
+};
+interface LinkPair {
+  readonly zoneA: string;
+  readonly zoneB: string;
+  readonly home: string;
+  /** record.cjs run in `cwd` from the shell of a session. */
+  readonly rec: (
+    cwd: string,
+    sessionId: string,
+    args: readonly string[],
+  ) => SpawnSyncReturns<string>;
+}
+// Zone A (`<tag>-a`, a repository with a contract) and zone B (`<tag>-b`, a
+// linked worktree of A outside it with its own pointer), both governed by a
+// contract file named test-boundary.md, and a fresh AMBER_HOME (`<tag>`).
+function linkPair(tag: string): LinkPair {
+  const zoneA = makeZone(tag + '-a', BOUNDARY, LINK_POINTER);
   fs.mkdirSync(path.join(zoneA, 'docs'), { recursive: true });
-  fs.writeFileSync(path.join(zoneA, 'docs', 'plan.md'), PLAN);
+  fs.writeFileSync(path.join(zoneA, 'docs', 'plan.md'), LINK_PLAN);
   fs.writeFileSync(path.join(zoneA, '.gitignore'), '.amber/\n');
   execFileSync('git', ['-C', zoneA, 'config', 'user.email', 't@t']);
   execFileSync('git', ['-C', zoneA, 'config', 'user.name', 't']);
   execFileSync('git', ['-C', zoneA, 'add', '-A']);
   execFileSync('git', ['-C', zoneA, 'commit', '-q', '-m', 'init']);
-  const zoneB = path.join(BASE, 'link-b');
+  const zoneB = path.join(BASE, tag + '-b');
   execFileSync('git', [
     '-C',
     zoneA,
@@ -2579,17 +2600,16 @@ const registersAny = (home: string, sessionId: string): boolean => {
     'add',
     '-q',
     '-b',
-    'link-b',
+    tag + '-b',
     zoneB,
   ]);
   fs.mkdirSync(path.join(zoneB, '.amber'), { recursive: true });
   fs.writeFileSync(
     path.join(zoneB, '.amber', 'active.json'),
-    JSON.stringify(POINTER),
+    JSON.stringify(LINK_POINTER),
   );
-  const home = freshHome('link');
-  // record.cjs run in `cwd` from the shell of a session (Claude Code's own
-  // variable only; the others are blanked).
+  const home = freshHome(tag);
+  // Claude Code's own variable only; the others are blanked.
   const rec = (
     cwd: string,
     sessionId: string,
@@ -2608,17 +2628,21 @@ const registersAny = (home: string, sessionId: string): boolean => {
         PI_SESSION_ID: '',
       },
     });
-  const progressOf = (zone: string): unknown =>
-    parseJson(
-      fs.readFileSync(path.join(zone, '.amber', 'progress.json'), 'utf8'),
-    );
-  const amberFiles = (zone: string): string =>
-    JSON.stringify(
-      fs
-        .readdirSync(path.join(zone, '.amber'))
-        .sort()
-        .map((n) => [n, fs.readFileSync(path.join(zone, '.amber', n), 'utf8')]),
-    );
+  return { zoneA, zoneB, home, rec };
+}
+const progressOf = (zone: string): unknown =>
+  parseJson(
+    fs.readFileSync(path.join(zone, '.amber', 'progress.json'), 'utf8'),
+  );
+const amberFiles = (zone: string): string =>
+  JSON.stringify(
+    fs
+      .readdirSync(path.join(zone, '.amber'))
+      .sort()
+      .map((n) => [n, fs.readFileSync(path.join(zone, '.amber', n), 'utf8')]),
+  );
+{
+  const { zoneA, zoneB, home, rec } = linkPair('link');
   const atOf = (sessionId: string, zone: string): string =>
     stringOf(
       at(sessionState(home, sessionId), 'runs', fs.realpathSync(zone), 'at'),
@@ -2732,16 +2756,364 @@ const registersAny = (home: string, sessionId: string): boolean => {
       get(sessionState(home, 'legacy'), 'run') === 'test-boundary.md',
     JSON.stringify(sessionState(home, 'legacy')),
   );
-  runHook(
-    'S0',
-    { session_id: 'legacy-other', cwd: zoneA, model: 'm', source: 'resume' },
-    home,
-  );
+  for (const id of ['legacy-other', 'legacy']) {
+    runHook(
+      'S0',
+      { session_id: id, cwd: zoneA, model: 'm', source: 'resume' },
+      home,
+    );
+  }
   check(
-    'S0 does not carry a pre-upgrade run over',
-    !has(sessionState(home, 'legacy-other'), 'run'),
-    JSON.stringify(sessionState(home, 'legacy-other')),
+    'S0 on resume carries a pre-upgrade run as found, alone or beside runs',
+    get(sessionState(home, 'legacy-other'), 'run') === 'other-boundary.md' &&
+      !has(sessionState(home, 'legacy-other'), 'runs') &&
+      get(sessionState(home, 'legacy'), 'run') === 'test-boundary.md' &&
+      runAt(home, 'legacy', zoneB) === 'test-boundary.md',
+    JSON.stringify([
+      sessionState(home, 'legacy-other'),
+      sessionState(home, 'legacy'),
+    ]),
   );
+}
+
+// ---- zone link: the completion signal names its session, and a stop follows the zones the session drives ----
+{
+  // A Stop of the session standing in `cwd`, with the pair's AMBER_HOME.
+  const stopIn = (
+    home: string,
+    sessionId: string,
+    cwd: string,
+    active?: boolean,
+  ): HookRun =>
+    runHook(
+      'S2',
+      {
+        session_id: sessionId,
+        cwd,
+        hook_event_name: 'Stop',
+        stop_hook_active: !!active,
+        last_assistant_message: 'report',
+      },
+      home,
+    );
+  const realB = (zone: string): string => fs.realpathSync(zone);
+  const blocksOf = (zone: string): unknown => get(progressOf(zone), 'blocks');
+  const noFailures = (home: string): boolean =>
+    !fs.existsSync(path.join(home, 'state', 'sensor-failures.log'));
+  // The signal file's text, '' once it is gone.
+  const signalText = (zone: string): string =>
+    signalExists(zone) ? fs.readFileSync(signalPath(zone), 'utf8') : '';
+  const readSignal = (zone: string): unknown => parseJson(signalText(zone));
+  const passedRows = (home: string): unknown[] =>
+    ledger(home).filter((r) => get(r, 'gate') === 'passed');
+  const DRIVEN_LINE =
+    /this session also drives the run of test-boundary\.md in /;
+  // Every unit of the pair's plan verified by the session, in `zone`.
+  const finish = (
+    rec: LinkPair['rec'],
+    zone: string,
+    sessionId: string,
+  ): void => {
+    for (const id of ['U1', 'U2']) {
+      rec(zone, sessionId, ['unit', 'start', id]);
+      rec(zone, sessionId, ['unit', 'verified', id, '--evidence', 'ok']);
+    }
+  };
+
+  // B finished, A open: the session in A signals in B; a second session
+  // registered in B leaves that signal alone; the owner's stop takes it.
+  {
+    const { zoneA, zoneB, home, rec } = linkPair('sig');
+    rec(zoneA, 's1', ['unit', 'init', 'docs/plan.md']);
+    rec(zoneA, 's1', ['unit', 'start', 'U1']);
+    rec(zoneB, 's1', ['unit', 'init', 'docs/plan.md']);
+    finish(rec, zoneB, 's1');
+    const s0 = contextOf(
+      runHook('S0', { session_id: 's1', cwd: zoneA, model: 'm1' }, home).out,
+    );
+    check(
+      'S0 in A names the run the session also drives in B, once',
+      DRIVEN_LINE.test(stringOf(s0)) &&
+        stringOf(s0).includes(' in ' + realB(zoneB) + ' ') &&
+        stringOf(s0).split('also drives').length === 2,
+      stringOf(s0).slice(-500),
+    );
+    const s1 = contextOf(
+      runHook('S1', { session_id: 's1', cwd: zoneA, prompt: 'go on' }, home)
+        .out,
+    );
+    check(
+      'S1 after S0 does not repeat the briefing line',
+      !DRIVEN_LINE.test(stringOf(s1)),
+      stringOf(s1),
+    );
+    const doneB = rec(zoneB, 's1', ['done', ...OK_DONE]);
+    check(
+      "done run in B writes the session's id into B's signal",
+      doneB.status === 0 &&
+        get(readSignal(zoneB), 'session_id') === 's1' &&
+        get(readSignal(zoneB), 'target') === 'test-boundary.md' &&
+        !signalExists(zoneA),
+      doneB.stderr,
+    );
+    register(zoneB, home, 's2');
+    register(zoneA, home, 's1b');
+    register(zoneB, home, 's1b');
+    const s1first = contextOf(
+      runHook('S1', { session_id: 's1b', cwd: zoneA, prompt: 'hello' }, home)
+        .out,
+    );
+    check(
+      'the first S1 briefing in A carries the line for B with the contract briefing',
+      /an active contract governs/.test(stringOf(s1first)) &&
+        DRIVEN_LINE.test(stringOf(s1first)),
+      stringOf(s1first).slice(-400),
+    );
+    const signalBefore = signalText(zoneB);
+    const ledgerBefore = ledger(home).length;
+    const otherFromA = stopIn(home, 's2', zoneA);
+    const otherFromB = stopIn(home, 's2', zoneB);
+    check(
+      "another session's stops, from A or from B, leave the signal byte-identical",
+      otherFromA.exit === 0 &&
+        otherFromB.exit === 0 &&
+        otherFromA.out === null &&
+        otherFromB.out === null &&
+        signalText(zoneB) === signalBefore &&
+        ledger(home).length === ledgerBefore &&
+        fs.existsSync(path.join(zoneB, '.amber', 'active.json')),
+      JSON.stringify([otherFromA, otherFromB]),
+    );
+    const s0other = contextOf(
+      runHook('S0', { session_id: 's2', cwd: zoneB, model: 'm' }, home).out,
+    );
+    check(
+      'S0 in B tells the other session that a signal from another session waits',
+      /completion signal is waiting in this zone from another session/.test(
+        stringOf(s0other),
+      ),
+      stringOf(s0other).slice(-400),
+    );
+    const aBefore = amberFiles(zoneA);
+    const own = stopIn(home, 's1', zoneA);
+    const row = passedRows(home).find(
+      (r) => get(r, 'summary') === 'unit complete',
+    );
+    check(
+      "the session's stop in A takes its signal in B and releases B only",
+      own.exit === 0 &&
+        own.out === null &&
+        !signalExists(zoneB) &&
+        !fs.existsSync(path.join(zoneB, '.amber', 'active.json')) &&
+        !fs.existsSync(path.join(zoneB, '.amber', 'progress.json')) &&
+        amberFiles(zoneA) === aBefore,
+      JSON.stringify(own),
+    );
+    check(
+      "the passed row carries B's contract, B's place and the session",
+      !!row &&
+        get(row, 'contract') === 'test-boundary.md' &&
+        get(row, 'review_target') === 'test-boundary.md' &&
+        get(row, 'cwd') === realB(zoneB) &&
+        get(row, 'project') === path.basename(zoneB) &&
+        get(row, 'session_id') === 's1' &&
+        get(row, 'model') === 'm1',
+      JSON.stringify(row),
+    );
+    const next = stopIn(home, 's1', zoneA);
+    check(
+      "with B released, the next stop is sent back for A's open units",
+      get(next.out, 'decision') === 'block' && blocksOf(zoneA) === 1,
+      JSON.stringify(next.out),
+    );
+    check('no sensor failure in the signal pair', noFailures(home));
+  }
+
+  // A finished, B open: A's completion passes and the next stop goes to B.
+  {
+    const { zoneA, zoneB, home, rec } = linkPair('waitb');
+    rec(zoneB, 'w', ['unit', 'init', 'docs/plan.md']);
+    rec(zoneB, 'w', ['unit', 'start', 'U1']);
+    rec(zoneA, 'w', ['unit', 'init', 'docs/plan.md']);
+    finish(rec, zoneA, 'w');
+    rec(zoneA, 'w', ['done', ...OK_DONE]);
+    const pass = stopIn(home, 'w', zoneA);
+    check(
+      "A's own signal passes and releases A while B stays open",
+      pass.out === null &&
+        !fs.existsSync(path.join(zoneA, '.amber', 'active.json')) &&
+        fs.existsSync(path.join(zoneB, '.amber', 'active.json')) &&
+        get(passedRows(home)[0], 'cwd') === realB(zoneA),
+      JSON.stringify(pass),
+    );
+    const back = stopIn(home, 'w', zoneA);
+    check(
+      'the next stop in A is sent back for B, the zone with open units',
+      get(back.out, 'decision') === 'block' &&
+        /amber loop \(contract test-boundary\.md\)/.test(
+          stringAt(back.out, 'reason'),
+        ) &&
+        blocksOf(zoneB) === 1,
+      JSON.stringify(back.out),
+    );
+  }
+
+  // Both open: the stop follows the zone the session drove last.
+  {
+    const { zoneA, zoneB, home, rec } = linkPair('newest');
+    rec(zoneA, 'n', ['unit', 'init', 'docs/plan.md']);
+    rec(zoneA, 'n', ['unit', 'start', 'U1']);
+    rec(zoneB, 'n', ['unit', 'init', 'docs/plan.md']);
+    rec(zoneB, 'n', ['unit', 'start', 'U1']);
+    stopIn(home, 'n', zoneA);
+    check(
+      'driving A then B, a stop in A is sent back for B only',
+      blocksOf(zoneB) === 1 && blocksOf(zoneA) === 0,
+      JSON.stringify([progressOf(zoneA), progressOf(zoneB)]),
+    );
+    rec(zoneA, 'n', ['unit', 'start', 'U2']);
+    stopIn(home, 'n', zoneB);
+    check(
+      'driving A again, a stop in B is sent back for A only',
+      blocksOf(zoneA) === 1 && blocksOf(zoneB) === 1,
+      JSON.stringify([progressOf(zoneA), progressOf(zoneB)]),
+    );
+    rec(zoneA, 'n', ['unit', 'hold', 'U2', '--reason', 'operator']);
+    const held = stopIn(home, 'n', zoneB);
+    check(
+      'a plain hold in the newest zone passes that stop without sending it to the older zone',
+      held.out === null && blocksOf(zoneB) === 1,
+      JSON.stringify(held.out),
+    );
+  }
+
+  // The hook cwd zone has no contract: B's units and B's signal still reach the session.
+  {
+    const { zoneB, home, rec } = linkPair('bare');
+    rec(zoneB, 'b', ['unit', 'init', 'docs/plan.md']);
+    rec(zoneB, 'b', ['unit', 'start', 'U1']);
+    const back = stopIn(home, 'b', zoneEmpty);
+    check(
+      'a session standing in a zone without a contract is sent back for B',
+      get(back.out, 'decision') === 'block' && blocksOf(zoneB) === 1,
+      JSON.stringify(back),
+    );
+    rec(zoneB, 'b', ['unit', 'verified', 'U1', '--evidence', 'ok']);
+    rec(zoneB, 'b', ['unit', 'start', 'U2']);
+    rec(zoneB, 'b', ['unit', 'verified', 'U2', '--evidence', 'ok']);
+    rec(zoneB, 'b', ['done', ...OK_DONE]);
+    const pass = stopIn(home, 'b', zoneEmpty);
+    check(
+      "the stop in that zone takes B's signal and releases B",
+      pass.out === null &&
+        !signalExists(zoneB) &&
+        !fs.existsSync(path.join(zoneB, '.amber', 'active.json')) &&
+        get(passedRows(home)[0], 'contract') === 'test-boundary.md' &&
+        get(passedRows(home)[0], 'cwd') === realB(zoneB),
+      JSON.stringify([pass, ledger(home)]),
+    );
+  }
+
+  // Stale and legacy signals in B.
+  {
+    const { zoneA, zoneB, home, rec } = linkPair('aged');
+    rec(zoneA, 'o', ['unit', 'init', 'docs/plan.md']);
+    rec(zoneB, 'o', ['unit', 'init', 'docs/plan.md']);
+    finish(rec, zoneA, 'o');
+    finish(rec, zoneB, 'o');
+    rec(zoneB, 'o', ['done', ...OK_DONE]);
+    const fresh = readSignal(zoneB);
+    fs.writeFileSync(
+      signalPath(zoneB),
+      JSON.stringify({
+        ...(typeof fresh === 'object' && fresh !== null ? fresh : {}),
+        ts: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
+      }),
+    );
+    const stale = stopIn(home, 'o', zoneA);
+    check(
+      "the session's own signal older than an hour is dropped without a row",
+      stale.out === null &&
+        !signalExists(zoneB) &&
+        ledger(home).every((r) => get(r, 'gate') === undefined) &&
+        fs.existsSync(path.join(zoneB, '.amber', 'active.json')),
+      JSON.stringify([stale, ledger(home)]),
+    );
+    plantSignal(zoneB, { summary: 'legacy signal' });
+    const legacyBefore = signalText(zoneB);
+    const stranger = stopIn(home, 'stranger', zoneB);
+    check(
+      'a signal naming no session is left alone by a session that does not drive B',
+      stranger.out === null && signalText(zoneB) === legacyBefore,
+      JSON.stringify(stranger),
+    );
+    const owner = stopIn(home, 'o', zoneA);
+    check(
+      'a signal naming no session is taken by a session that drives B',
+      owner.out === null &&
+        !signalExists(zoneB) &&
+        passedRows(home).some(
+          (r) =>
+            get(r, 'summary') === 'legacy signal' &&
+            get(r, 'cwd') === realB(zoneB),
+        ),
+      JSON.stringify([owner, ledger(home)]),
+    );
+  }
+
+  // A registered zone whose worktree was removed.
+  {
+    const { zoneA, zoneB, home, rec } = linkPair('gone');
+    rec(zoneA, 'g', ['unit', 'init', 'docs/plan.md']);
+    rec(zoneA, 'g', ['unit', 'start', 'U1']);
+    rec(zoneB, 'g', ['unit', 'init', 'docs/plan.md']);
+    rec(zoneB, 'g', ['unit', 'start', 'U1']);
+    const realGone = realB(zoneB);
+    execFileSync('git', ['-C', zoneA, 'worktree', 'remove', '--force', zoneB]);
+    const s0 = runHook(
+      'S0',
+      { session_id: 'g', cwd: zoneA, model: 'm', source: 'resume' },
+      home,
+    );
+    const stop = stopIn(home, 'g', zoneA);
+    check(
+      'S0 and S2 pass over a removed worktree: no line for it, the stop goes to A',
+      s0.exit === 0 &&
+        !DRIVEN_LINE.test(stringOf(contextOf(s0.out))) &&
+        has(at(sessionState(home, 'g'), 'runs'), realGone) &&
+        stop.exit === 0 &&
+        get(stop.out, 'decision') === 'block' &&
+        blocksOf(zoneA) === 1 &&
+        noFailures(home),
+      JSON.stringify([s0, stop]),
+    );
+  }
+
+  // Only the hook cwd zone registered: no extra line.
+  {
+    const { zoneA, home, rec } = linkPair('solo');
+    rec(zoneA, 'solo', ['unit', 'init', 'docs/plan.md']);
+    const s0 = contextOf(
+      runHook('S0', { session_id: 'solo', cwd: zoneA, model: 'm' }, home).out,
+    );
+    check(
+      'S0 adds no extra-zone line when the only registration is the cwd zone',
+      !!s0 &&
+        /this session drives the run/.test(stringOf(s0)) &&
+        !DRIVEN_LINE.test(stringOf(s0)),
+      stringOf(s0).slice(-400),
+    );
+    const s1new = contextOf(
+      runHook('S1', { session_id: 'solo-new', cwd: zoneA, prompt: 'hi' }, home)
+        .out,
+    );
+    register(zoneA, home, 'solo-new');
+    check(
+      'the first S1 briefing of an unregistered session has no extra-zone line',
+      !!s1new && !DRIVEN_LINE.test(stringOf(s1new)),
+      stringOf(s1new),
+    );
+  }
 }
 
 // ---- worktree zone: a linked worktree outside the zone is its own zone, with or without a pointer ----
@@ -2818,12 +3190,12 @@ const registersAny = (home: string, sessionId: string): boolean => {
       ),
     ctxSide,
   );
-  const sideNoContract = done(side, home, [
-    '--review',
-    'r',
-    '--summary',
-    'sibling no-contract done',
-  ]);
+  const sideNoContract = done(
+    side,
+    home,
+    ['--review', 'r', '--summary', 'sibling no-contract done'],
+    { AMBER_SESSION_ID: 'wt0' },
+  );
   check(
     'done in a sibling worktree without a pointer signals in that worktree',
     sideNoContract.status === 0 &&
@@ -2897,14 +3269,12 @@ const registersAny = (home: string, sessionId: string): boolean => {
       /side rule/.test(stringOf(ctx)),
   );
   register(side, home, 'wt');
-  const sideDone = done(side, home, [
-    '--review',
-    'r',
-    '--goal',
-    'g',
-    '--summary',
-    'side done',
-  ]);
+  const sideDone = done(
+    side,
+    home,
+    ['--review', 'r', '--goal', 'g', '--summary', 'side done'],
+    { AMBER_SESSION_ID: 'wt' },
+  );
   check(
     'done in the side zone signals the side contract',
     sideDone.status === 0 &&
@@ -2945,7 +3315,7 @@ const registersAny = (home: string, sessionId: string): boolean => {
     }),
   );
   register(zone, home, 'mn');
-  done(zone, home, OK_DONE);
+  done(zone, home, OK_DONE, { AMBER_SESSION_ID: 'mn' });
   const mainPass = runHook(
     'S2',
     {
@@ -4586,7 +4956,7 @@ const registersAny = (home: string, sessionId: string): boolean => {
       units: {},
     }),
   );
-  const ok = done(released, home, OK_DONE);
+  const ok = done(released, home, OK_DONE, { AMBER_SESSION_ID: 'ph-r' });
   const before = ledger(home).length;
   const pass = runHook(
     'S2',

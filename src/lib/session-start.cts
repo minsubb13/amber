@@ -2,7 +2,8 @@
 // files idle past the TTL, and brief the session - the active contract with
 // its progress, ownership and waiting signal, or the arming note with the
 // completion procedure (its index on a startup or clear, its full text on a
-// compaction or resume) when there is none - plus any sensor failures.
+// compaction or resume) when there is none - plus the runs the session
+// drives in other zones and any sensor failures.
 
 import fs = require('node:fs');
 import path = require('node:path');
@@ -80,10 +81,13 @@ function runS0(input: HookInput): HookOutput {
   if (contract) sessionState.briefed = contract.boundaryFile || 'broken';
   // A resumed or compacted session keeps driving its runs, and keeps the
   // phase it opened: the gate outlives the context that opened it. A
-  // pre-upgrade single `run` is not carried: it is never written again.
+  // pre-upgrade single `run` is carried as found, a read-only fallback while
+  // the state file lives; nothing creates or updates it.
   const previous = state.readSessionState(input.session_id);
   const previousRuns = guards.readField(previous, 'runs');
   if (previousRuns) sessionState.runs = previousRuns;
+  const previousRun = guards.readField(previous, 'run');
+  if (previousRun) sessionState.run = previousRun;
   const previousPhase = guards.readField(previous, 'phase');
   if (previousPhase) sessionState.phase = previousPhase;
   state.writeStateAtomic(statePath, sessionState);
@@ -116,6 +120,8 @@ function runS0(input: HookInput): HookOutput {
         : text.NO_CONTRACT_INDEX,
     );
   }
+  const drivenCtx = briefing.drivenZonesContextFor(input.cwd, input.session_id);
+  if (drivenCtx) parts.push(drivenCtx);
   if (failures > 0) {
     parts.push(text.sensorFailures(failures, state.FAILURES_FILE));
   }

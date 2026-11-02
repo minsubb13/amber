@@ -488,7 +488,9 @@ function doneCommand(rest: readonly string[]): void {
   }
   const target = info.boundaryFile || 'request';
   registerDriver(sessionId, info);
+  // The signal names its session: only that session's Stop consumes it.
   done.writeDoneSignal(info.root, {
+    session_id: sessionId,
     target,
     review,
     goal: goal || null,

@@ -1,12 +1,17 @@
 // S2 (Stop): consume the completion signal the model wrote with `record.cjs
 // done` (its semantic-review attestation rides in the signal; the final
-// message is never read). Under a contract, accept it only when the pointer is
-// sound, the signal names that contract, and no unit worktree remains (at most
-// three rejections), then release the contract. With open plan units and no
-// signal, send the stop back (the loop body): a plain hold passes once, an
-// external hold passes every stop until the held unit's next transition.
+// message is never read). The signal names the session that wrote it, and a
+// stop takes only its own: from the hook cwd's zone or from any zone the
+// session registered (a linked worktree outside the zone it stands in).
+// Under that zone's contract, accept it only when the pointer is sound, the
+// signal names that contract, and no unit worktree remains (at most three
+// rejections), then release the contract. With open plan units and no
+// signal, send the stop back (the loop body) for the one zone the session
+// drove last: a plain hold passes once, an external hold passes every stop
+// until the held unit's next transition.
 
 import fs = require('node:fs');
+import path = require('node:path');
 
 import clock = require('./clock.cjs');
 import contracts = require('./contract.cjs');
@@ -20,7 +25,14 @@ import store = require('./progress-store.cjs');
 import state = require('./state-store.cjs');
 import text = require('./hook-text.cjs');
 import zone = require('./zone.cjs');
-import type { ActiveContract, HookInput, HookOutput } from './types.cjs';
+import type {
+  ActiveContract,
+  Contract,
+  DoneSignal,
+  HookInput,
+  HookOutput,
+  Progress,
+} from './types.cjs';
 
 const REQUEST_REVIEW_TARGET = 'request';
 
@@ -54,24 +66,45 @@ function releaseContract(
 }
 
 /**
+ * The zone the loop body sends a stop back for: among the zones the session
+ * registered (newest `at` first) and then the hook cwd's zone, the first
+ * whose sound contract the session drives and whose progress has open units.
+ */
+function continuationZone(
+  input: HookInput,
+  cwdRoot: string,
+): { contract: ActiveContract; p: Progress } | null {
+  const roots = ownership.registeredRuns(input.session_id).map((r) => r.root);
+  if (!roots.includes(cwdRoot)) roots.push(cwdRoot);
+  for (const root of roots) {
+    // Progress first: a file read, before the contract's git queries.
+    const p = store.loadProgress(root);
+    if (!p || model.isBroken(p)) continue;
+    if (model.openUnits(p).length === 0) continue;
+    const contract = contracts.loadContract(root);
+    if (!contract || contract.broken) continue;
+    if (!ownership.ownsRun(input.session_id, contract)) continue;
+    return { contract, p };
+  }
+  return null;
+}
+
+/**
  * Loop body: a plain stop under a contract with open units is sent back with
  * the next unit, up to REENTRY_LIMIT re-entries per unit; a recorded hold
  * passes once, an external hold passes every stop until the held unit's next
- * transition; reaching the limit records it and lets the stop through. No
- * progress.json means no continuation at all.
+ * transition; reaching the limit records it and lets the stop through. One
+ * zone only - the one continuationZone picks; none means no continuation.
  */
-function continuation(input: HookInput): HookOutput {
+function continuation(input: HookInput, cwdRoot: string): HookOutput {
   const loopFile = state.loopStatePath(input.session_id);
   const release = (): null => {
     state.tryUnlink(loopFile);
     return null;
   };
-  const contract = contracts.loadContract(input.cwd);
-  if (!contract || contract.broken) return release();
-  if (!ownership.ownsRun(input.session_id, contract)) return release();
-  const p = store.loadProgress(contract.root);
-  if (!p || model.isBroken(p)) return release();
-  if (model.openUnits(p).length === 0) return release();
+  const target = continuationZone(input, cwdRoot);
+  if (!target) return release();
+  const { contract, p } = target;
   if (p.hold) {
     if (p.hold.kind === 'external') return release();
     p.hold = null;
@@ -122,17 +155,40 @@ function gateAttempts(gateFile: string): number {
   }
 }
 
+/**
+ * The session's own completion signal and the zone that held it. The hook
+ * cwd's zone is looked at first, then every zone the session registered,
+ * newest `at` first; the first signal claimed is consumed and the search
+ * ends there, even when it turns out stale or malformed. A signal is claimed
+ * when it names this session; one that names no session (an older recorder)
+ * when the session drives that zone's run, as before signals named one.
+ */
+function takeOwnSignal(
+  input: HookInput,
+  cwdRoot: string,
+): { root: string; signal: DoneSignal | null } | null {
+  const roots = [cwdRoot];
+  for (const r of ownership.registeredRuns(input.session_id)) {
+    if (!roots.includes(r.root)) roots.push(r.root);
+  }
+  for (const root of roots) {
+    const { taken, signal } = done.takeDoneSignal(root, (sessionId) => {
+      if (sessionId !== null) return sessionId === input.session_id;
+      const contract = contracts.loadContract(root);
+      // Outside the cwd's zone only a run the session drives is its own.
+      if (!contract && root !== cwdRoot) return false;
+      return ownership.ownsRun(input.session_id, contract);
+    });
+    if (taken) return { root, signal };
+  }
+  return null;
+}
+
 function runS2(input: HookInput): HookOutput {
   state.touchSessionState(input.session_id);
-  const root = zone.zoneRoot(input.cwd);
-  // A session that does not drive the run leaves its signal alone: the driver
-  // that wrote it (the recorder registered it on the done command) reads it.
-  const signal = ownership.ownsRun(
-    input.session_id,
-    contracts.loadContract(input.cwd),
-  )
-    ? done.takeDoneSignal(root)
-    : null;
+  const cwdRoot = path.resolve(zone.zoneRoot(input.cwd));
+  const taken = takeOwnSignal(input, cwdRoot);
+  const signal = taken ? taken.signal : null;
   const gateFile = state.gateStatePath(input.session_id);
   let attemptsSoFar = gateAttempts(gateFile);
   const loopFile = state.loopStatePath(input.session_id);
@@ -141,7 +197,7 @@ function runS2(input: HookInput): HookOutput {
       // Re-entered stop with no live gate counter: our own continuation or
       // another hook's block. A fresh signal is ours either way - a consumed
       // signal cannot be re-presented, so a foreign re-entry never duplicates.
-      if (!signal) return continuation(input);
+      if (!signal) return continuation(input, cwdRoot);
       state.tryUnlink(loopFile);
     } else if (!signal) {
       // The model followed the directive's other branch: declaration withdrawn.
@@ -156,8 +212,12 @@ function runS2(input: HookInput): HookOutput {
     }
     state.tryUnlink(loopFile);
   }
-  if (!signal) return continuation(input);
-  const contract = contracts.loadContract(input.cwd);
+  if (!signal || !taken) return continuation(input, cwdRoot);
+  // Judged by the contract of the zone that held the signal; a row for a
+  // zone other than the cwd's is recorded there.
+  const contract: Contract | null = contracts.loadContract(taken.root);
+  const source: HookInput =
+    taken.root === cwdRoot ? input : { ...input, cwd: taken.root };
   const reviewFields = {
     review_target:
       contract && !contract.broken
@@ -167,7 +227,7 @@ function runS2(input: HookInput): HookOutput {
   };
   if (!contract) {
     state.tryUnlink(gateFile);
-    ledger.appendRecord(input, signal.summary, reviewFields);
+    ledger.appendRecord(source, signal.summary, reviewFields);
     return null;
   }
   let worktrees: string[] = [];
@@ -177,7 +237,7 @@ function runS2(input: HookInput): HookOutput {
     if (worktrees.length === 0) {
       state.tryUnlink(gateFile);
       const outOfScope = signal.out_of_scope;
-      ledger.appendRecord(input, signal.summary, {
+      ledger.appendRecord(source, signal.summary, {
         contract: contract.boundaryFile,
         goal: guards.toText(signal.goal || '').slice(0, ledger.SUMMARY_MAX),
         gate: 'passed',
@@ -200,7 +260,7 @@ function runS2(input: HookInput): HookOutput {
   const attempts = attemptsSoFar + 1;
   if (attempts > text.MAX_GATE_ATTEMPTS) {
     state.tryUnlink(gateFile);
-    ledger.appendRecord(input, signal.summary, {
+    ledger.appendRecord(source, signal.summary, {
       contract: contract.boundaryFile || 'broken',
       goal: null,
       gate: 'exhausted',

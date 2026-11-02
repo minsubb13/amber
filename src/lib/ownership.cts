@@ -10,6 +10,7 @@
 // own zone and a linked worktree outside it. It is mirrored into
 // progress.json's session_ids for the briefing.
 
+import fs = require('node:fs');
 import path = require('node:path');
 
 import clock = require('./clock.cjs');
@@ -74,4 +75,27 @@ function registerSession(
   }
 }
 
-export = { ownsRun, registerSession };
+/**
+ * The zones the session's `runs` registers, newest `at` first: each zone
+ * root with the boundary file and time recorded there. A zone whose .amber
+ * directory is gone (a removed worktree) is left out; a pre-upgrade single
+ * `run` names no zone and is not listed.
+ */
+function registeredRuns(
+  sessionId: string | undefined,
+): { root: string; run: string; at: string }[] {
+  const runs = guards.readField(state.readSessionState(sessionId), 'runs');
+  if (!guards.isObject(runs)) return [];
+  const out: { root: string; run: string; at: string }[] = [];
+  for (const [root, entry] of Object.entries(runs)) {
+    if (!guards.isObject(entry)) continue;
+    const run = entry['run'];
+    if (typeof run !== 'string' || !run) continue;
+    if (!fs.existsSync(path.join(root, '.amber'))) continue;
+    const at = entry['at'];
+    out.push({ root, run, at: typeof at === 'string' ? at : '' });
+  }
+  return out.sort((a, b) => (a.at < b.at ? 1 : a.at > b.at ? -1 : 0));
+}
+
+export = { ownsRun, registerSession, registeredRuns };
