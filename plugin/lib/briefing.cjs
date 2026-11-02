@@ -72,6 +72,7 @@ function drivenZonesFor(cwd, sessionId) {
             continue;
         out.push({
             root: r.root,
+            boundaryFile: contract.boundaryFile,
             line: text.drivenZoneLine(contract.boundaryFile, r.root),
         });
     }
@@ -79,11 +80,12 @@ function drivenZonesFor(cwd, sessionId) {
 }
 /**
  * The key S0 and S1 keep in the session state as `driven_briefed`: the
- * sorted roots of the other driven zones last announced, so the lines are
- * sent once per change of that set.
+ * other driven zones last announced, each as `<root>=<boundary file>`,
+ * sorted, so the lines are sent once per change of that set and again when
+ * a zone's contract is replaced by another.
  */
 function drivenKey(zones) {
-    return zones.map((z) => z.root).sort();
+    return zones.map((z) => z.root + '=' + z.boundaryFile).sort();
 }
 function linkedWorktreeContextFor(cwd) {
     const main = zone.linkedWorktreeMain(cwd);

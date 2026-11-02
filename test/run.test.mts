@@ -2867,7 +2867,9 @@ const amberFiles = (zone: string): string =>
   // The signal file's text, '' once it is gone.
   const signalText = (zone: string): string =>
     signalExists(zone) ? fs.readFileSync(signalPath(zone), 'utf8') : '';
-  const readSignal = (zone: string): unknown => parseJson(signalText(zone));
+  // The parsed signal, null once it is gone.
+  const readSignal = (zone: string): unknown =>
+    signalExists(zone) ? parseJson(signalText(zone)) : null;
   const passedRows = (home: string): unknown[] =>
     ledger(home).filter((r) => get(r, 'gate') === 'passed');
   const DRIVEN_LINE =
@@ -3023,7 +3025,7 @@ const amberFiles = (zone: string): string =>
     );
     const back = stopIn(home, 'w', zoneA);
     const reason = stringAt(back.out, 'reason');
-    const inB = 'cd ' + realB(zoneB) + ' && node ';
+    const inB = "cd '" + realB(zoneB) + "' && node '";
     check(
       'the next stop in A is sent back for B, the zone with open units',
       get(back.out, 'decision') === 'block' &&
@@ -3035,51 +3037,95 @@ const amberFiles = (zone: string): string =>
     );
     check(
       "the send-back for B gives every command with B's directory, in one line",
-      reason.includes(inB + RECORD_CLI + ' unit start U1`') &&
-        reason.includes(inB + RECORD_CLI + ' unit verified U1 --evidence') &&
-        reason.includes(inB + RECORD_CLI + ' unit hold U1 --reason') &&
+      reason.includes(inB + RECORD_CLI + "' unit start U1`") &&
+        reason.includes(inB + RECORD_CLI + "' unit verified U1 --evidence") &&
+        reason.includes(inB + RECORD_CLI + "' unit hold U1 --reason") &&
         !reason.includes('amber:mark') &&
         !reason.includes('`node '),
       reason,
     );
   }
 
-  // A signal replaced between its owner's read and the unlink: the owner
-  // takes what it read, and the replacement stays for its own session.
+  // F8: a zone root with a space and a single quote reaches the directive
+  // as one shell argument, and that `cd` lands in the root.
+  {
+    const { zoneB, rec } = linkPair('quote');
+    rec(zoneB, 'q', ['unit', 'init', 'docs/plan.md']);
+    const text = loadModule<typeof import('../src/lib/hook-text.cjs')>(
+      'lib/hook-text.cjs',
+      ['continuationDirective'],
+    );
+    const store = loadModule<typeof import('../src/lib/progress-store.cjs')>(
+      'lib/progress-store.cjs',
+      ['loadProgress'],
+    );
+    const p = store.loadProgress(zoneB);
+    const odd = path.join(BASE, "zone B'x");
+    fs.mkdirSync(odd, { recursive: true });
+    const directive =
+      p && !('broken' in p)
+        ? text.continuationDirective('test-boundary.md', p, 'U1', 1, odd)
+        : '';
+    const cdPart = "cd '" + BASE + "/zone B'\\''x'";
+    const landed = spawnSync('sh', ['-c', cdPart + ' && pwd'], {
+      encoding: 'utf8',
+    });
+    check(
+      'a root with a space and a quote is one quoted argument, and its cd lands in the root',
+      directive.includes(
+        '`' + cdPart + " && node '" + RECORD_CLI + "' unit start U1`",
+      ) &&
+        landed.status === 0 &&
+        landed.stdout.trim() === odd,
+      JSON.stringify([directive, landed.stdout, landed.stderr]),
+    );
+  }
+
+  // F4: the completion signal is consumed by renaming it to a claim file.
+  const doneSignal = loadModule<typeof import('../src/lib/done-signal.cjs')>(
+    'lib/done-signal.cjs',
+    ['takeDoneSignal', 'writeDoneSignal'],
+  );
+  const claimsOf = (zone: string): string[] =>
+    fs
+      .readdirSync(path.join(zone, '.amber'))
+      .filter((n) => n.startsWith('done.json.taking-'));
+  const signalOf = (sessionId: string): Record<string, string> => ({
+    session_id: sessionId,
+    target: 'test-boundary.md',
+    review: sessionId + ' review',
+    goal: sessionId + ' goal',
+    summary: sessionId + ' complete',
+  });
+
+  // (a) Replaced between the first read and the claim: the claim holds the
+  // replacement, which goes back in place, and the owner takes nothing.
   {
     const { zoneB, home, rec } = linkPair('race');
     rec(zoneB, 'r1', ['unit', 'init', 'docs/plan.md']);
     finish(rec, zoneB, 'r1');
     rec(zoneB, 'r1', ['done', ...OK_DONE]);
-    const doneSignal = loadModule<typeof import('../src/lib/done-signal.cjs')>(
-      'lib/done-signal.cjs',
-      ['takeDoneSignal', 'writeDoneSignal'],
-    );
     let replacement = '';
     const first = doneSignal.takeDoneSignal(zoneB, (sessionId) => {
-      // r2's recorder writes its signal while r1's stop decides.
-      doneSignal.writeDoneSignal(zoneB, {
-        session_id: 'r2',
-        target: 'test-boundary.md',
-        review: 'r2 review',
-        goal: 'r2 goal',
-        summary: 'r2 complete',
-      });
-      replacement = signalText(zoneB);
+      if (replacement === '') {
+        // r2's recorder writes its signal while r1's stop decides.
+        doneSignal.writeDoneSignal(zoneB, signalOf('r2'));
+        replacement = signalText(zoneB);
+      }
       return sessionId === 'r1';
     });
     check(
-      'a signal replaced while its owner reads it is taken, and the replacement survives byte-identical',
-      first.taken &&
-        get(first.signal, 'session_id') === 'r1' &&
-        replacement !== '' &&
+      'a signal replaced before the claim is restored byte-identical, and the owner takes nothing',
+      !first.taken &&
+        first.signal === null &&
         get(parseJson(replacement), 'session_id') === 'r2' &&
-        signalText(zoneB) === replacement,
-      JSON.stringify([first, replacement, signalText(zoneB)]),
+        signalText(zoneB) === replacement &&
+        claimsOf(zoneB).length === 0,
+      JSON.stringify([first, replacement, signalText(zoneB), claimsOf(zoneB)]),
     );
     const own = stopIn(home, 'r2', zoneB);
     check(
-      "the replacement is consumed by its own session's stop",
+      "the restored replacement is consumed by its own session's stop",
       own.out === null &&
         !signalExists(zoneB) &&
         passedRows(home).some(
@@ -3088,6 +3134,87 @@ const amberFiles = (zone: string): string =>
             get(r, 'session_id') === 'r2',
         ),
       JSON.stringify([own, ledger(home)]),
+    );
+    doneSignal.writeDoneSignal(zoneB, signalOf('r1'));
+    const later = doneSignal.takeDoneSignal(zoneB, (id) => id === 'r1');
+    check(
+      "the first session's signal written later is taken",
+      later.taken &&
+        at(later.signal, 'session_id') === 'r1' &&
+        !signalExists(zoneB) &&
+        claimsOf(zoneB).length === 0,
+      JSON.stringify(later),
+    );
+  }
+
+  // (b) Replaced right after the claim (the afterClaim seam): the claimed
+  // signal is consumed and the replacement lands in a fresh done.json.
+  {
+    const { zoneB, rec } = linkPair('claim');
+    rec(zoneB, 'k1', ['unit', 'init', 'docs/plan.md']);
+    finish(rec, zoneB, 'k1');
+    rec(zoneB, 'k1', ['done', ...OK_DONE]);
+    let replacement = '';
+    const first = doneSignal.takeDoneSignal(
+      zoneB,
+      (id) => id === 'k1',
+      () => {
+        doneSignal.writeDoneSignal(zoneB, signalOf('k2'));
+        replacement = signalText(zoneB);
+      },
+    );
+    check(
+      'a signal written after the claim survives byte-identical, and the claimed one is taken',
+      first.taken &&
+        at(first.signal, 'session_id') === 'k1' &&
+        get(parseJson(replacement), 'session_id') === 'k2' &&
+        signalText(zoneB) === replacement &&
+        claimsOf(zoneB).length === 0,
+      JSON.stringify([first, replacement, signalText(zoneB), claimsOf(zoneB)]),
+    );
+  }
+
+  // (d) Replaced before the claim and again before the restore: the first
+  // replacement stays as a claim file, swept once older than the TTL.
+  {
+    const { zoneB } = linkPair('sweep');
+    doneSignal.writeDoneSignal(zoneB, signalOf('d1'));
+    let calls = 0;
+    const first = doneSignal.takeDoneSignal(
+      zoneB,
+      (id) => {
+        calls += 1;
+        if (calls === 1) doneSignal.writeDoneSignal(zoneB, signalOf('d2'));
+        return id === 'd1';
+      },
+      () => {
+        doneSignal.writeDoneSignal(zoneB, signalOf('d3'));
+      },
+    );
+    const left = claimsOf(zoneB);
+    const leftText =
+      left.length === 1
+        ? fs.readFileSync(path.join(zoneB, '.amber', left[0] ?? ''), 'utf8')
+        : '';
+    check(
+      'a restore blocked by a newer signal leaves the claimed one as a claim file',
+      !first.taken &&
+        at(readSignal(zoneB), 'session_id') === 'd3' &&
+        leftText !== '' &&
+        at(parseJson(leftText), 'session_id') === 'd2',
+      JSON.stringify([first, left, leftText, signalText(zoneB)]),
+    );
+    const old = new Date(Date.now() - 2 * 60 * 60 * 1000);
+    fs.utimesSync(path.join(zoneB, '.amber', left[0] ?? ''), old, old);
+    const fresh = 'done.json.taking-1-1-1';
+    fs.writeFileSync(path.join(zoneB, '.amber', fresh), '{}');
+    const swept = doneSignal.takeDoneSignal(zoneB, () => false);
+    check(
+      'a claim file older than the TTL is swept, a fresh one is not',
+      !swept.taken &&
+        JSON.stringify(claimsOf(zoneB)) === JSON.stringify([fresh]) &&
+        at(readSignal(zoneB), 'session_id') === 'd3',
+      JSON.stringify([swept, claimsOf(zoneB)]),
     );
   }
 
@@ -3192,6 +3319,44 @@ const amberFiles = (zone: string): string =>
         !/an active contract governs/.test(withB) &&
         !DRIVEN_LINE.test(quiet),
       JSON.stringify([briefedOnly, withB, quiet]),
+    );
+  }
+
+  // F9: a new contract in B is announced again though B's root is unchanged.
+  {
+    const { zoneB, home, rec } = linkPair('swap');
+    const s1 = (cwd: string): string =>
+      stringOf(
+        contextOf(
+          runHook('S1', { session_id: 'f9', cwd, prompt: 'go' }, home).out,
+        ),
+      );
+    runHook('S0', { session_id: 'f9', cwd: zoneEmpty, model: 'm' }, home);
+    rec(zoneB, 'f9', ['unit', 'init', 'docs/plan.md']);
+    const firstLine = s1(zoneEmpty);
+    finish(rec, zoneB, 'f9');
+    rec(zoneB, 'f9', ['done', ...OK_DONE]);
+    const pass = stopIn(home, 'f9', zoneEmpty);
+    fs.writeFileSync(path.join(zoneB, 'next-boundary.md'), BOUNDARY);
+    fs.writeFileSync(
+      path.join(zoneB, '.amber', 'active.json'),
+      JSON.stringify({ ...LINK_POINTER, boundary: 'next-boundary.md' }),
+    );
+    const init = rec(zoneB, 'f9', ['unit', 'init', 'docs/plan.md']);
+    const renamed = s1(zoneEmpty);
+    const quiet = s1(zoneEmpty);
+    check(
+      "B's next contract is announced again, then the unchanged set is silent",
+      DRIVEN_LINE.test(firstLine) &&
+        pass.out === null &&
+        init.status === 0 &&
+        renamed.includes(
+          'also drives the run of next-boundary.md in ' + realB(zoneB) + ' ',
+        ) &&
+        !/also drives/.test(quiet) &&
+        JSON.stringify(get(sessionState(home, 'f9'), 'driven_briefed')) ===
+          JSON.stringify([realB(zoneB) + '=next-boundary.md']),
+      JSON.stringify([firstLine, pass, init.stderr, renamed, quiet]),
     );
   }
 

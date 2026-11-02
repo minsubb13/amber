@@ -316,8 +316,9 @@ export interface SessionState {
   /** The session's open phase (a SessionPhase), carried like `runs`. */
   phase?: unknown;
   /**
-   * The sorted roots of the other zones whose driven runs S0 or S1 last
-   * announced; S1 announces them again only when the set changes.
+   * The other zones whose driven runs S0 or S1 last announced, each as
+   * `<root>=<boundary file>`, sorted; S1 announces them again only when the
+   * set changes.
    */
   driven_briefed?: unknown;
 }

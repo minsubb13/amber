@@ -70,11 +70,11 @@ function waitingSignalContextFor(
 function drivenZonesFor(
   cwd: string | undefined,
   sessionId: string | undefined,
-): { root: string; line: string }[] {
+): { root: string; boundaryFile: string; line: string }[] {
   const runs = ownership.registeredRuns(sessionId);
   if (runs.length === 0) return [];
   const cwdRoot = path.resolve(zone.zoneRoot(cwd));
-  const out: { root: string; line: string }[] = [];
+  const out: { root: string; boundaryFile: string; line: string }[] = [];
   for (const r of runs) {
     if (r.root === cwdRoot) continue;
     const contract = contracts.loadContract(r.root);
@@ -82,6 +82,7 @@ function drivenZonesFor(
     if (!ownership.ownsRun(sessionId, contract)) continue;
     out.push({
       root: r.root,
+      boundaryFile: contract.boundaryFile,
       line: text.drivenZoneLine(contract.boundaryFile, r.root),
     });
   }
@@ -90,11 +91,14 @@ function drivenZonesFor(
 
 /**
  * The key S0 and S1 keep in the session state as `driven_briefed`: the
- * sorted roots of the other driven zones last announced, so the lines are
- * sent once per change of that set.
+ * other driven zones last announced, each as `<root>=<boundary file>`,
+ * sorted, so the lines are sent once per change of that set and again when
+ * a zone's contract is replaced by another.
  */
-function drivenKey(zones: readonly { root: string }[]): string[] {
-  return zones.map((z) => z.root).sort();
+function drivenKey(
+  zones: readonly { root: string; boundaryFile: string }[],
+): string[] {
+  return zones.map((z) => z.root + '=' + z.boundaryFile).sort();
 }
 
 function linkedWorktreeContextFor(cwd: string | undefined): string | null {

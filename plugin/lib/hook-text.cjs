@@ -213,6 +213,10 @@ const NO_CONTRACT_INDEX = 'Completion index: the signal command is `' +
 function sensorFailures(count, file) {
     return ('amber: ' + String(count) + ' sensor failure(s) recorded - see ' + file);
 }
+/** A path as one single-quoted POSIX shell argument. */
+function shellQuote(arg) {
+    return "'" + arg.replace(/'/g, "'\\''") + "'";
+}
 /**
  * The loop body's send-back directive for the focus unit. `elsewhere` is the
  * root of the unit's zone when it is not the zone the session stands in (a
@@ -234,7 +238,7 @@ function continuationDirective(boundaryFile, p, id, reentries, elsewhere = null)
         model.summary(p) +
         '\n';
     if (elsewhere) {
-        const there = 'cd ' + elsewhere + ' && node ' + RECORD_CLI;
+        const there = 'cd ' + shellQuote(elsewhere) + ' && node ' + shellQuote(RECORD_CLI);
         return (head +
             'This run is in ' +
             elsewhere +
