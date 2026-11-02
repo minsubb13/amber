@@ -157,6 +157,17 @@ function ownershipContext(owner, registered) {
 }
 const WAITING_SIGNAL = 'amber: a completion signal is waiting in this zone; this session does not drive the run ' +
     '(run a unit command or the done command here to take the run over, or leave it to the driving session).';
+/** A waiting signal that names another session: only that session takes it. */
+const WAITING_OTHER_SESSION_SIGNAL = 'amber: a completion signal is waiting in this zone from another session; ' +
+    "that session's stop consumes it, never this session's.";
+/** A run the session drives in a zone other than the one it stands in. */
+function drivenZoneLine(boundaryFile, root) {
+    return ('amber: this session also drives the run of ' +
+        boundaryFile +
+        ' in ' +
+        root +
+        ' (run its unit and done commands there).');
+}
 /**
  * A linked worktree outside the zone directory is a zone of its own: tell the
  * session where its main checkout is and whether a run is active there.
@@ -290,6 +301,8 @@ module.exports = {
     progressContext,
     ownershipContext,
     WAITING_SIGNAL,
+    WAITING_OTHER_SESSION_SIGNAL,
+    drivenZoneLine,
     linkedWorktreeContext,
     NO_CONTRACT,
     NO_CONTRACT_INDEX,

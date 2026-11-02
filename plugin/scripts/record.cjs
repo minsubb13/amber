@@ -37,6 +37,34 @@ function envSessionId() {
         process.env['PI_SESSION_ID'] ||
         '').trim();
 }
+/**
+ * The session a unit or done command registers and records: the environment
+ * names it, or the command is refused before anything is written. Without an
+ * id the run could not be bound to the session driving it.
+ */
+function requireSessionId(command) {
+    const sessionId = envSessionId();
+    if (!sessionId) {
+        throw new Error(command +
+            ' refused: no session id in the environment. Set AMBER_SESSION_ID, ' +
+            'or run it from the session shell of a host that exports ' +
+            'CODEX_THREAD_ID, CLAUDE_CODE_SESSION_ID or PI_SESSION_ID; ' +
+            'nothing was recorded.');
+    }
+    return sessionId;
+}
+/**
+ * Registers the session as a driver of the zone's run, once the command has
+ * passed its checks; a zone without a contract has no run to register to.
+ */
+function registerDriver(sessionId, info) {
+    if (!info.boundaryFile)
+        return;
+    ownership.registerSession(sessionId, {
+        root: info.root,
+        boundaryFile: info.boundaryFile,
+    });
+}
 /** Whether `file` names a regular file (a symbolic link to one included). */
 function isRegularFile(file) {
     try {
@@ -116,16 +144,13 @@ function unitCommand(name, rest) {
     const command = args.unitCommandOf(name);
     if (!command)
         throw new Error('invalid unit command\n' + USAGE);
+    // A claim is the subagent's handshake, observed by E1; it registers nobody.
+    const sessionId = command === 'claim' ? '' : requireSessionId('unit ' + command);
     const cwd = process.cwd();
     const info = contracts.contractInfo(cwd);
     if (info.broken) {
         throw new Error('active contract pointer is broken: ' + guards.toText(info.error));
     }
-    // Session identity: an explicit environment id wins; otherwise the recorder
-    // reads back the driver E1 registered for this run just before the command.
-    const fromEnv = envSessionId();
-    const driver = fromEnv ? null : ownership.driverOfRun(info.boundaryFile);
-    const sessionId = fromEnv || driver?.sessionId || 'shell';
     if (command === 'init') {
         const plan = rest.find((a) => !a.startsWith('--'));
         if (!plan)
@@ -158,6 +183,7 @@ function unitCommand(name, rest) {
                 ? fallback.commit
                 : scope.headCommit(cwd);
         const p = store.initProgress(info.root, plan, info.boundaryFile, rest.includes('--force'), preexisting, clock.isoNow, baselineCommit, fallback);
+        registerDriver(sessionId, info);
         const ids = Object.keys(p.units);
         recordUnitEvent(sessionId, cwd, 'init', String(ids.length) + ' unit(s) from ' + p.plan, { contract: info.boundaryFile, units: ids.length });
         process.stdout.write('amber: progress.json initialized with ' +
@@ -270,6 +296,7 @@ function unitCommand(name, rest) {
         files,
     }, clock.isoNow);
     store.saveProgress(info.root, p, clock.isoNow);
+    registerDriver(sessionId, info);
     const fields = {
         contract: info.boundaryFile,
         unit: id,
@@ -297,6 +324,7 @@ function unitCommand(name, rest) {
  * hook only has to judge the pointer and the worktrees.
  */
 function doneCommand(rest) {
+    const sessionId = requireSessionId('done');
     const cwd = process.cwd();
     const info = contracts.contractInfo(cwd);
     if (info.broken) {
@@ -356,7 +384,10 @@ function doneCommand(rest) {
         }
     }
     const target = info.boundaryFile || 'request';
+    registerDriver(sessionId, info);
+    // The signal names its session: only that session's Stop consumes it.
     done.writeDoneSignal(info.root, {
+        session_id: sessionId,
         target,
         review,
         goal: goal || null,
@@ -401,7 +432,7 @@ function recordCall(command, name, rest) {
         session_id: sessionId,
         cwd: process.cwd(),
         tool_input: { skill, args: skillArgs },
-    }, 'S3'));
+    }, 'S3'), true);
     process.stdout.write('amber: recorded ' + recorded + '\n');
 }
 function main(argv) {

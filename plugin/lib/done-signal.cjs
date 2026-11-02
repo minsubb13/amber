@@ -3,7 +3,8 @@
 // Completion signal: the model runs `record.cjs done` as its last tool call,
 // which writes <zone>/.amber/done.json; S2 consumes that file instead of
 // parsing the final message, so no marker line reaches the operator. The file
-// is single-use and short-lived.
+// is single-use and short-lived, and names the session that wrote it: only
+// that session's Stop consumes it.
 const fs = require("node:fs");
 const path = require("node:path");
 const clock = require("./clock.cjs");
@@ -29,27 +30,53 @@ function isDoneSignal(value) {
         typeof guards.readField(value, 'summary') === 'string' &&
         typeof guards.readField(value, 'review') === 'string');
 }
+/** The session a parsed signal names; null for one that names none. */
+function signalSession(value) {
+    // An unreadable signal parses to null, which names no session.
+    const id = guards.isObject(value) ? value['session_id'] : undefined;
+    return typeof id === 'string' && id ? id : null;
+}
+/** A signal file's parsed value, or null when it cannot be parsed. */
+function readSignalFile(file) {
+    try {
+        return JSON.parse(fs.readFileSync(file, 'utf8'));
+    }
+    catch {
+        return null;
+    }
+}
 /**
- * Reads and consumes the zone's completion signal. Consumed on every path so
- * a rejected signal never fires twice; a malformed or stale one is dropped.
+ * Who the zone's waiting signal belongs to, without consuming it: null when
+ * there is no signal file, else the session it names (null inside for a
+ * signal from an older recorder that names none, or an unreadable one).
  */
-function takeDoneSignal(root) {
+function peekSignalSession(root) {
     const file = donePath(root);
     if (!fs.existsSync(file))
         return null;
-    let signal = null;
-    try {
-        signal = JSON.parse(fs.readFileSync(file, 'utf8'));
-    }
-    catch {
-        // A corrupt signal is dropped below.
-    }
+    return { sessionId: signalSession(readSignalFile(file)) };
+}
+/**
+ * Reads the zone's completion signal and consumes it when `accepts` claims
+ * it, given the session the signal names (null when it names none). A signal
+ * the caller does not claim stays in place untouched. A claimed one is
+ * consumed on every path so a rejected signal never fires twice, and a
+ * malformed or stale one is dropped. `taken` says whether the file was
+ * consumed.
+ */
+function takeDoneSignal(root, accepts = () => true) {
+    const file = donePath(root);
+    if (!fs.existsSync(file))
+        return { taken: false, signal: null };
+    const signal = readSignalFile(file);
+    if (!accepts(signalSession(signal)))
+        return { taken: false, signal: null };
     state.tryUnlink(file);
     if (!isDoneSignal(signal))
-        return null;
+        return { taken: true, signal: null };
     const age = clock.nowMs() - Date.parse(guards.toText(signal.ts || 0));
     if (!(age <= DONE_TTL_MS))
-        return null;
-    return signal;
+        return { taken: true, signal: null };
+    return { taken: true, signal };
 }
-module.exports = { donePath, writeDoneSignal, takeDoneSignal };
+module.exports = { donePath, writeDoneSignal, peekSignalSession, takeDoneSignal };

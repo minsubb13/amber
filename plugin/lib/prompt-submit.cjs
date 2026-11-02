@@ -50,6 +50,7 @@ function runS1(input) {
         briefing.progressContextFor(contract),
         briefing.ownershipContextFor(contract, input.session_id),
         waiting,
+        briefing.drivenZonesContextFor(input.cwd, input.session_id),
     ]
         .filter(Boolean)
         .join('\n\n'));
