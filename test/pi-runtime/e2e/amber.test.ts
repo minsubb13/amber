@@ -278,13 +278,13 @@ test('#23 on pi, only a recorder command at command position registers the sessi
     const session = (await pi.command('get_state')).sessionId;
     await pi.prompt('mention the recorder');
     assert.equal(toolResults(pi).length, 2);
-    assert.equal(sessionState(h, session).run, undefined);
+    assert.equal(sessionState(h, session).runs?.[h.dir], undefined);
     let progress = JSON.parse(
       readFileSync(join(h.dir, '.amber/progress.json'), 'utf8'),
     );
     assert.ok(!(progress.session_ids ?? []).includes(session));
     await pi.prompt('drive the run');
-    assert.equal(sessionState(h, session).run, 'boundary.md');
+    assert.equal(sessionState(h, session).runs?.[h.dir]?.run, 'boundary.md');
     progress = JSON.parse(
       readFileSync(join(h.dir, '.amber/progress.json'), 'utf8'),
     );
