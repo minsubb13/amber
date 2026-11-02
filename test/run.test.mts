@@ -3218,6 +3218,136 @@ const amberFiles = (zone: string): string =>
     );
   }
 
+  // F10: s2's Stop runs while s1 holds s2's signal as a claim (inside
+  // afterClaim): s2 takes it over from the claim and s1 finds its claim gone.
+  {
+    const { zoneB, home, rec } = linkPair('inflight');
+    rec(zoneB, 's2', ['unit', 'init', 'docs/plan.md']);
+    finish(rec, zoneB, 's2');
+    doneSignal.writeDoneSignal(zoneB, signalOf('s1'));
+    const seen: {
+      done?: SpawnSyncReturns<string>;
+      stop?: HookRun;
+      claims?: number;
+      signal?: boolean;
+    } = {};
+    const first = doneSignal.takeDoneSignal(
+      zoneB,
+      (id) => {
+        // s2's recorder replaces s1's signal while s1's stop decides.
+        seen.done ??= rec(zoneB, 's2', ['done', ...OK_DONE]);
+        return id === 's1';
+      },
+      () => {
+        seen.claims = claimsOf(zoneB).length;
+        seen.signal = signalExists(zoneB);
+        seen.stop = stopIn(home, 's2', zoneB);
+      },
+    );
+    check(
+      "the owner's stop takes its signal from another session's in-flight claim and releases B",
+      seen.done?.status === 0 &&
+        seen.claims === 1 &&
+        seen.signal === false &&
+        seen.stop?.out === null &&
+        passedRows(home).some(
+          (r) =>
+            get(r, 'session_id') === 's2' && get(r, 'cwd') === realB(zoneB),
+        ) &&
+        !fs.existsSync(path.join(zoneB, '.amber', 'active.json')),
+      JSON.stringify([seen, ledger(home)]),
+    );
+    check(
+      'the holder then takes nothing and leaves no signal or claim behind',
+      !first.taken &&
+        first.signal === null &&
+        !signalExists(zoneB) &&
+        claimsOf(zoneB).length === 0,
+      JSON.stringify([first, signalText(zoneB), claimsOf(zoneB)]),
+    );
+    doneSignal.writeDoneSignal(zoneB, signalOf('s1'));
+    const later = doneSignal.takeDoneSignal(zoneB, (id) => id === 's1');
+    check(
+      "the holder's own signal written later is taken",
+      later.taken &&
+        at(later.signal, 'session_id') === 's1' &&
+        !signalExists(zoneB) &&
+        claimsOf(zoneB).length === 0,
+      JSON.stringify(later),
+    );
+  }
+
+  // A claim naming the caller is taken while fresh and swept once stale.
+  {
+    const { zoneB } = linkPair('heldclaim');
+    const plantClaim = (name: string, sessionId: string): string => {
+      const file = path.join(zoneB, '.amber', name);
+      fs.writeFileSync(
+        file,
+        JSON.stringify({
+          v: 1,
+          ts: new Date().toISOString(),
+          ...signalOf(sessionId),
+        }),
+      );
+      return file;
+    };
+    plantClaim('done.json.taking-1-1-3', 'h1');
+    const fresh = doneSignal.takeDoneSignal(zoneB, (id) => id === 'h1');
+    const staleFile = plantClaim('done.json.taking-1-1-4', 'h2');
+    const old = new Date(Date.now() - 2 * 60 * 60 * 1000);
+    fs.utimesSync(staleFile, old, old);
+    const stale = doneSignal.takeDoneSignal(zoneB, (id) => id === 'h2');
+    check(
+      'a fresh claim naming the caller is taken, a stale one is swept and not taken',
+      fresh.taken &&
+        at(fresh.signal, 'session_id') === 'h1' &&
+        !stale.taken &&
+        stale.signal === null &&
+        claimsOf(zoneB).length === 0 &&
+        !signalExists(zoneB),
+      JSON.stringify([fresh, stale, claimsOf(zoneB)]),
+    );
+  }
+
+  // F11: a restore whose hard link fails (not EEXIST) falls back to a rename.
+  {
+    const { zoneB } = linkPair('nolink');
+    doneSignal.writeDoneSignal(zoneB, signalOf('n1'));
+    let replacement = '';
+    // Every hard link fails as on a filesystem without them, for this call.
+    const withoutLinks = <T,>(run: () => T): T => {
+      const realLink: unknown = Reflect.get(fs, 'linkSync');
+      Reflect.set(fs, 'linkSync', () => {
+        throw Object.assign(new Error('EPERM: operation not permitted, link'), {
+          code: 'EPERM',
+        });
+      });
+      try {
+        return run();
+      } finally {
+        Reflect.set(fs, 'linkSync', realLink);
+      }
+    };
+    const first = withoutLinks(() =>
+      doneSignal.takeDoneSignal(zoneB, (id) => {
+        if (replacement === '') {
+          doneSignal.writeDoneSignal(zoneB, signalOf('n2'));
+          replacement = signalText(zoneB);
+        }
+        return id === 'n1';
+      }),
+    );
+    check(
+      'a claimed foreign signal is restored by rename, byte-identical, when the link fails with EPERM',
+      !first.taken &&
+        at(parseJson(replacement), 'session_id') === 'n2' &&
+        signalText(zoneB) === replacement &&
+        claimsOf(zoneB).length === 0,
+      JSON.stringify([first, replacement, signalText(zoneB), claimsOf(zoneB)]),
+    );
+  }
+
   // Two sessions submit in B before the first one stops.
   {
     const { zoneA, zoneB, home, rec } = linkPair('concur');

@@ -104,38 +104,10 @@ function errorCode(err: unknown): unknown {
   return guards.isObject(err) ? err['code'] : undefined;
 }
 
-/**
- * Reads the zone's completion signal and consumes it when `accepts` claims
- * it, given the session the signal names (null when it names none). A signal
- * the caller does not claim stays in place untouched. A claimed one is
- * consumed on every path so a rejected signal never fires twice, and a
- * malformed or stale one is dropped. `taken` says whether a signal was
- * consumed.
- *
- * Consuming renames done.json to a claim file first. The rename is atomic, so
- * the claim holds exactly one file and a recorder that writes after it lands
- * in a fresh done.json this Stop never touches. The claimed file is then read
- * and judged again: when a replacement slipped in between the first read and
- * the rename it is not this caller's, so it is linked back to done.json and
- * the claim dropped. If yet another signal took done.json before that link
- * (EEXIST), the claimed foreign one is superseded as a plain overwrite would
- * have left it, and it stays as a claim file for sweepClaims to remove once
- * it is older than the TTL. `afterClaim` runs right after the rename; tests
- * use it to write a replacement at that moment.
- */
-function takeDoneSignal(
-  root: string,
-  accepts: (sessionId: string | null) => boolean = () => true,
-  afterClaim: () => void = () => {},
-): { taken: boolean; signal: DoneSignal | null } {
-  sweepClaims(root);
-  const file = donePath(root);
-  if (!fs.existsSync(file)) return { taken: false, signal: null };
-  if (!accepts(signalSession(readSignalFile(file)))) {
-    return { taken: false, signal: null };
-  }
+/** A fresh claim file name in the zone, unique to this process. */
+function newClaimPath(root: string): string {
   claimSeq += 1;
-  const claimed = path.join(
+  return path.join(
     root,
     '.amber',
     CLAIM_PREFIX +
@@ -145,22 +117,74 @@ function takeDoneSignal(
       '-' +
       String(claimSeq),
   );
+}
+
+/** The zone's claim files, each a signal some Stop is settling. */
+function claimFiles(root: string): string[] {
+  const dir = path.join(root, '.amber');
   try {
-    fs.renameSync(file, claimed);
+    return fs
+      .readdirSync(dir)
+      .filter((name) => name.startsWith(CLAIM_PREFIX))
+      .map((name) => path.join(dir, name));
+  } catch {
+    return [];
+  }
+}
+
+/** Renames `from` to `to`; false when `from` is gone (someone took it). */
+function claimByRename(from: string, to: string): boolean {
+  try {
+    fs.renameSync(from, to);
+    return true;
   } catch (err) {
-    // Another Stop took it meanwhile.
-    if (errorCode(err) === 'ENOENT') return { taken: false, signal: null };
+    if (errorCode(err) === 'ENOENT') return false;
     throw err;
   }
-  afterClaim();
-  const signal = readSignalFile(claimed);
+}
+
+/**
+ * Puts a claimed signal that is not the caller's back as done.json. EEXIST
+ * means a newer signal took done.json meanwhile and supersedes the claimed
+ * one, as a plain overwrite would have: the claim stays for sweepClaims. Any
+ * other link failure (no hard links on this filesystem, a permission error,
+ * the claim taken by its owner) falls back to a rename while done.json is
+ * absent; when that fails too the claim stays for its owner or the sweep.
+ */
+function restoreClaim(claimed: string, file: string): void {
+  try {
+    fs.linkSync(claimed, file);
+    state.tryUnlink(claimed);
+    return;
+  } catch (err) {
+    if (errorCode(err) === 'EEXIST') return;
+  }
+  try {
+    if (!fs.existsSync(file)) fs.renameSync(claimed, file);
+  } catch {
+    // Taken by its owner or not movable: the claim stays.
+  }
+}
+
+/**
+ * Settles a claim this call holds: consumes it when `accepts` claims the
+ * session it names, else restores it. A claim gone before it is read was
+ * taken by its owner (see takeDoneSignal) and counts as not taken.
+ */
+function settleClaim(
+  claimed: string,
+  file: string,
+  accepts: (sessionId: string | null) => boolean,
+): { taken: boolean; signal: DoneSignal | null } {
+  let signal: unknown = null;
+  try {
+    signal = JSON.parse(fs.readFileSync(claimed, 'utf8'));
+  } catch (err) {
+    if (errorCode(err) === 'ENOENT') return { taken: false, signal: null };
+    // Unreadable or not JSON: signal stays null, which names no session.
+  }
   if (!accepts(signalSession(signal))) {
-    try {
-      fs.linkSync(claimed, file);
-      state.tryUnlink(claimed);
-    } catch {
-      // A newer signal holds done.json: the claimed one stays for the sweep.
-    }
+    restoreClaim(claimed, file);
     return { taken: false, signal: null };
   }
   state.tryUnlink(claimed);
@@ -168,6 +192,54 @@ function takeDoneSignal(
   const age = clock.nowMs() - Date.parse(guards.toText(signal.ts || 0));
   if (!(age <= DONE_TTL_MS)) return { taken: true, signal: null };
   return { taken: true, signal };
+}
+
+/**
+ * Reads the zone's completion signal and consumes it when `accepts` claims
+ * it, given the session the signal names (null when it names none). A signal
+ * the caller does not claim stays in place untouched. A claimed one is
+ * consumed on every path so a rejected signal never fires twice, and a
+ * malformed or stale one is dropped. `taken` says whether a signal was
+ * consumed; at most one is per call.
+ *
+ * Consuming renames done.json to a claim file first. The rename is atomic, so
+ * the claim holds exactly one file and a recorder that writes after it lands
+ * in a fresh done.json this Stop never touches. The claimed file is then read
+ * and judged again: when a replacement slipped in between the first read and
+ * the rename it is not this caller's, so it is put back (restoreClaim).
+ *
+ * While another Stop holds the caller's signal that way, done.json is absent
+ * or names someone else. So when done.json is not the caller's, the claim
+ * files are searched for one naming the caller, and that one is taken over by
+ * a rename to the caller's own claim; the holder then finds its claim gone
+ * and leaves it. `afterClaim` runs right after the rename of done.json; tests
+ * use it to act at that moment.
+ */
+function takeDoneSignal(
+  root: string,
+  accepts: (sessionId: string | null) => boolean = () => true,
+  afterClaim: () => void = () => {},
+): { taken: boolean; signal: DoneSignal | null } {
+  sweepClaims(root);
+  const file = donePath(root);
+  const takeFile = (): { taken: boolean; signal: DoneSignal | null } | null => {
+    if (!fs.existsSync(file)) return null;
+    if (!accepts(signalSession(readSignalFile(file)))) return null;
+    const claimed = newClaimPath(root);
+    if (!claimByRename(file, claimed)) return null;
+    afterClaim();
+    return settleClaim(claimed, file, accepts);
+  };
+  const fromFile = takeFile();
+  if (fromFile?.taken) return fromFile;
+  for (const held of claimFiles(root)) {
+    if (!accepts(signalSession(readSignalFile(held)))) continue;
+    const mine = newClaimPath(root);
+    if (claimByRename(held, mine)) return settleClaim(mine, file, accepts);
+    // The holder restored or consumed it meanwhile: done.json once more.
+    return takeFile() ?? { taken: false, signal: null };
+  }
+  return { taken: false, signal: null };
 }
 
 export = { donePath, writeDoneSignal, peekSignalSession, takeDoneSignal };
