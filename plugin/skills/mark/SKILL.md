@@ -15,6 +15,7 @@ Record one cycle event in the ledger and immediately resume work.
   or `hold - U<n> - <reason>` (waiting on the operator, budget reached, or
   out-of-contract decision), including `hold - U<n> - external: <job>` (see
   [run protocol](../../references/protocol.md) `## Loop body`).
+- A hold goes to the run this session drove most recently, even one in a linked worktree outside this zone; on Codex and pi, run `record.cjs mark hold` in that run's directory, as its unit commands run.
 
 ## Procedure
 

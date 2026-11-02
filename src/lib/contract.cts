@@ -17,7 +17,11 @@ function errorText(err: unknown): string {
 }
 
 function loadContract(cwd: string | undefined): Contract | null {
-  const root = zone.zoneRoot(cwd);
+  return loadContractAt(zone.zoneRoot(cwd));
+}
+
+/** The contract of a zone whose root is already known: no git query. */
+function loadContractAt(root: string): Contract | null {
   const pointerPath = path.join(root, '.amber', 'active.json');
   if (!fs.existsSync(pointerPath)) return null;
   try {
@@ -98,4 +102,4 @@ function contractInfo(cwd: string | undefined): {
   };
 }
 
-export = { loadContract, boundaryRel, contractInfo };
+export = { loadContract, loadContractAt, boundaryRel, contractInfo };

@@ -3116,6 +3116,507 @@ const amberFiles = (zone: string): string =>
   }
 }
 
+// ---- zone link: E1 judges each target by its own zone, bash-deny is the union of driven runs, mark hold goes to the run driven last ----
+{
+  // B's contract differs from A's: A writes plugin/** and docs/*.md and
+  // denies git merge|push; B writes plugin/** and lib/** and denies make
+  // deploy. A docs/ path is in A's scope only, a lib/ path in B's only.
+  const B_BOUNDARY = [
+    '# boundary - worktree B',
+    '- B writes plugin [machine: write-scope plugin/**]',
+    '- B writes lib [machine: write-scope lib/**]',
+    '- no deploy from B [machine: bash-deny \\bmake\\s+deploy\\b]',
+  ].join('\n');
+  const linkE1 = (
+    tag: string,
+  ): LinkPair & { readonly realB: string; readonly realA: string } => {
+    const pair = linkPair(tag);
+    fs.writeFileSync(path.join(pair.zoneB, 'test-boundary.md'), B_BOUNDARY);
+    return {
+      ...pair,
+      realA: fs.realpathSync(pair.zoneA),
+      realB: fs.realpathSync(pair.zoneB),
+    };
+  };
+  const e1In = (
+    home: string,
+    cwd: string,
+    sessionId: string,
+    tool: string,
+    toolInput: unknown,
+    agentId?: string,
+  ): HookRun =>
+    runHook(
+      'E1',
+      {
+        session_id: sessionId,
+        cwd,
+        hook_event_name: 'PreToolUse',
+        tool_name: tool,
+        tool_input: toolInput,
+        ...(agentId ? { agent_id: agentId, agent_type: 'default' } : {}),
+      },
+      home,
+    );
+  const write = (
+    home: string,
+    cwd: string,
+    sessionId: string,
+    file: string,
+    agentId?: string,
+  ): HookRun =>
+    e1In(home, cwd, sessionId, 'Write', { file_path: file }, agentId);
+  const reasonOf = (run: HookRun): string =>
+    run.out === null
+      ? ''
+      : stringAt(run.out, 'hookSpecificOutput', 'permissionDecisionReason');
+  const passes = (run: HookRun): boolean => run.exit === 0 && run.out === null;
+  const denied = (run: HookRun, re: RegExp): boolean =>
+    run.exit === 0 && isDeny(run.out) && re.test(reasonOf(run));
+  const esc = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const noCrash = (home: string): boolean =>
+    !fs.existsSync(path.join(home, 'state', 'sensor-failures.log'));
+
+  // Hook cwd A (with a contract), session registered to B.
+  {
+    const { zoneA, zoneB, home, rec, realB } = linkE1('e1z');
+    rec(zoneB, 'z', ['unit', 'init', 'docs/plan.md']);
+    const bName = 'test-boundary\\.md \\(' + esc(realB) + '\\)';
+    const outB = write(home, zoneA, 'z', path.join(zoneB, 'docs', 'n.md'));
+    check(
+      "a Write from hook cwd A to a B path outside B's write-scope is refused by B's contract, named with B's root",
+      denied(
+        outB,
+        new RegExp(
+          '^amber: blocked by contract ' +
+            bName +
+            ': write target docs/n\\.md is outside every write-scope \\(plugin/\\*\\*, lib/\\*\\*\\)$',
+        ),
+      ),
+      reasonOf(outB),
+    );
+    check(
+      "a Write from hook cwd A inside B's write-scope passes (outside A's)",
+      passes(write(home, zoneA, 'z', path.join(zoneB, 'lib', 'x.cjs'))),
+    );
+    const ptrB = write(
+      home,
+      zoneA,
+      'z',
+      path.join(zoneB, '.amber', 'active.json'),
+    );
+    const docB = write(home, zoneA, 'z', path.join(zoneB, 'test-boundary.md'));
+    const stateB = write(
+      home,
+      zoneA,
+      'z',
+      path.join(zoneB, '.amber', 'progress.json'),
+    );
+    check(
+      "B's pointer and contract file are not editable from hook cwd A, and B's .amber/ is refused",
+      denied(ptrB, /not editable.*remove .*active\.json/) &&
+        reasonOf(ptrB).includes(path.join(realB, '.amber', 'active.json')) &&
+        denied(docB, /not editable/) &&
+        denied(
+          stateB,
+          new RegExp(
+            'blocked by contract ' +
+              bName +
+              ': \\.amber/progress\\.json is the run',
+          ),
+        ),
+      [reasonOf(ptrB), reasonOf(docB), reasonOf(stateB)].join(' | '),
+    );
+    const outA = write(home, zoneA, 'z', path.join(zoneA, 'secrets.txt'));
+    check(
+      "a Write in A is still judged by A's contract, named without a root",
+      passes(write(home, zoneA, 'z', path.join(zoneA, 'docs', 'a.md'))) &&
+        denied(
+          outA,
+          /^amber: blocked by contract test-boundary\.md: write target secrets\.txt/,
+        ),
+      reasonOf(outA),
+    );
+    // The same B paths from a session registered nowhere: the target's zone
+    // judges, not the session.
+    check(
+      'the target zone judges whoever writes: an unregistered session meets B as well',
+      denied(
+        write(home, zoneA, 'nobody', path.join(zoneB, 'docs', 'n.md')),
+        new RegExp(bName),
+      ) &&
+        passes(write(home, zoneA, 'nobody', path.join(zoneB, 'lib', 'x.cjs'))),
+    );
+    // apply_patch: each target is judged by its own zone in one call.
+    const patchOf = (...files: string[]): unknown => ({
+      command:
+        '*** Begin Patch\n' +
+        files.map((f) => '*** Add File: ' + f + '\n+x').join('\n') +
+        '\n*** End Patch',
+    });
+    const mixedOk = e1In(
+      home,
+      zoneA,
+      'z',
+      'apply_patch',
+      patchOf(
+        path.join(zoneA, 'docs', 'ok.md'),
+        path.join(zoneB, 'lib', 'ok.cjs'),
+      ),
+    );
+    const mixedBad = e1In(
+      home,
+      zoneA,
+      'z',
+      'apply_patch',
+      patchOf(
+        path.join(zoneA, 'docs', 'ok.md'),
+        path.join(zoneB, 'docs', 'bad.md'),
+      ),
+    );
+    check(
+      'an apply_patch spanning A and B passes when each target fits its own zone and names B when one does not',
+      passes(mixedOk) &&
+        denied(mixedBad, new RegExp(bName + ': write target docs/bad\\.md')),
+      reasonOf(mixedBad),
+    );
+    // A third zone C (a repository with no contract) passes; a nested
+    // repository inside A and a path outside any repository stay A's.
+    const zoneC = makeZone('e1z-c', null, null);
+    const nested = path.join(zoneA, 'nested');
+    fs.mkdirSync(nested);
+    execFileSync('git', ['-C', nested, 'init', '-q']);
+    const loose = path.join(BASE, 'e1z-loose', 'deep', 'x.txt');
+    check(
+      'a target in another repository with no contract passes from hook cwd A under a contract',
+      passes(write(home, zoneA, 'z', path.join(zoneC, 'x.txt'))) &&
+        passes(
+          write(home, zoneA, 'z', path.join(zoneC, 'new', 'dir', 'x.txt')),
+        ),
+    );
+    check(
+      "a nested repository inside A and a path outside any repository are still judged by A's contract",
+      denied(
+        write(home, zoneA, 'z', path.join(nested, 'x.txt')),
+        /write target nested\/x\.txt is outside/,
+      ) &&
+        denied(
+          write(home, zoneA, 'z', loose),
+          /^amber: blocked by contract test-boundary\.md: write target \.\./,
+        ),
+    );
+
+    // Bash and Monitor: the union of A's rows and the rows of B, which the
+    // session drives.
+    const bash = (sessionId: string, command: string, tool = 'Bash'): HookRun =>
+      e1In(home, zoneA, sessionId, tool, { command });
+    const deploy = bash('z', 'make deploy');
+    check(
+      "B's bash-deny row applies to a session in A that drives B, naming B's contract and root",
+      denied(
+        deploy,
+        new RegExp(
+          '^amber: blocked by contract ' + bName + ': bash-deny \\\\bmake',
+        ),
+      ),
+      reasonOf(deploy),
+    );
+    const push = bash('z', 'git push origin x');
+    check(
+      "A's own bash-deny row still applies to that session, named as before",
+      denied(
+        push,
+        /^amber: blocked by contract test-boundary\.md: bash-deny git/,
+      ),
+      reasonOf(push),
+    );
+    check(
+      "a session registered nowhere meets only A's rows",
+      passes(bash('nobody', 'make deploy')) &&
+        denied(bash('nobody', 'git push origin x'), /bash-deny git/),
+    );
+    check(
+      'Monitor follows Bash: B rows for the driving session, none for another',
+      denied(bash('z', 'make deploy', 'Monitor'), new RegExp(bName)) &&
+        passes(bash('nobody', 'make deploy', 'Monitor')),
+    );
+    // A registration whose run was released adds no rows.
+    const ptr = fs.readFileSync(
+      path.join(zoneB, '.amber', 'active.json'),
+      'utf8',
+    );
+    fs.rmSync(path.join(zoneB, '.amber', 'active.json'));
+    check(
+      'a released B adds no bash-deny rows and its paths pass as a zone without a contract',
+      passes(bash('z', 'make deploy')) &&
+        passes(write(home, zoneA, 'z', path.join(zoneB, 'docs', 'n.md'))),
+    );
+    fs.writeFileSync(path.join(zoneB, '.amber', 'active.json'), ptr);
+
+    // Subagents: the unit claimed in B bounds writes in B.
+    const claim = e1In(
+      home,
+      zoneB,
+      'z',
+      'Bash',
+      { command: 'node "' + RECORD_CLI + '" unit claim U1' },
+      'agent-b',
+    );
+    check(
+      "a subagent's claim made with hook cwd B lands in B's progress",
+      passes(claim) &&
+        get(progressOf(zoneB), 'units', 'U1', 'agent_id') === 'agent-b',
+      JSON.stringify([claim, get(progressOf(zoneB), 'units', 'U1')]),
+    );
+    const inUnit = write(
+      home,
+      zoneA,
+      'z',
+      path.join(zoneB, 'plugin', 'x.cjs'),
+      'agent-b',
+    );
+    const outUnit = write(
+      home,
+      zoneA,
+      'z',
+      path.join(zoneB, 'lib', 'x.cjs'),
+      'agent-b',
+    );
+    const unclaimed = write(
+      home,
+      zoneA,
+      'z',
+      path.join(zoneB, 'plugin', 'x.cjs'),
+      'agent-n',
+    );
+    check(
+      "a subagent that claimed U1 in B writes inside U1's scope in B from hook cwd A, not outside it",
+      passes(inUnit) &&
+        denied(
+          outUnit,
+          /blocked by unit U1 \(claimed by subagent agent-b\): write target lib\/x\.cjs is outside its scope \(plugin\/\*\*\)/,
+        ),
+      reasonOf(inUnit) + ' | ' + reasonOf(outUnit),
+    );
+    check(
+      'an unclaimed subagent writing in B is refused for not claiming a unit',
+      denied(unclaimed, /subagent agent-n has not claimed a unit/),
+      reasonOf(unclaimed),
+    );
+    check('no sensor failure across the A/B E1 calls', noCrash(home));
+  }
+
+  // Hook cwd A without a contract, session registered to B.
+  {
+    const { zoneA, zoneB, home, rec, realB } = linkE1('e1bare');
+    fs.rmSync(path.join(zoneA, '.amber', 'active.json'));
+    rec(zoneB, 'zb', ['unit', 'init', 'docs/plan.md']);
+    const bName = 'test-boundary\\.md \\(' + esc(realB) + '\\)';
+    const outB = write(home, zoneA, 'zb', path.join(zoneB, 'docs', 'n.md'));
+    check(
+      "with no contract in hook cwd A, B's targets are still judged by B's contract",
+      denied(
+        outB,
+        new RegExp(
+          '^amber: blocked by contract ' + bName + ': write target docs/n\\.md',
+        ),
+      ) &&
+        passes(write(home, zoneA, 'zb', path.join(zoneB, 'lib', 'x.cjs'))) &&
+        denied(
+          write(home, zoneA, 'zb', path.join(zoneB, '.amber', 'active.json')),
+          /not editable/,
+        ),
+      reasonOf(outB),
+    );
+    check(
+      'with no contract and no phase in A, a target in A passes',
+      passes(write(home, zoneA, 'zb', path.join(zoneA, 'secrets.txt'))),
+    );
+    const bash = (sessionId: string, command: string): HookRun =>
+      e1In(home, zoneA, sessionId, 'Bash', { command });
+    check(
+      "with no contract in A, B's bash-deny row still applies to the session driving B, and not to another",
+      denied(bash('zb', 'make deploy'), new RegExp(bName)) &&
+        passes(bash('other', 'make deploy')) &&
+        passes(bash('zb', 'git push origin x')),
+    );
+    runHook(
+      'S3',
+      {
+        session_id: 'zb',
+        cwd: zoneA,
+        hook_event_name: 'PreToolUse',
+        tool_name: 'Skill',
+        tool_input: { skill: 'amber:planning' },
+      },
+      home,
+    );
+    const gated = write(home, zoneA, 'zb', path.join(zoneA, 'src', 'x.cjs'));
+    check(
+      'with a phase open in A, the phase gate judges A targets and B keeps its own contract',
+      denied(
+        gated,
+        /planning phase open since .*: write target src\/x\.cjs is not a planning artifact/,
+      ) &&
+        passes(write(home, zoneA, 'zb', path.join(zoneB, 'lib', 'x.cjs'))) &&
+        denied(
+          write(home, zoneA, 'zb', path.join(zoneB, 'docs', 'n.md')),
+          new RegExp(bName),
+        ),
+      reasonOf(gated),
+    );
+    check('no sensor failure with a contract-less hook cwd', noCrash(home));
+  }
+
+  // amber:mark hold goes to the run the session drove last.
+  {
+    const { zoneA, zoneB, home, rec, realB } = linkE1('e1hold');
+    rec(zoneA, 'h', ['unit', 'init', 'docs/plan.md']);
+    rec(zoneA, 'h', ['unit', 'start', 'U1']);
+    rec(zoneB, 'h', ['unit', 'init', 'docs/plan.md']);
+    rec(zoneB, 'h', ['unit', 'start', 'U1']);
+    const mark = (sessionId: string, args: string): HookRun =>
+      runHook(
+        'S3',
+        {
+          session_id: sessionId,
+          cwd: zoneA,
+          hook_event_name: 'PreToolUse',
+          tool_name: 'Skill',
+          tool_input: { skill: 'amber:mark', args },
+        },
+        home,
+      );
+    const holdRows = (): unknown[] =>
+      ledger(home).filter((r) => get(r, 'trigger') === 'unit-hold');
+    const aBefore = amberFiles(zoneA);
+    const plain = mark('h', 'hold - U1 - some reason');
+    check(
+      "a mark hold from hook cwd A goes to B, the run the session drove last, and leaves A's progress untouched",
+      plain.exit === 0 &&
+        plain.out === null &&
+        at(progressOf(zoneB), 'hold', 'unit') === 'U1' &&
+        /some reason/.test(stringOf(at(progressOf(zoneB), 'hold', 'reason'))) &&
+        at(progressOf(zoneA), 'hold') == null &&
+        amberFiles(zoneA) === aBefore,
+      JSON.stringify([
+        at(progressOf(zoneB), 'hold'),
+        at(progressOf(zoneA), 'hold'),
+      ]),
+    );
+    check(
+      "the hold's ledger row names B's contract and B as its cwd",
+      holdRows().length === 1 &&
+        at(holdRows(), 0, 'contract') === 'test-boundary.md' &&
+        at(holdRows(), 0, 'cwd') === realB &&
+        at(holdRows(), 0, 'unit') === 'U1',
+      JSON.stringify(holdRows()),
+    );
+    mark('h', 'hold - U1 - external: job');
+    check(
+      'an external mark hold from hook cwd A lands in B with kind external',
+      at(progressOf(zoneB), 'hold', 'kind') === 'external' &&
+        /job/.test(stringOf(at(progressOf(zoneB), 'hold', 'reason'))) &&
+        at(progressOf(zoneA), 'hold') == null &&
+        at(holdRows(), 1, 'kind') === 'external',
+      JSON.stringify(at(progressOf(zoneB), 'hold')),
+    );
+    mark('stranger', 'hold - U1 - stranger reason');
+    check(
+      "a session with no registration holds in the hook cwd's run, as before",
+      /stranger reason/.test(
+        stringOf(at(progressOf(zoneA), 'hold', 'reason')),
+      ) && at(holdRows(), 2, 'cwd') === zoneA,
+      JSON.stringify([at(progressOf(zoneA), 'hold'), at(holdRows(), 2)]),
+    );
+    // The recorder's mark hold (Codex, pi) stays with its directory's run.
+    const recorderHold = (
+      cwd: string,
+      reason: string,
+    ): SpawnSyncReturns<string> =>
+      spawnSync('node', [RECORD_CLI, 'mark', 'hold', 'U1', reason], {
+        cwd,
+        encoding: 'utf8',
+        timeout: 10000,
+        env: {
+          ...process.env,
+          AMBER_HOME: home,
+          AMBER_SESSION_ID: '',
+          CLAUDE_CODE_SESSION_ID: '',
+          PI_SESSION_ID: '',
+          CODEX_THREAD_ID: 'h',
+        },
+      });
+    const recA = recorderHold(zoneA, 'recorder in A');
+    check(
+      "the recorder's mark hold (Codex, pi) goes to the run of the directory it runs in, not the run driven last",
+      recA.status === 0 &&
+        /recorder in A/.test(
+          stringOf(at(progressOf(zoneA), 'hold', 'reason')),
+        ) &&
+        !/recorder in A/.test(
+          stringOf(at(progressOf(zoneB), 'hold', 'reason')),
+        ),
+      recA.stderr,
+    );
+    // B released: the newest registration that still holds its run is A.
+    const ptrB = path.join(zoneB, '.amber', 'active.json');
+    const ptr = fs.readFileSync(ptrB, 'utf8');
+    fs.rmSync(ptrB);
+    mark('h', 'hold - U1 - after B released');
+    check(
+      'once B is released, a mark hold goes to the next run the session drives (A)',
+      /after B released/.test(
+        stringOf(at(progressOf(zoneA), 'hold', 'reason')),
+      ) &&
+        !/after B released/.test(
+          stringOf(at(progressOf(zoneB), 'hold', 'reason')),
+        ),
+      JSON.stringify([
+        at(progressOf(zoneA), 'hold'),
+        at(progressOf(zoneB), 'hold'),
+      ]),
+    );
+    fs.writeFileSync(ptrB, ptr);
+  }
+
+  // A registered zone whose worktree was removed: E1 and S3 pass over it.
+  {
+    const { zoneA, zoneB, home, rec } = linkE1('e1gone');
+    rec(zoneA, 'gz', ['unit', 'init', 'docs/plan.md']);
+    rec(zoneA, 'gz', ['unit', 'start', 'U1']);
+    rec(zoneB, 'gz', ['unit', 'init', 'docs/plan.md']);
+    execFileSync('git', ['-C', zoneA, 'worktree', 'remove', '--force', zoneB]);
+    const bash = e1In(home, zoneA, 'gz', 'Bash', { command: 'make deploy' });
+    const gone = write(home, zoneA, 'gz', path.join(zoneB, 'lib', 'x.cjs'));
+    const hold = runHook(
+      'S3',
+      {
+        session_id: 'gz',
+        cwd: zoneA,
+        hook_event_name: 'PreToolUse',
+        tool_name: 'Skill',
+        tool_input: { skill: 'amber:mark', args: 'hold - U1 - after removal' },
+      },
+      home,
+    );
+    check(
+      'a removed B worktree: E1 Bash and Write and the S3 hold run without error and fall back to A',
+      passes(bash) &&
+        denied(
+          gone,
+          /^amber: blocked by contract test-boundary\.md: write target \.\./,
+        ) &&
+        hold.exit === 0 &&
+        /after removal/.test(
+          stringOf(at(progressOf(zoneA), 'hold', 'reason')),
+        ) &&
+        noCrash(home),
+      JSON.stringify([bash, gone, hold]),
+    );
+  }
+}
+
 // ---- worktree zone: a linked worktree outside the zone is its own zone, with or without a pointer ----
 {
   const zone = makeZone('wtz', BOUNDARY, {

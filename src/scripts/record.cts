@@ -549,6 +549,7 @@ function recordCall(
       },
       'S3',
     ),
+    true,
   );
   process.stdout.write('amber: recorded ' + recorded + '\n');
 }
