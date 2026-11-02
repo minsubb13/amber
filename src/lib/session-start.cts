@@ -78,11 +78,12 @@ function runS0(input: HookInput): HookOutput {
   // Briefed flag keyed to the boundary file: S1 re-briefs only when a
   // contract appears (or changes) after this session's opening.
   if (contract) sessionState.briefed = contract.boundaryFile || 'broken';
-  // A resumed or compacted session keeps driving its run, and keeps the
-  // phase it opened: the gate outlives the context that opened it.
+  // A resumed or compacted session keeps driving its runs, and keeps the
+  // phase it opened: the gate outlives the context that opened it. A
+  // pre-upgrade single `run` is not carried: it is never written again.
   const previous = state.readSessionState(input.session_id);
-  const previousRun = guards.readField(previous, 'run');
-  if (previousRun) sessionState.run = previousRun;
+  const previousRuns = guards.readField(previous, 'runs');
+  if (previousRuns) sessionState.runs = previousRuns;
   const previousPhase = guards.readField(previous, 'phase');
   if (previousPhase) sessionState.phase = previousPhase;
   state.writeStateAtomic(statePath, sessionState);

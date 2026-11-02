@@ -54,6 +54,40 @@ function envSessionId(): string {
   ).trim();
 }
 
+/**
+ * The session a unit or done command registers and records: the environment
+ * names it, or the command is refused before anything is written. Without an
+ * id the run could not be bound to the session driving it.
+ */
+function requireSessionId(command: string): string {
+  const sessionId = envSessionId();
+  if (!sessionId) {
+    throw new Error(
+      command +
+        ' refused: no session id in the environment. Set AMBER_SESSION_ID, ' +
+        'or run it from the session shell of a host that exports ' +
+        'CODEX_THREAD_ID, CLAUDE_CODE_SESSION_ID or PI_SESSION_ID; ' +
+        'nothing was recorded.',
+    );
+  }
+  return sessionId;
+}
+
+/**
+ * Registers the session as a driver of the zone's run, once the command has
+ * passed its checks; a zone without a contract has no run to register to.
+ */
+function registerDriver(
+  sessionId: string,
+  info: { root: string; boundaryFile: string | null },
+): void {
+  if (!info.boundaryFile) return;
+  ownership.registerSession(sessionId, {
+    root: info.root,
+    boundaryFile: info.boundaryFile,
+  });
+}
+
 /** Whether `file` names a regular file (a symbolic link to one included). */
 function isRegularFile(file: string): boolean {
   try {
@@ -148,6 +182,9 @@ function activateCommand(
 function unitCommand(name: string | undefined, rest: readonly string[]): void {
   const command = args.unitCommandOf(name);
   if (!command) throw new Error('invalid unit command\n' + USAGE);
+  // A claim is the subagent's handshake, observed by E1; it registers nobody.
+  const sessionId =
+    command === 'claim' ? '' : requireSessionId('unit ' + command);
   const cwd = process.cwd();
   const info = contracts.contractInfo(cwd);
   if (info.broken) {
@@ -155,11 +192,6 @@ function unitCommand(name: string | undefined, rest: readonly string[]): void {
       'active contract pointer is broken: ' + guards.toText(info.error),
     );
   }
-  // Session identity: an explicit environment id wins; otherwise the recorder
-  // reads back the driver E1 registered for this run just before the command.
-  const fromEnv = envSessionId();
-  const driver = fromEnv ? null : ownership.driverOfRun(info.boundaryFile);
-  const sessionId = fromEnv || driver?.sessionId || 'shell';
   if (command === 'init') {
     const plan = rest.find((a) => !a.startsWith('--'));
     if (!plan) throw new Error('unit init needs the plan path\n' + USAGE);
@@ -199,6 +231,7 @@ function unitCommand(name: string | undefined, rest: readonly string[]): void {
       baselineCommit,
       fallback,
     );
+    registerDriver(sessionId, info);
     const ids = Object.keys(p.units);
     recordUnitEvent(
       sessionId,
@@ -349,6 +382,7 @@ function unitCommand(name: string | undefined, rest: readonly string[]): void {
     clock.isoNow,
   );
   store.saveProgress(info.root, p, clock.isoNow);
+  registerDriver(sessionId, info);
   const fields: Record<string, unknown> = {
     contract: info.boundaryFile,
     unit: id,
@@ -383,6 +417,7 @@ function unitCommand(name: string | undefined, rest: readonly string[]): void {
  * hook only has to judge the pointer and the worktrees.
  */
 function doneCommand(rest: readonly string[]): void {
+  const sessionId = requireSessionId('done');
   const cwd = process.cwd();
   const info = contracts.contractInfo(cwd);
   if (info.broken) {
@@ -452,6 +487,7 @@ function doneCommand(rest: readonly string[]): void {
     }
   }
   const target = info.boundaryFile || 'request';
+  registerDriver(sessionId, info);
   done.writeDoneSignal(info.root, {
     target,
     review,

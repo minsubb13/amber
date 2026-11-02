@@ -225,7 +225,9 @@ function stopEvent(zone: string, message: string, active?: boolean): unknown {
 }
 
 const RECORD_CLI = path.join(PLUGIN, 'scripts', 'record.cjs');
-// The completion signal: `record.cjs done` run in the zone, as the model does.
+// The completion signal: `record.cjs done` run in the zone, as the model does,
+// from the shell of the session the Stop events name (the recorder refuses a
+// shell without a session id).
 function done(
   zone: string,
   home: string,
@@ -236,7 +238,12 @@ function done(
     cwd: zone,
     encoding: 'utf8',
     timeout: 10000,
-    env: { ...process.env, AMBER_HOME: home, ...extraEnv },
+    env: {
+      ...process.env,
+      AMBER_HOME: home,
+      AMBER_SESSION_ID: 's2-test',
+      ...extraEnv,
+    },
   });
 }
 const signalPath = (zone: string): string =>
@@ -270,14 +277,53 @@ const OK_DONE = [
   '--summary',
   'unit complete',
 ];
-// Session binding: E1 registers the session that runs a unit
-// command itself. Tests drive record.cjs directly, so they register through
-// the same observation the live session gets.
-function register(
+// Session binding: the recorder registers the session its environment names
+// when that session runs a unit or done command. Tests that need a driver
+// without running one seed the same registration through the plugin's own
+// ownership module.
+// `<call>(sessionId, <the zone's contract>)` of the plugin's ownership module,
+// run with the given AMBER_HOME; its result as JSON on stdout.
+function ownership(
+  call: 'registerSession' | 'ownsRun',
   zone: string,
   home: string,
   sessionId: string,
-  command?: string,
+): string {
+  const lib = (name: string): string =>
+    JSON.stringify(path.join(PLUGIN, 'lib', name));
+  const script =
+    'process.stdout.write(String(JSON.stringify(require(' +
+    lib('ownership.cjs') +
+    ').' +
+    call +
+    '(' +
+    JSON.stringify(sessionId) +
+    ', require(' +
+    lib('contract.cjs') +
+    ').loadContract(' +
+    JSON.stringify(zone) +
+    ')))));';
+  const r = spawnSync('node', ['-e', script], {
+    encoding: 'utf8',
+    timeout: 10000,
+    env: { ...process.env, AMBER_HOME: home },
+  });
+  assert.equal(r.status, 0, r.stderr);
+  return r.stdout;
+}
+function register(zone: string, home: string, sessionId: string): void {
+  ownership('registerSession', zone, home, sessionId);
+}
+// Whether the session drives the zone's run, as the hooks judge it.
+function owns(home: string, sessionId: string, zone: string): boolean {
+  return ownership('ownsRun', zone, home, sessionId) === 'true';
+}
+// A Bash call through E1 as the session itself makes it (no agent id).
+function e1Bash(
+  zone: string,
+  home: string,
+  sessionId: string,
+  command: string,
 ): unknown {
   return runHook(
     'E1',
@@ -286,9 +332,7 @@ function register(
       cwd: zone,
       hook_event_name: 'PreToolUse',
       tool_name: 'Bash',
-      tool_input: {
-        command: command || 'node ' + RECORD_CLI + ' unit start U1',
-      },
+      tool_input: { command },
     },
     home,
   ).out;
@@ -304,6 +348,15 @@ const sessionState = (home: string, sessionId: string): unknown => {
   } catch {
     return {};
   }
+};
+// The boundary file the session's `runs` registers for a zone, keyed by the
+// zone root as git reports it; undefined without one.
+const runAt = (home: string, sessionId: string, zone: string): unknown =>
+  at(sessionState(home, sessionId), 'runs', fs.realpathSync(zone), 'run');
+// Whether the session's state registers any run at all.
+const registersAny = (home: string, sessionId: string): boolean => {
+  const runs = at(sessionState(home, sessionId), 'runs');
+  return typeof runs === 'object' && runs !== null && keysOf(runs).length > 0;
 };
 
 // ---- E1: contract zone ----
@@ -1605,7 +1658,7 @@ const sessionState = (home: string, sessionId: string): unknown => {
   register(zone, home, 's2-test');
   check(
     'registration lists the session in progress.json',
-    joined(get(progress(), 'session_ids')) === 's2-test',
+    joined(get(progress(), 'session_ids')) === 'loop-shell,s2-test',
   );
   const b1 = runHook('S2', plain(false), home).out;
   check(
@@ -1979,43 +2032,56 @@ const sessionState = (home: string, sessionId: string): unknown => {
   const progressFile = path.join(zone, '.amber', 'progress.json');
   const progress = (): unknown =>
     parseJson(fs.readFileSync(progressFile, 'utf8'));
-  const record = (args: readonly string[]): SpawnSyncReturns<string> =>
+  const record = (
+    args: readonly string[],
+    extraEnv?: NodeJS.ProcessEnv,
+  ): SpawnSyncReturns<string> =>
     spawnSync('node', [RECORD_CLI, ...args], {
       cwd: zone,
       encoding: 'utf8',
       timeout: 10000,
-      env: { ...process.env, AMBER_HOME: home, AMBER_SESSION_ID: 'bind-shell' },
+      env: {
+        ...process.env,
+        AMBER_HOME: home,
+        AMBER_SESSION_ID: 'bind-shell',
+        ...extraEnv,
+      },
     });
   record(['unit', 'init', 'docs/plan.md']);
   record(['unit', 'start', 'U1']);
   check(
-    'progress.json starts with an empty session list',
-    get(progress(), 'session_ids', 'length') === 0,
+    'the recorder registers the session its environment names',
+    joined(get(progress(), 'session_ids')) === 'bind-shell' &&
+      runAt(home, 'bind-shell', zone) === 'test-boundary.md',
+    JSON.stringify(sessionState(home, 'bind-shell')),
   );
   for (const id of ['drv', 'talk']) {
     runHook('S0', { session_id: id, cwd: zone, model: 'm' }, home);
   }
 
-  const reg = register(zone, home, 'drv');
+  const reg = e1Bash(
+    zone,
+    home,
+    'drv',
+    'node ' + RECORD_CLI + ' unit start U1',
+  );
   check(
-    'E1 registers the session that runs a unit command itself',
+    'E1 lets a unit command through without registering the session',
     reg === null &&
-      get(sessionState(home, 'drv'), 'run') === 'test-boundary.md' &&
-      joined(get(progress(), 'session_ids')) === 'drv',
+      !registersAny(home, 'drv') &&
+      joined(get(progress(), 'session_ids')) === 'bind-shell',
     JSON.stringify(sessionState(home, 'drv')) +
       ' ' +
       JSON.stringify(get(progress(), 'session_ids')),
   );
-  register(
-    zone,
-    home,
-    'drv2',
-    'node ' + RECORD_CLI + ' done --review "r" --goal "g" --summary "s"',
-  );
+  register(zone, home, 'drv');
+  const drv2 = record(['done', ...OK_DONE], { AMBER_SESSION_ID: 'drv2' });
   check(
-    'E1 registers on the done command too',
-    get(sessionState(home, 'drv2'), 'run') === 'test-boundary.md' &&
-      list(get(progress(), 'session_ids')).includes('drv2'),
+    'a done command refused for open units registers nobody',
+    drv2.status !== 0 &&
+      !registersAny(home, 'drv2') &&
+      !list(get(progress(), 'session_ids')).includes('drv2'),
+    drv2.stderr,
   );
   register(zone, home, 'drv');
   check(
@@ -2038,7 +2104,7 @@ const sessionState = (home: string, sessionId: string): unknown => {
   );
   check(
     'a subagent call does not register a session',
-    !get(sessionState(home, 'sub'), 'run') &&
+    !registersAny(home, 'sub') &&
       !list(get(progress(), 'session_ids')).includes('sub'),
   );
   runHook(
@@ -2052,14 +2118,11 @@ const sessionState = (home: string, sessionId: string): unknown => {
     },
     home,
   );
-  check(
-    'an ordinary command does not register',
-    !get(sessionState(home, 'talk'), 'run'),
-  );
-  // The regexes anchor to the command position: the same words inside prose
-  // (a commit message, a grep argument, a document heredoc, a node -e probe)
-  // register nothing, while the command behind a loop keyword, an env
-  // prefix, a quoted path or a shell variable still does.
+  check('an ordinary command does not register', !registersAny(home, 'talk'));
+  // E1 registers nobody, whatever form the command takes: the same words
+  // inside prose (a commit message, a grep argument, a document heredoc, a
+  // node -e probe), and the command itself behind a loop keyword, an env
+  // prefix, a quoted path or a shell variable. The recorder registers.
   const prose: [string, string][] = [
     [
       'a commit message naming record.cjs does not register',
@@ -2089,31 +2152,31 @@ const sessionState = (home: string, sessionId: string): unknown => {
   ];
   prose.forEach(([label, command], i) => {
     const id = 'prose' + String(i);
-    register(zone, home, id, command);
-    check(label, !get(sessionState(home, id), 'run'));
+    e1Bash(zone, home, id, command);
+    check(label, !registersAny(home, id));
   });
   const commands: [string, string][] = [
     [
-      'a for loop running the unit command registers',
+      'a for loop running the unit command does not register through E1',
       'for u in U1 U2; do node ' + RECORD_CLI + ' unit start $u; done',
     ],
     [
-      'an env prefix before node registers',
+      'an env prefix before node does not register through E1',
       'env GIT_OPTIONAL_LOCKS=0 node ' + RECORD_CLI + ' unit start U1',
     ],
     [
-      'a quoted record.cjs path registers',
+      'a quoted record.cjs path does not register through E1',
       'node "' + RECORD_CLI + '" unit start U1',
     ],
     [
-      'a plugin-root variable path registers',
+      'a plugin-root variable path does not register through E1',
       'AMBER_HOME=/tmp/h node "$amber_plugin_root/scripts/record.cjs" unit start U1',
     ],
   ];
   commands.forEach(([label, command], i) => {
     const id = 'cmd' + String(i);
-    register(zone, home, id, command);
-    check(label, get(sessionState(home, id), 'run') === 'test-boundary.md');
+    e1Bash(zone, home, id, command);
+    check(label, !registersAny(home, id));
   });
   const brief = runHook(
     'E1',
@@ -2308,7 +2371,7 @@ const sessionState = (home: string, sessionId: string): unknown => {
   const rctx = contextOf(resumed);
   check(
     'S0 on resume/compact keeps the session driving its run',
-    get(sessionState(home, 'drv4'), 'run') === 'test-boundary.md' &&
+    runAt(home, 'drv4', zone) === 'test-boundary.md' &&
       !!rctx &&
       /this session drives the run/.test(stringOf(rctx)),
     String(rctx).slice(-300),
@@ -2323,7 +2386,7 @@ const sessionState = (home: string, sessionId: string): unknown => {
     'S0 tells a non-driving session so and how to take over',
     !!octx &&
       /not one of them/.test(stringOf(octx)) &&
-      /1 session\(s\) drive/.test(stringOf(octx)) &&
+      /2 session\(s\) drive/.test(stringOf(octx)) &&
       /unit/.test(stringOf(octx)),
     String(octx).slice(-400),
   );
@@ -2339,7 +2402,7 @@ const sessionState = (home: string, sessionId: string): unknown => {
   );
 }
 
-// ---- shell attribution: unit rows carry the session E1 registered, not "shell"/"unknown" ----
+// ---- no session id: the recorder refuses unit and done commands and writes nothing ----
 {
   const PLAN = [
     '## Work units',
@@ -2358,9 +2421,9 @@ const sessionState = (home: string, sessionId: string): unknown => {
   const progressFile = path.join(zone, '.amber', 'progress.json');
   const progress = (): unknown =>
     parseJson(fs.readFileSync(progressFile, 'utf8'));
-  // No environment session id: the registration-lookup path. The runner may
-  // itself run inside a Claude Code or pi session, whose CLAUDE_CODE_SESSION_ID
-  // or PI_SESSION_ID would otherwise be inherited and win - blank them explicitly.
+  // No environment session id unless a case sets one. The runner may itself
+  // run inside a Claude Code, Codex or pi session, whose ids would otherwise
+  // be inherited - blank them explicitly.
   const bare = (
     args: readonly string[],
     extraEnv?: NodeJS.ProcessEnv,
@@ -2379,60 +2442,305 @@ const sessionState = (home: string, sessionId: string): unknown => {
         ...extraEnv,
       },
     });
-  const lastRow = (h?: string): unknown => ledger(h || home).slice(-1)[0] || {};
+  // Everything a refused command must leave as it was: the zone's .amber/
+  // files and every state file, byte for byte, and the ledger.
+  const snapshot = (): string => {
+    const files = (dir: string): [string, string][] => {
+      try {
+        return fs
+          .readdirSync(dir)
+          .sort()
+          .map((n) => [n, fs.readFileSync(path.join(dir, n), 'utf8')]);
+      } catch {
+        return [];
+      }
+    };
+    return JSON.stringify([
+      files(path.join(zone, '.amber')),
+      files(path.join(home, 'state')),
+      ledger(home).length,
+    ]);
+  };
+  const lastRow = (): unknown => ledger(home).slice(-1)[0] || {};
+  const NAMES_VARS =
+    /AMBER_SESSION_ID[\s\S]*CODEX_THREAD_ID[\s\S]*CLAUDE_CODE_SESSION_ID[\s\S]*PI_SESSION_ID/;
   runHook('S0', { session_id: 'sa', cwd: zone, model: 'model-a' }, home);
   runHook('S0', { session_id: 'sb', cwd: zone, model: 'model-b' }, home);
-  register(zone, home, 'sa', 'node ' + RECORD_CLI + ' unit init docs/plan.md');
-  const init = bare(['unit', 'init', 'docs/plan.md']);
+  const fresh = snapshot();
+  const noInit = bare(['unit', 'init', 'docs/plan.md']);
   check(
-    'a shell unit init is attributed to the session E1 registered (no progress.json yet)',
+    'unit init without a session id is refused, naming the variables, and writes nothing',
+    noInit.status === 1 &&
+      NAMES_VARS.test(noInit.stderr) &&
+      /nothing was recorded/.test(noInit.stderr) &&
+      !fs.existsSync(progressFile) &&
+      snapshot() === fresh,
+    noInit.stderr,
+  );
+  const init = bare(['unit', 'init', 'docs/plan.md'], {
+    AMBER_SESSION_ID: 'sa',
+  });
+  check(
+    'a unit init with a session id carries that session and its model and registers it',
     init.status === 0 &&
       get(lastRow(), 'trigger') === 'unit-init' &&
       get(lastRow(), 'session_id') === 'sa' &&
-      get(lastRow(), 'model') === 'model-a',
+      get(lastRow(), 'model') === 'model-a' &&
+      runAt(home, 'sa', zone) === 'test-boundary.md' &&
+      joined(get(progress(), 'session_ids')) === 'sa',
     (init.stderr || '') + JSON.stringify(lastRow()),
   );
-  register(zone, home, 'sb');
-  const start = bare(['unit', 'start', 'U1']);
+  const initialized = snapshot();
+  const noStart = bare(['unit', 'start', 'U1']);
   check(
-    'the most recently registered driver takes the row and the progress history',
-    start.status === 0 &&
-      get(lastRow(), 'session_id') === 'sb' &&
-      get(lastRow(), 'model') === 'model-b' &&
-      get(
-        list(get(progress(), 'units', 'U1', 'history')).slice(-1)[0],
-        'by',
-      ) === 'sb',
-    (start.stderr || '') + JSON.stringify(lastRow()),
+    'unit start without a session id is refused, naming the variables, and changes no progress or state',
+    noStart.status === 1 &&
+      NAMES_VARS.test(noStart.stderr) &&
+      snapshot() === initialized,
+    noStart.stderr,
   );
-  const old = new Date(Date.now() - 3600 * 1000);
-  fs.utimesSync(path.join(home, 'state', 'session-sb.json'), old, old);
-  register(zone, home, 'sa');
-  const hold = bare(['unit', 'hold', 'U1', '--reason', 'waiting']);
-  check(
-    'an idempotent re-registration touches the state file, so the issuing session wins',
-    hold.status === 0 &&
-      get(lastRow(), 'trigger') === 'unit-hold' &&
-      get(lastRow(), 'session_id') === 'sa' &&
-      get(lastRow(), 'model') === 'model-a',
-    (hold.stderr || '') + JSON.stringify(lastRow()),
-  );
-  const env = bare(['unit', 'start', 'U2'], { AMBER_SESSION_ID: 'env-id' });
-  check(
-    'an explicit environment session id still wins',
-    env.status === 0 && get(lastRow(), 'session_id') === 'env-id',
-    (env.stderr || '') + JSON.stringify(lastRow()),
-  );
-  const none = freshHome('attr-none');
-  const bareNone = bare(['unit', 'failed', 'U2', '--evidence', 'x'], {
-    AMBER_HOME: none,
+  bare(['unit', 'start', 'U1'], { AMBER_SESSION_ID: 'sa' });
+  bare(['unit', 'verified', 'U1', '--evidence', 'ok'], {
+    AMBER_SESSION_ID: 'sa',
+  });
+  bare(['unit', 'start', 'U2'], { AMBER_SESSION_ID: 'sa' });
+  const started = snapshot();
+  const blank = bare(['unit', 'verified', 'U2', '--evidence', ' '], {
+    AMBER_SESSION_ID: 'sb',
   });
   check(
-    'without any registration the row still says shell/unknown (negative control)',
-    bareNone.status === 0 &&
-      get(lastRow(none), 'session_id') === 'shell' &&
-      get(lastRow(none), 'model') === 'unknown',
-    (bareNone.stderr || '') + JSON.stringify(lastRow(none)),
+    'a refused unit call does not register the session',
+    blank.status === 1 &&
+      /--evidence is missing or blank/.test(blank.stderr) &&
+      !registersAny(home, 'sb') &&
+      snapshot() === started,
+    blank.stderr,
+  );
+  const retry = bare(['unit', 'verified', 'U2', '--evidence', 'ok'], {
+    AMBER_SESSION_ID: 'sb',
+  });
+  check(
+    'the valid call that follows registers it and carries its model',
+    retry.status === 0 &&
+      runAt(home, 'sb', zone) === 'test-boundary.md' &&
+      joined(get(progress(), 'session_ids')) === 'sa,sb' &&
+      get(lastRow(), 'session_id') === 'sb' &&
+      get(lastRow(), 'model') === 'model-b',
+    (retry.stderr || '') + JSON.stringify(lastRow()),
+  );
+  const verified = snapshot();
+  const noDone = bare(['done', ...OK_DONE]);
+  check(
+    'done without a session id is refused, naming the variables, and writes no signal',
+    noDone.status === 1 &&
+      NAMES_VARS.test(noDone.stderr) &&
+      !signalExists(zone) &&
+      snapshot() === verified,
+    noDone.stderr,
+  );
+  const okDone = bare(['done', ...OK_DONE], { AMBER_SESSION_ID: 'sc' });
+  check(
+    'done with a session id writes the signal and registers that session',
+    okDone.status === 0 &&
+      signalExists(zone) &&
+      runAt(home, 'sc', zone) === 'test-boundary.md' &&
+      list(get(progress(), 'session_ids')).includes('sc'),
+    okDone.stderr,
+  );
+}
+
+// ---- zone link: a session in zone A drives the run of a linked worktree B outside it ----
+{
+  const PLAN = [
+    '## Work units',
+    '- [ ] U1 one [unit: U1 scope=plugin/** oracle=true]',
+    '- [ ] U2 two [unit: U2 scope=docs/*.md oracle=true]',
+  ].join('\n');
+  const POINTER = {
+    v: 1,
+    boundary: 'test-boundary.md',
+    ratified_by: 'operator',
+    ratified_at: '2026-11-02',
+  };
+  // A and B share their contract file name, test-boundary.md, from the commit.
+  const zoneA = makeZone('link-a', BOUNDARY, POINTER);
+  fs.mkdirSync(path.join(zoneA, 'docs'), { recursive: true });
+  fs.writeFileSync(path.join(zoneA, 'docs', 'plan.md'), PLAN);
+  fs.writeFileSync(path.join(zoneA, '.gitignore'), '.amber/\n');
+  execFileSync('git', ['-C', zoneA, 'config', 'user.email', 't@t']);
+  execFileSync('git', ['-C', zoneA, 'config', 'user.name', 't']);
+  execFileSync('git', ['-C', zoneA, 'add', '-A']);
+  execFileSync('git', ['-C', zoneA, 'commit', '-q', '-m', 'init']);
+  const zoneB = path.join(BASE, 'link-b');
+  execFileSync('git', [
+    '-C',
+    zoneA,
+    'worktree',
+    'add',
+    '-q',
+    '-b',
+    'link-b',
+    zoneB,
+  ]);
+  fs.mkdirSync(path.join(zoneB, '.amber'), { recursive: true });
+  fs.writeFileSync(
+    path.join(zoneB, '.amber', 'active.json'),
+    JSON.stringify(POINTER),
+  );
+  const home = freshHome('link');
+  // record.cjs run in `cwd` from the shell of a session (Claude Code's own
+  // variable only; the others are blanked).
+  const rec = (
+    cwd: string,
+    sessionId: string,
+    args: readonly string[],
+  ): SpawnSyncReturns<string> =>
+    spawnSync('node', [RECORD_CLI, ...args], {
+      cwd,
+      encoding: 'utf8',
+      timeout: 10000,
+      env: {
+        ...process.env,
+        AMBER_HOME: home,
+        AMBER_SESSION_ID: '',
+        CODEX_THREAD_ID: '',
+        CLAUDE_CODE_SESSION_ID: sessionId,
+        PI_SESSION_ID: '',
+      },
+    });
+  const progressOf = (zone: string): unknown =>
+    parseJson(
+      fs.readFileSync(path.join(zone, '.amber', 'progress.json'), 'utf8'),
+    );
+  const amberFiles = (zone: string): string =>
+    JSON.stringify(
+      fs
+        .readdirSync(path.join(zone, '.amber'))
+        .sort()
+        .map((n) => [n, fs.readFileSync(path.join(zone, '.amber', n), 'utf8')]),
+    );
+  const atOf = (sessionId: string, zone: string): string =>
+    stringOf(
+      at(sessionState(home, sessionId), 'runs', fs.realpathSync(zone), 'at'),
+    );
+  rec(zoneA, 'a-owner', ['unit', 'init', 'docs/plan.md']);
+  rec(zoneA, 'a-owner', ['unit', 'start', 'U1']);
+  rec(zoneB, 'b-init', ['unit', 'init', 'docs/plan.md']);
+  // The driving session stands in A: its hooks see cwd A.
+  runHook('S0', { session_id: 'zl', cwd: zoneA, model: 'model-zl' }, home);
+  const aBefore = amberFiles(zoneA);
+  const startB = rec(zoneB, 'zl', ['unit', 'start', 'U1']);
+  check(
+    'a unit command run in B registers the session in B only and leaves A untouched',
+    startB.status === 0 &&
+      list(get(progressOf(zoneB), 'session_ids')).includes('zl') &&
+      runAt(home, 'zl', zoneB) === 'test-boundary.md' &&
+      runAt(home, 'zl', zoneA) === undefined &&
+      !list(get(progressOf(zoneA), 'session_ids')).includes('zl') &&
+      amberFiles(zoneA) === aBefore,
+    (startB.stderr || '') + JSON.stringify(sessionState(home, 'zl')),
+  );
+  check(
+    'ownsRun holds for B and not for A, though both contract files are test-boundary.md',
+    owns(home, 'zl', zoneB) && !owns(home, 'zl', zoneA),
+  );
+  check(
+    'the unit row of B carries the session and its model',
+    ledger(home).some(
+      (r) =>
+        get(r, 'trigger') === 'unit-start' &&
+        get(r, 'session_id') === 'zl' &&
+        get(r, 'model') === 'model-zl' &&
+        get(r, 'cwd') === zoneB,
+    ),
+  );
+  check(
+    'a registration in A alone does not own B',
+    owns(home, 'a-owner', zoneA) && !owns(home, 'a-owner', zoneB),
+  );
+  const firstAtB = atOf('zl', zoneB);
+  const holdA = rec(zoneA, 'zl', ['unit', 'hold', 'U1', '--reason', 'r']);
+  check(
+    'driving A after B keeps both registrations',
+    holdA.status === 0 &&
+      runAt(home, 'zl', zoneA) === 'test-boundary.md' &&
+      runAt(home, 'zl', zoneB) === 'test-boundary.md' &&
+      owns(home, 'zl', zoneA) &&
+      owns(home, 'zl', zoneB) &&
+      atOf('zl', zoneB) === firstAtB &&
+      atOf('zl', zoneA) > firstAtB,
+    (holdA.stderr || '') + JSON.stringify(sessionState(home, 'zl')),
+  );
+  rec(zoneB, 'zl', ['unit', 'verified', 'U1', '--evidence', 'ok']);
+  check(
+    "driving B again refreshes B's time and keeps A's registration",
+    atOf('zl', zoneB) > firstAtB &&
+      atOf('zl', zoneB) > atOf('zl', zoneA) &&
+      runAt(home, 'zl', zoneA) === 'test-boundary.md',
+    JSON.stringify(sessionState(home, 'zl')),
+  );
+  const e1Out = e1Bash(
+    zoneA,
+    home,
+    'e1zl',
+    'cd ' + zoneB + ' && node ' + RECORD_CLI + ' unit start U2',
+  );
+  check(
+    'E1 registers nobody for a unit command, in A or in B',
+    e1Out === null &&
+      !registersAny(home, 'e1zl') &&
+      !list(get(progressOf(zoneA), 'session_ids')).includes('e1zl') &&
+      !list(get(progressOf(zoneB), 'session_ids')).includes('e1zl'),
+    JSON.stringify(e1Out),
+  );
+  const registered = JSON.stringify(at(sessionState(home, 'zl'), 'runs'));
+  for (const source of ['resume', 'compact', 'clear']) {
+    runHook(
+      'S0',
+      { session_id: 'zl', cwd: zoneA, model: 'model-zl', source },
+      home,
+    );
+    check(
+      'S0 on ' + source + ' carries both registrations over',
+      JSON.stringify(at(sessionState(home, 'zl'), 'runs')) === registered &&
+        owns(home, 'zl', zoneA) &&
+        owns(home, 'zl', zoneB),
+      JSON.stringify(sessionState(home, 'zl')),
+    );
+  }
+  // A state file written before `runs` existed: its single `run` owns any run
+  // with that boundary file, and S0 does not carry it.
+  fs.writeFileSync(
+    path.join(home, 'state', 'session-legacy.json'),
+    JSON.stringify({ model: 'm', run: 'test-boundary.md' }),
+  );
+  fs.writeFileSync(
+    path.join(home, 'state', 'session-legacy-other.json'),
+    JSON.stringify({ model: 'm', run: 'other-boundary.md' }),
+  );
+  check(
+    'a pre-upgrade state file with only run owns a run with that boundary file',
+    owns(home, 'legacy', zoneA) &&
+      owns(home, 'legacy', zoneB) &&
+      !owns(home, 'legacy-other', zoneA),
+  );
+  rec(zoneB, 'legacy', ['unit', 'start', 'U2']);
+  check(
+    'once the recorder registers it, runs decides and run is left as found',
+    owns(home, 'legacy', zoneB) &&
+      !owns(home, 'legacy', zoneA) &&
+      get(sessionState(home, 'legacy'), 'run') === 'test-boundary.md',
+    JSON.stringify(sessionState(home, 'legacy')),
+  );
+  runHook(
+    'S0',
+    { session_id: 'legacy-other', cwd: zoneA, model: 'm', source: 'resume' },
+    home,
+  );
+  check(
+    'S0 does not carry a pre-upgrade run over',
+    !has(sessionState(home, 'legacy-other'), 'run'),
+    JSON.stringify(sessionState(home, 'legacy-other')),
   );
 }
 

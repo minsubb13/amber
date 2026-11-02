@@ -126,7 +126,7 @@ function runS2(input: HookInput): HookOutput {
   state.touchSessionState(input.session_id);
   const root = zone.zoneRoot(input.cwd);
   // A session that does not drive the run leaves its signal alone: the driver
-  // that wrote it (E1 registered it on the done command) reads it.
+  // that wrote it (the recorder registered it on the done command) reads it.
   const signal = ownership.ownsRun(
     input.session_id,
     contracts.loadContract(input.cwd),

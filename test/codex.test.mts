@@ -735,11 +735,9 @@ test('Codex Stop leaves a signal alone for a session that does not drive the run
   );
   assert.deepEqual(ledger(f), []);
   assert.equal(fs.existsSync(path.join(f.root, '.amber', 'active.json')), true);
-  hook(f, 'PreToolUse', {
-    tool_name: 'Bash',
-    tool_use_id: 'call-unit',
-    tool_input: { command: 'node record.cjs unit start U1' },
-  });
+  // Running done from the session's own shell registers it as a driver.
+  const signalled = record(f, DONE);
+  assert.equal(signalled.status, 0, signalled.stderr);
   assert.equal(
     hook(f, 'Stop', {
       last_assistant_message: 'Finished.',

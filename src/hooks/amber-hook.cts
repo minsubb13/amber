@@ -30,7 +30,7 @@
 //
 // This entry reads stdin, picks the handler and writes its answer; the
 // handlers live in lib/ (session-start, prompt-submit, stop-gate,
-// skill-recorder, enforcer). scripts/record.cjs requires the five functions
+// skill-recorder, enforcer). scripts/record.cjs requires the four functions
 // exported below.
 
 import fs = require('node:fs');
@@ -42,7 +42,6 @@ import enforcer = require('../lib/enforcer.cjs');
 import guards = require('../lib/guards.cjs');
 import inputs = require('../lib/hook-input.cjs');
 import ledger = require('../lib/ledger.cjs');
-import ownership = require('../lib/ownership.cjs');
 import promptSubmit = require('../lib/prompt-submit.cjs');
 import sessionStart = require('../lib/session-start.cjs');
 import skillRecorder = require('../lib/skill-recorder.cjs');
@@ -131,7 +130,6 @@ export = {
   recordUnitEvent,
   contractInfo: contracts.contractInfo,
   writeDoneSignal: done.writeDoneSignal,
-  driverOfRun: ownership.driverOfRun,
 };
 
 if (require.main === module) main();

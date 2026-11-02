@@ -20,7 +20,6 @@ import glob = require('./glob.cjs');
 import guards = require('./guards.cjs');
 import ledger = require('./ledger.cjs');
 import model = require('./progress-model.cjs');
-import ownership = require('./ownership.cjs');
 import phase = require('./phase.cjs');
 import phaseStore = require('./phase-store.cjs');
 import rules = require('./contract-rules.cjs');
@@ -29,10 +28,10 @@ import text = require('./hook-text.cjs');
 import zone = require('./zone.cjs');
 import type { ActiveContract, HookInput, HookOutput, Unit } from './types.cjs';
 
-// A unit command or the completion signal at a command position: the start
-// of a shell segment (string start, newline, `;`, `&`, `|`, `(`, `$(`, or a
-// keyword such as `do`, `then`, `exec`), optional `env` and NAME=value
-// prefixes, then node running a path that ends in record.cjs, quoted or not.
+// A unit claim at a command position: the start of a shell segment (string
+// start, newline, `;`, `&`, `|`, `(`, `$(`, or a keyword such as `do`,
+// `then`, `exec`), optional `env` and NAME=value prefixes, then node running
+// a path that ends in record.cjs, quoted or not.
 // A backtick is not a segment start: Markdown inline code in a document
 // heredoc is the common prose form of the command, and backtick command
 // substitution is not a recorded way of running it. The former substring
@@ -53,14 +52,6 @@ const CLI =
 // The claim's unit id is read case-insensitively, as the recorder reads it.
 const UNIT_CLAIM = new RegExp(
   SEG + ENV + CLI + /unit\s+claim\s+([Uu]\d+)\b/.source,
-);
-// Any unit command or the completion signal, run by the session itself (no
-// agent id): the act that registers the session as a driver of the run.
-const UNIT_CMD = new RegExp(
-  SEG +
-    ENV +
-    CLI +
-    /(?:unit\s+(?:init|claim|start|verified|failed|hold)|done)\b/.source,
 );
 
 const deny = text.denyOutput;
@@ -139,8 +130,6 @@ function runBash(
       const unitId = (claim[1] ?? '').toUpperCase();
       return observeClaim(input, contract, agentId, unitId);
     }
-  } else if (UNIT_CMD.test(command)) {
-    ownership.registerSession(input.session_id, contract);
   }
   return null;
 }
@@ -344,4 +333,4 @@ function runE1(input: HookInput): HookOutput {
   return null;
 }
 
-export = { runE1, UNIT_CMD, UNIT_CLAIM };
+export = { runE1, UNIT_CLAIM };
