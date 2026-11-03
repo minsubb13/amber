@@ -4,7 +4,8 @@
 // files idle past the TTL, and brief the session - the active contract with
 // its progress, ownership and waiting signal, or the arming note with the
 // completion procedure (its index on a startup or clear, its full text on a
-// compaction or resume) when there is none - plus any sensor failures.
+// compaction or resume) when there is none - plus the runs the session
+// drives in other zones and any sensor failures.
 const fs = require("node:fs");
 const path = require("node:path");
 const briefing = require("./briefing.cjs");
@@ -72,15 +73,27 @@ function runS0(input) {
     // contract appears (or changes) after this session's opening.
     if (contract)
         sessionState.briefed = contract.boundaryFile || 'broken';
-    // A resumed or compacted session keeps driving its run, and keeps the
-    // phase it opened: the gate outlives the context that opened it.
+    // A resumed or compacted session keeps driving its runs, and keeps the
+    // phase it opened: the gate outlives the context that opened it. A
+    // pre-upgrade single `run` is carried as found, a read-only fallback while
+    // the state file lives; nothing creates or updates it.
+    // A present `runs` is carried even when malformed: it alone decides
+    // ownership (a malformed one owns nothing), and dropping it would hand the
+    // decision back to the pre-upgrade `run`.
     const previous = state.readSessionState(input.session_id);
+    if ('runs' in previous)
+        sessionState.runs = previous['runs'];
     const previousRun = guards.readField(previous, 'run');
     if (previousRun)
         sessionState.run = previousRun;
     const previousPhase = guards.readField(previous, 'phase');
     if (previousPhase)
         sessionState.phase = previousPhase;
+    // The other driven zones announced below; S1 repeats them only when the
+    // set changes. Read from the previous state, whose runs are carried as is.
+    const driven = briefing.drivenZonesFor(input.cwd, input.session_id);
+    if (driven.length > 0)
+        sessionState.driven_briefed = briefing.drivenKey(driven);
     state.writeStateAtomic(statePath, sessionState);
     sweepIdleState();
     const failures = sensorFailureCount();
@@ -111,6 +124,8 @@ function runS0(input) {
             ? text.noContractGuidance()
             : text.NO_CONTRACT_INDEX);
     }
+    if (driven.length > 0)
+        parts.push(driven.map((z) => z.line).join('\n'));
     if (failures > 0) {
         parts.push(text.sensorFailures(failures, state.FAILURES_FILE));
     }

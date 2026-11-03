@@ -54,6 +54,11 @@ function insideZone(root: string, dir: string): boolean {
  * own through planning, set, and approval run there.
  */
 function zoneRoot(cwd: string | null | undefined): string {
+  return gitZoneRoot(cwd) ?? path.resolve(cwd || '.');
+}
+
+/** zoneRoot as git answers it, or null outside any repository. */
+function gitZoneRoot(cwd: string | null | undefined): string | null {
   const top = gitQuery(cwd, ['rev-parse', '--show-toplevel']);
   if (top && fs.existsSync(path.join(top, '.amber', 'active.json'))) return top;
   const common = gitQuery(cwd, [
@@ -72,8 +77,7 @@ function zoneRoot(cwd: string | null | undefined): string {
     }
     return top;
   }
-  if (top) return top;
-  return path.resolve(cwd || '.');
+  return top;
 }
 
 function worktreeTop(cwd: string | null | undefined): string | null {
@@ -128,8 +132,8 @@ function zoneRelative(
 /**
  * Zone-relative paths of every write target of one tool call, each paired
  * with its absolute path, from the two git queries made once instead of
- * once per target: a patch touching n files costs two queries, not 2n. No
- * target, no query.
+ * once per target: a patch touching n files costs two queries, not 2n (one
+ * when cwd is the zone root). No target, no query.
  */
 function zoneRelativeAll(
   root: string,
@@ -137,7 +141,9 @@ function zoneRelativeAll(
   absList: readonly string[],
 ): { abs: string; rel: string }[] {
   if (absList.length === 0) return [];
-  const top = worktreeTop(cwd);
+  // A cwd at the zone root is its own toplevel: no query.
+  const top =
+    cwd && path.resolve(cwd) === path.resolve(root) ? root : worktreeTop(cwd);
   const worktrees = worktreeList(root);
   return absList.map((abs) => ({
     abs,
@@ -186,6 +192,7 @@ function projectKey(cwd: string | null | undefined): string {
 export = {
   insideZone,
   zoneRoot,
+  gitZoneRoot,
   worktreeTop,
   zoneRelative,
   zoneRelativeAll,

@@ -14,7 +14,10 @@ function errorText(err) {
     return guards.toText(message || err);
 }
 function loadContract(cwd) {
-    const root = zone.zoneRoot(cwd);
+    return loadContractAt(zone.zoneRoot(cwd));
+}
+/** The contract of a zone whose root is already known: no git query. */
+function loadContractAt(root) {
     const pointerPath = path.join(root, '.amber', 'active.json');
     if (!fs.existsSync(pointerPath))
         return null;
@@ -82,4 +85,4 @@ function contractInfo(cwd) {
         baseline: c.broken ? undefined : c.baseline,
     };
 }
-module.exports = { loadContract, boundaryRel, contractInfo };
+module.exports = { loadContract, loadContractAt, boundaryRel, contractInfo };

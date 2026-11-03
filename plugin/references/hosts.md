@@ -67,10 +67,15 @@ initializing a zone, running an audit, or dispatching a review.*
 ## Loop-body unit commands (both hosts)
 
 Run unit transitions in the zone (or in a unit worktree under
-`<zone>/.claude/worktrees/`; the recorder resolves the main checkout). The first
-unit command a main session (not a subagent) runs registers it as a driver of
-the run: only driving sessions are sent back by the Stop hook while units are
-open or have their completion signal read. Sibling sessions in the zone receive
+`<zone>/.claude/worktrees/`; the recorder resolves the main checkout). Every
+unit command but `unit claim`, and `done`, needs the session id from the
+environment (the first set of `AMBER_SESSION_ID`, `CODEX_THREAD_ID`,
+`CLAUDE_CODE_SESSION_ID` and `PI_SESSION_ID`; a shell without one is refused and
+nothing is recorded), and once the command passes its checks the recorder
+registers the session its environment names as a driver of the run in the zone
+of its working directory; no hook registers a session, and `unit claim`
+registers nobody. Only driving sessions are sent back by the Stop hook while
+units are open or have their completion signal read. Sibling sessions in the zone receive
 the briefing and obey `write-scope` and `bash-deny`, but are not pulled into the loop.
 The session-opening briefing (S0; on every host - a Codex session leaves the
 same S0 state file - on Claude Code at startup, resume, clear and compact, and
@@ -95,6 +100,33 @@ node "$amber_plugin_root/scripts/record.cjs" unit claim U1                  # a 
 host-assigned subagent id) and reports whether the claim was recorded. Holds can
 also be recorded via `amber:mark` (`hold - U1 - <reason>` or
 `hold - U1 - external: <job>`; Codex `mark hold` above).
+
+A session may drive the run of a linked worktree outside its own zone
+directory (a separate zone with its own pointer) by running every unit and
+done command with that worktree as the working directory, in one line:
+`cd <worktree> && node "$amber_plugin_root/scripts/record.cjs" unit start U1`.
+Registration, the completion signal and `unit hold` then belong to that
+worktree's run, and the session's own zone keeps its own. The Stop hook reads
+the session's own signal there as well as in its own zone, and a stop without
+a signal is sent back for one zone only: the most recently driven one that has
+open units. A
+Skill-call `amber:mark` hold goes to the run the session drove most recently,
+while the Codex and pi `record.cjs mark hold` follows its working directory.
+File-tool writes in that worktree are checked against its contract, and shell
+commands meet the `bash-deny` rows of every run the session drives.
+
+The one-line form is needed only when the worktree is not one of the session's
+working directories. Claude Code keeps a standalone `cd` only inside them and
+resets one that leaves them at the next call. When the worktree is a working
+directory from the session's start (`claude --add-dir <worktree>`, or
+`permissions.additionalDirectories` in settings), `cd <worktree>` persists and
+the hooks receive it as their `cwd`: the worktree is then the session's zone
+for every tool call until the session changes directory again, as if the
+session had started there. A directory added mid-session with `/add-dir`, or
+created after the session started, does not keep a `cd` (measured on Claude
+Code 2.1.317); reopen the session with `claude --continue --add-dir <worktree>`.
+A reopened session starts in its launch directory again, so it changes
+directory before its first command there.
 
 **Post-hoc scope check (both hosts):** `unit verified` and `done` compare the
 files changed since the run began against the contract's `write-scope` rows.

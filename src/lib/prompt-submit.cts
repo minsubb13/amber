@@ -2,7 +2,8 @@
 // /amber:init, $amber:init and the typed audit call; brief the session once
 // per boundary file when a contract became active after session start (S0
 // briefs only at startup); name a completion signal waiting for another
-// session on every prompt while it applies. Everything else stays silent.
+// session on every prompt while it applies; name the runs the session drives
+// in other zones once per change of their set. Everything else stays silent.
 
 import briefing = require('./briefing.cjs');
 import contracts = require('./contract.cjs');
@@ -34,29 +35,47 @@ function runS1(input: HookInput): HookOutput {
   if (AUDIT_CALL.test(prompt)) {
     ledger.appendRecord(input, 'amber:audit (typed)', null, 'skill-invocation');
   }
-  const contract = contracts.loadContract(input.cwd);
-  if (!contract) return null;
-  const waiting = briefing.waitingSignalContextFor(contract, input.session_id);
-  const key = contract.boundaryFile || 'broken';
   const stateFile = state.sessionStatePath(input.session_id);
-  const sessionState = state.readJsonOrEmpty(stateFile);
-  if (guards.readField(sessionState, 'briefed') === key) {
-    return waiting ? text.contextOutput('UserPromptSubmit', waiting) : null;
+  const sessionState = state.readSessionState(input.session_id);
+  let changed = false;
+  const parts: (string | null)[] = [];
+  const contract = contracts.loadContract(input.cwd);
+  if (contract) {
+    const waiting = briefing.waitingSignalContextFor(
+      contract,
+      input.session_id,
+    );
+    const key = contract.boundaryFile || 'broken';
+    if (sessionState['briefed'] === key) {
+      parts.push(waiting);
+    } else {
+      sessionState['briefed'] = key;
+      changed = true;
+      parts.push(
+        briefing.contractContextFor(contract),
+        briefing.progressContextFor(contract),
+        briefing.ownershipContextFor(contract, input.session_id),
+        waiting,
+      );
+    }
   }
-  guards.writeField(sessionState, 'briefed', key);
-  state.ensureDirs();
-  state.writeStateAtomic(stateFile, sessionState);
-  return text.contextOutput(
-    'UserPromptSubmit',
-    [
-      briefing.contractContextFor(contract),
-      briefing.progressContextFor(contract),
-      briefing.ownershipContextFor(contract, input.session_id),
-      waiting,
-    ]
-      .filter(Boolean)
-      .join('\n\n'),
-  );
+  // The other zones the session drives, announced once per change of their
+  // set whatever the cwd zone's briefing did (S0 records the set it named).
+  const driven = briefing.drivenZonesFor(input.cwd, input.session_id);
+  const drivenKey = briefing.drivenKey(driven);
+  const announced = sessionState['driven_briefed'];
+  const before = Array.isArray(announced) ? announced : [];
+  if (JSON.stringify(before) !== JSON.stringify(drivenKey)) {
+    sessionState['driven_briefed'] = drivenKey;
+    changed = true;
+    parts.push(driven.map((z) => z.line).join('\n'));
+  }
+  if (changed) {
+    state.ensureDirs();
+    state.writeStateAtomic(stateFile, sessionState);
+  }
+  const context = parts.filter(Boolean).join('\n\n');
+  return context ? text.contextOutput('UserPromptSubmit', context) : null;
 }
 
 export = { runS1 };

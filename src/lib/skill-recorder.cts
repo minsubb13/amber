@@ -10,11 +10,12 @@ import contracts = require('./contract.cjs');
 import guards = require('./guards.cjs');
 import ledger = require('./ledger.cjs');
 import model = require('./progress-model.cjs');
+import ownership = require('./ownership.cjs');
 import phaseStore = require('./phase-store.cjs');
 import store = require('./progress-store.cjs');
 import recordArgs = require('./record-args.cjs');
 import zone = require('./zone.cjs');
-import type { HookInput, HookOutput } from './types.cjs';
+import type { Contract, HookInput, HookOutput } from './types.cjs';
 
 // Model-invoked amber skills arrive as Skill tool calls; match the likely
 // fields defensively (with or without the plugin prefix).
@@ -26,20 +27,50 @@ const MARK_ARGS = /^(skip|finding|hold)\s*[-:]\s*([\s\S]+)$/;
 const HOLD_TEXT = /^(U\d+)\s*[-:]\s*([\s\S]*)$/;
 
 /**
+ * The run a hold goes to. A Skill call (Claude Code's S3): the newest
+ * registration of the session whose zone still holds that run (the run the
+ * session drove last), with that zone as the ledger row's cwd; without one,
+ * the hook cwd's zone contract. The recorder's `mark hold` (Codex, pi) runs
+ * in the run's directory, like its unit commands, and takes that zone's.
+ */
+function holdTarget(
+  input: HookInput,
+  atCwd: boolean,
+): {
+  contract: Contract | null;
+  source: HookInput;
+} {
+  const registrations = atCwd ? [] : ownership.registeredRuns(input.session_id);
+  for (const registered of registrations) {
+    const contract = contracts.loadContractAt(registered.root);
+    if (
+      contract &&
+      !contract.broken &&
+      contract.boundaryFile === registered.run
+    ) {
+      return { contract, source: { ...input, cwd: contract.root } };
+    }
+  }
+  return { contract: contracts.loadContract(input.cwd), source: input };
+}
+
+/**
  * A hold recorded through mark: `hold - U<n> - <reason>`. Sets the pass in
- * progress.json (when the zone has one) - one-shot, or standing when the
- * reason starts with `external:` - and always leaves a ledger row whose
- * summary is the text as written; the unit field carries the prepared id.
+ * progress.json of the run the session drove last (holdTarget), when that
+ * zone has one - one-shot, or standing when the reason starts with
+ * `external:` - and always leaves a ledger row whose summary is the text as
+ * written; the unit field carries the prepared id.
  */
 function recordHold(
   input: HookInput,
   rawText: string,
   holdText: string,
+  atCwd: boolean,
 ): HookOutput {
   const m = HOLD_TEXT.exec(holdText);
   const unitId = m ? (m[1] ?? null) : null;
   const reason = m ? (m[2] ?? '').trim() : holdText;
-  const contract = contracts.loadContract(input.cwd);
+  const { contract, source } = holdTarget(input, atCwd);
   const fields: Record<string, unknown> = {
     unit: unitId,
     reason: reason.slice(0, ledger.SUMMARY_MAX),
@@ -67,11 +98,16 @@ function recordHold(
       }
     }
   }
-  ledger.appendRecord(input, rawText, fields, 'unit-hold');
+  ledger.appendRecord(source, rawText, fields, 'unit-hold');
   return null;
 }
 
-function runS3(input: HookInput): HookOutput {
+/**
+ * `holdAtCwd`: the recorder's mark hold (Codex, pi) goes to the run of the
+ * directory it runs in; a Skill call's goes to the run the session drove
+ * last.
+ */
+function runS3(input: HookInput, holdAtCwd = false): HookOutput {
   const toolInput = input.tool_input;
   const name = guards
     .toText(toolInput['skill'] || toolInput['name'] || '')
@@ -88,6 +124,7 @@ function runS3(input: HookInput): HookOutput {
           input,
           recordArgs.markText(args) ?? eventText.trim(),
           eventText.trim(),
+          holdAtCwd,
         );
       }
       ledger.appendRecord(input, eventText.trim(), null, kind);

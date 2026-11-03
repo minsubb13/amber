@@ -1,7 +1,11 @@
 // E1 (PreToolUse): deny tool calls that cross the active contract's machine
-// rules (write-scope globs, bash-deny). Monitor runs a shell command like
-// Bash and takes the same path. Shell writes escape it, so scope-check
-// compares git-changed files with the write-scope at unit verified and done.
+// rules (write-scope globs, bash-deny). A file-tool target is judged by the
+// contract of its own zone - a linked worktree outside the hook cwd's zone
+// with a pointer of its own is judged by that pointer's contract - and a
+// shell command meets the bash-deny rows of the hook cwd's contract and of
+// every run the session drives. Monitor runs a shell command like Bash and
+// takes the same path. Shell writes escape it, so scope-check compares
+// git-changed files with the write-scope at unit verified and done.
 // The run's own state under .amber/ is written by record.cjs and the hooks,
 // never by a file tool. A subagent writes only inside the unit it claimed; the
 // claim and the driving session are registered here, the one party that sees
@@ -10,6 +14,7 @@
 // approved contract) writes only planning artifacts with file tools (lib/phase);
 // the first tool call that finds the pointer closes the phase as an approval.
 
+import fs = require('node:fs');
 import path = require('node:path');
 
 // The apply_patch parser keeps its stage 2 module at hooks/patch-paths.
@@ -27,12 +32,18 @@ import rules = require('./contract-rules.cjs');
 import store = require('./progress-store.cjs');
 import text = require('./hook-text.cjs');
 import zone = require('./zone.cjs');
-import type { ActiveContract, HookInput, HookOutput, Unit } from './types.cjs';
+import type {
+  ActiveContract,
+  Contract,
+  HookInput,
+  HookOutput,
+  Unit,
+} from './types.cjs';
 
-// A unit command or the completion signal at a command position: the start
-// of a shell segment (string start, newline, `;`, `&`, `|`, `(`, `$(`, or a
-// keyword such as `do`, `then`, `exec`), optional `env` and NAME=value
-// prefixes, then node running a path that ends in record.cjs, quoted or not.
+// A unit claim at a command position: the start of a shell segment (string
+// start, newline, `;`, `&`, `|`, `(`, `$(`, or a keyword such as `do`,
+// `then`, `exec`), optional `env` and NAME=value prefixes, then node running
+// a path that ends in record.cjs, quoted or not.
 // A backtick is not a segment start: Markdown inline code in a document
 // heredoc is the common prose form of the command, and backtick command
 // substitution is not a recorded way of running it. The former substring
@@ -53,14 +64,6 @@ const CLI =
 // The claim's unit id is read case-insensitively, as the recorder reads it.
 const UNIT_CLAIM = new RegExp(
   SEG + ENV + CLI + /unit\s+claim\s+([Uu]\d+)\b/.source,
-);
-// Any unit command or the completion signal, run by the session itself (no
-// agent id): the act that registers the session as a driver of the run.
-const UNIT_CMD = new RegExp(
-  SEG +
-    ENV +
-    CLI +
-    /(?:unit\s+(?:init|claim|start|verified|failed|hold)|done)\b/.source,
 );
 
 const deny = text.denyOutput;
@@ -104,43 +107,78 @@ function observeClaim(
   return null;
 }
 
+/**
+ * A contract as a refusal names it: the boundary file, followed by the zone
+ * root when the contract belongs to a zone other than the hook cwd's.
+ */
+function contractLabel(contract: ActiveContract, cwdRoot: string): string {
+  return contract.root === cwdRoot
+    ? contract.boundaryFile
+    : contract.boundaryFile + ' (' + contract.root + ')';
+}
+
+/**
+ * The contracts whose bash-deny rows a shell command meets: the hook cwd's
+ * zone contract, then the contract of every zone the session drives, newest
+ * registration first. A registration whose zone no longer holds that run
+ * (released, replaced, broken, or removed) adds nothing.
+ */
+function bashContracts(
+  input: HookInput,
+  cwdRoot: string,
+  contract: ActiveContract | null,
+): ActiveContract[] {
+  const out: ActiveContract[] = contract ? [contract] : [];
+  for (const registered of ownership.registeredRuns(input.session_id)) {
+    const root = path.resolve(registered.root);
+    if (root === cwdRoot || out.some((c) => c.root === root)) continue;
+    const other = contracts.loadContractAt(root);
+    if (!other || other.broken || other.boundaryFile !== registered.run) {
+      continue;
+    }
+    out.push(other);
+  }
+  return out;
+}
+
 function runBash(
   input: HookInput,
-  contract: ActiveContract,
-  bashDeny: readonly string[],
+  cwdRoot: string,
+  contract: ActiveContract | null,
   agentId: string | null,
 ): HookOutput {
   const command = guards.toText(input.tool_input['command'] || '');
-  for (const pattern of bashDeny) {
-    let re: RegExp;
-    try {
-      re = new RegExp(pattern);
-    } catch {
-      return deny(
-        'contract ' +
-          contract.boundaryFile +
-          ' has an invalid bash-deny pattern: ' +
-          pattern +
-          '. Fix the boundary document.',
-      );
-    }
-    if (re.test(command)) {
-      return deny(
-        'blocked by contract ' +
-          contract.boundaryFile +
-          ': bash-deny ' +
-          pattern,
-      );
+  for (const source of bashContracts(input, cwdRoot, contract)) {
+    for (const pattern of rules.machineRules(source.text).bashDeny) {
+      let re: RegExp;
+      try {
+        re = new RegExp(pattern);
+      } catch {
+        return deny(
+          'contract ' +
+            contractLabel(source, cwdRoot) +
+            ' has an invalid bash-deny pattern: ' +
+            pattern +
+            '. Fix the boundary document.',
+        );
+      }
+      if (re.test(command)) {
+        return deny(
+          'blocked by contract ' +
+            contractLabel(source, cwdRoot) +
+            ': bash-deny ' +
+            pattern,
+        );
+      }
     }
   }
-  if (agentId) {
+  // The claim goes to the hook cwd's contract, as it always has.
+  if (agentId && contract) {
     const claim = UNIT_CLAIM.exec(command);
     if (claim) {
       const unitId = (claim[1] ?? '').toUpperCase();
       return observeClaim(input, contract, agentId, unitId);
     }
-  } else if (UNIT_CMD.test(command)) {
-    ownership.registerSession(input.session_id, contract);
   }
   return null;
 }
@@ -207,11 +245,10 @@ function targetsOf(input: HookInput): string[] {
  * this zone's; a unit worktree under <zone>/.claude/worktrees/ lies inside
  * and is judged by its zone-relative path.
  */
-function runPhaseGate(input: HookInput): HookOutput {
+function runPhaseGate(input: HookInput, root: string): HookOutput {
   if (input.tool_name === 'Bash' || input.tool_name === 'Monitor') return null;
   const current = phaseStore.phaseOf(input.session_id);
   if (!current) return null;
-  const root = zone.zoneRoot(input.cwd);
   if (current.zone !== root) return null;
   let targets: string[];
   try {
@@ -240,9 +277,68 @@ function runPhaseGate(input: HookInput): HookOutput {
   return null;
 }
 
-function runE1(input: HookInput): HookOutput {
-  const contract = contracts.loadContract(input.cwd);
-  if (!contract) return runPhaseGate(input);
+/**
+ * Which zone's contract judges each write target, for one hook call. A
+ * target belongs to the zone of its nearest existing directory, found by git
+ * once per directory. A zone with a contract of its own judges its targets
+ * by that contract, wherever it lies. Otherwise the hook cwd's zone judges a
+ * target inside its directory (a nested repository there is part of it) or
+ * outside any repository, as before; a target in another repository's zone
+ * without a contract passes (null). Inside the cwd zone's directory, git is
+ * asked only when an ancestor of the target below the zone root holds a
+ * pointer.
+ */
+function targetJudge(
+  cwdRoot: string,
+  loadAt: (root: string) => Contract | null,
+): (abs: string) => string | null {
+  const zones = new Map<string, string | null>();
+  const gitZone = (dir: string): string | null => {
+    if (!zones.has(dir)) {
+      const found = zone.gitZoneRoot(dir);
+      zones.set(dir, found === null ? null : path.resolve(found));
+    }
+    return zones.get(dir) ?? null;
+  };
+  return (abs) => {
+    const inside = abs === cwdRoot || zone.insideZone(cwdRoot, abs);
+    let other: string | null = null;
+    if (inside) {
+      for (
+        let dir = path.dirname(abs);
+        zone.insideZone(cwdRoot, dir);
+        dir = path.dirname(dir)
+      ) {
+        if (fs.existsSync(path.join(dir, '.amber', 'active.json'))) {
+          other = gitZone(dir);
+          break;
+        }
+      }
+    } else {
+      let dir = path.dirname(abs);
+      while (!fs.existsSync(dir) && path.dirname(dir) !== dir) {
+        dir = path.dirname(dir);
+      }
+      other = gitZone(dir);
+    }
+    if (other === null || other === cwdRoot) return cwdRoot;
+    if (loadAt(other)) return other;
+    return inside ? cwdRoot : null;
+  };
+}
+
+/**
+ * The checks of one zone's contract on the write targets that zone judges:
+ * pointer and contract file protection, the .amber/ refusal, write-scope,
+ * and the claimed unit's scope for a subagent.
+ */
+function checkTargets(
+  input: HookInput,
+  contract: Contract,
+  cwdRoot: string,
+  absList: readonly string[],
+  agentId: string | null,
+): HookOutput {
   if (contract.broken) {
     return deny(
       'active contract pointer ' +
@@ -252,25 +348,8 @@ function runE1(input: HookInput): HookOutput {
         '). Fix it, or remove the file to release the contract.',
     );
   }
-  // The pointer is the approval: a phase still open here ends now.
-  phaseStore.exit(input, contract.root, 'approval');
-  const { writeScopes, bashDeny } = rules.machineRules(contract.text);
-  const agentId = input.agent_id ? guards.toText(input.agent_id) : null;
-  if (input.tool_name === 'Bash' || input.tool_name === 'Monitor') {
-    return runBash(input, contract, bashDeny, agentId);
-  }
-  let targets: string[];
-  try {
-    targets = targetsOf(input);
-  } catch (err) {
-    return deny(
-      'cannot inspect apply_patch under contract ' +
-        contract.boundaryFile +
-        ': ' +
-        messageOf(err) +
-        '. Correct the patch and retry.',
-    );
-  }
+  const { writeScopes } = rules.machineRules(contract.text);
+  const label = contractLabel(contract, cwdRoot);
   let claimed: { id: string; unit: Unit } | null = null;
   if (agentId) {
     const result = claimedUnit(contract, agentId);
@@ -281,10 +360,12 @@ function runE1(input: HookInput): HookOutput {
     contract.root,
     contract.boundaryPath,
   );
+  // The hook cwd maps the cwd zone's targets (a unit worktree it stands in);
+  // another zone maps its own from its root.
   const resolved = zone.zoneRelativeAll(
     contract.root,
-    input.cwd,
-    targets.map((target) => path.resolve(input.cwd || contract.root, target)),
+    contract.root === cwdRoot ? input.cwd : contract.root,
+    absList,
   );
   for (const { abs, rel } of resolved) {
     if (
@@ -303,7 +384,7 @@ function runE1(input: HookInput): HookOutput {
     if (rel === '.amber' || rel.startsWith('.amber/')) {
       return deny(
         'blocked by contract ' +
-          contract.boundaryFile +
+          label +
           ': ' +
           rel +
           " is the run's state under .amber/, written only by `node " +
@@ -319,7 +400,7 @@ function runE1(input: HookInput): HookOutput {
     ) {
       return deny(
         'blocked by contract ' +
-          contract.boundaryFile +
+          label +
           ': write target ' +
           rel +
           ' is outside every write-scope (' +
@@ -344,4 +425,70 @@ function runE1(input: HookInput): HookOutput {
   return null;
 }
 
-export = { runE1, UNIT_CMD, UNIT_CLAIM };
+function runE1(input: HookInput): HookOutput {
+  const cwdRoot = path.resolve(zone.zoneRoot(input.cwd));
+  const contract = contracts.loadContractAt(cwdRoot);
+  if (contract && contract.broken) {
+    return deny(
+      'active contract pointer ' +
+        contract.pointerPath +
+        ' is broken (' +
+        contract.error +
+        '). Fix it, or remove the file to release the contract.',
+    );
+  }
+  // The pointer is the approval: a phase still open here ends now.
+  if (contract) phaseStore.exit(input, contract.root, 'approval');
+  const agentId = input.agent_id ? guards.toText(input.agent_id) : null;
+  if (input.tool_name === 'Bash' || input.tool_name === 'Monitor') {
+    return runBash(input, cwdRoot, contract, agentId);
+  }
+  if (!contract) {
+    const gated = runPhaseGate(input, cwdRoot);
+    if (gated) return gated;
+  }
+  let targets: string[];
+  try {
+    targets = targetsOf(input);
+  } catch (err) {
+    // Without a contract here, a patch that cannot be read is the phase
+    // gate's to refuse, as before.
+    if (!contract) return null;
+    return deny(
+      'cannot inspect apply_patch under contract ' +
+        contract.boundaryFile +
+        ': ' +
+        messageOf(err) +
+        '. Correct the patch and retry.',
+    );
+  }
+  // A subagent writes only after claiming a unit, even before naming a target.
+  if (contract && agentId && targets.length === 0) {
+    const result = claimedUnit(contract, agentId);
+    if ('denied' in result) return result.denied;
+  }
+  const loaded = new Map<string, Contract | null>([[cwdRoot, contract]]);
+  const loadAt = (root: string): Contract | null => {
+    if (!loaded.has(root)) loaded.set(root, contracts.loadContractAt(root));
+    return loaded.get(root) ?? null;
+  };
+  const judge = targetJudge(cwdRoot, loadAt);
+  const groups = new Map<string, string[]>();
+  for (const target of targets) {
+    const abs = path.resolve(input.cwd || cwdRoot, target);
+    const root = judge(abs);
+    if (root === null) continue;
+    const group = groups.get(root);
+    if (group) group.push(abs);
+    else groups.set(root, [abs]);
+  }
+  for (const [root, absList] of groups) {
+    const governing = loadAt(root);
+    if (!governing) continue;
+    const refused = checkTargets(input, governing, cwdRoot, absList, agentId);
+    if (refused) return refused;
+  }
+  return null;
+}
+
+export = { runE1, UNIT_CLAIM };

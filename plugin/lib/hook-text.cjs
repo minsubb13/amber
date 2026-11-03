@@ -157,6 +157,17 @@ function ownershipContext(owner, registered) {
 }
 const WAITING_SIGNAL = 'amber: a completion signal is waiting in this zone; this session does not drive the run ' +
     '(run a unit command or the done command here to take the run over, or leave it to the driving session).';
+/** A waiting signal that names another session: only that session takes it. */
+const WAITING_OTHER_SESSION_SIGNAL = 'amber: a completion signal is waiting in this zone from another session; ' +
+    "that session's stop consumes it, never this session's.";
+/** A run the session drives in a zone other than the one it stands in. */
+function drivenZoneLine(boundaryFile, root) {
+    return ('amber: this session also drives the run of ' +
+        boundaryFile +
+        ' in ' +
+        root +
+        ' (run its unit and done commands there).');
+}
 /**
  * A linked worktree outside the zone directory is a zone of its own: tell the
  * session where its main checkout is and whether a run is active there.
@@ -202,10 +213,19 @@ const NO_CONTRACT_INDEX = 'Completion index: the signal command is `' +
 function sensorFailures(count, file) {
     return ('amber: ' + String(count) + ' sensor failure(s) recorded - see ' + file);
 }
-/** The loop body's send-back directive for the focus unit. */
-function continuationDirective(boundaryFile, p, id, reentries) {
-    return ('amber loop (contract ' +
+/** A path as one single-quoted POSIX shell argument. */
+function shellQuote(arg) {
+    return "'" + arg.replace(/'/g, "'\\''") + "'";
+}
+/**
+ * The loop body's send-back directive for the focus unit. `elsewhere` is the
+ * root of the unit's zone when it is not the zone the session stands in (a
+ * linked worktree outside it): every command then runs there, in one line.
+ */
+function continuationDirective(boundaryFile, p, id, reentries, elsewhere = null) {
+    const head = 'amber loop (contract ' +
         boundaryFile +
+        (elsewhere ? ' in ' + elsewhere : '') +
         '): ' +
         String(model.openUnits(p).length) +
         ' unit(s) still open. Re-entry ' +
@@ -216,7 +236,38 @@ function continuationDirective(boundaryFile, p, id, reentries) {
         id +
         '.\n' +
         model.summary(p) +
-        '\n' +
+        '\n';
+    if (elsewhere) {
+        const there = 'cd ' + shellQuote(elsewhere) + ' && node ' + shellQuote(RECORD_CLI);
+        return (head +
+            'This run is in ' +
+            elsewhere +
+            ', not in the zone this session stands in: run every unit command ' +
+            'with that directory as the working directory, in one line as shown. ' +
+            'Continue the contract work now: run `' +
+            there +
+            ' unit start ' +
+            id +
+            '` if it is not running, do the unit, verify it with its oracle, then `' +
+            there +
+            ' unit verified ' +
+            id +
+            ' --evidence "<what the oracle showed>"` (or `' +
+            there +
+            ' unit failed ' +
+            id +
+            ' --evidence "..."`); ' +
+            '--evidence is required and a blank one is refused. ' +
+            'Units listed as ready whose scopes do not overlap may run in parallel as subagents in worktrees; ' +
+            'each subagent first runs `unit claim U<n>` there. ' +
+            'If you must stop instead - waiting on the operator, budget reached, an out-of-contract decision - ' +
+            'run `' +
+            there +
+            ' unit hold ' +
+            id +
+            ' --reason "<reason>"` and then stop. Do not declare completion while units are open.');
+    }
+    return (head +
         'Continue the contract work now: run `node ' +
         RECORD_CLI +
         ' unit start ' +
@@ -290,6 +341,8 @@ module.exports = {
     progressContext,
     ownershipContext,
     WAITING_SIGNAL,
+    WAITING_OTHER_SESSION_SIGNAL,
+    drivenZoneLine,
     linkedWorktreeContext,
     NO_CONTRACT,
     NO_CONTRACT_INDEX,

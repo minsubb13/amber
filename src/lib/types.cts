@@ -302,10 +302,33 @@ export interface SessionState {
   started_at?: unknown;
   /** The boundary file this session was briefed about, or 'broken'. */
   briefed?: unknown;
-  /** The boundary file of the run this session drives. */
+  /**
+   * The runs this session drives, keyed by absolute zone root (a
+   * RunRegistration each): one session can drive the run of its own zone and
+   * that of a linked worktree outside it.
+   */
+  runs?: unknown;
+  /**
+   * The boundary file of the one run a session drove before `runs` existed:
+   * read as a fallback while such a state file lives, never written.
+   */
   run?: unknown;
-  /** The session's open phase (a SessionPhase), carried like `run`. */
+  /** The session's open phase (a SessionPhase), carried like `runs`. */
   phase?: unknown;
+  /**
+   * The other zones whose driven runs S0 or S1 last announced, each as
+   * `<root>=<boundary file>`, sorted; S1 announces them again only when the
+   * set changes.
+   */
+  driven_briefed?: unknown;
+}
+
+/** A session's registration in one zone, under its `runs` map. */
+export interface RunRegistration {
+  /** The boundary file of the zone's run. */
+  readonly run: string;
+  /** When the session last ran a unit or done command in the zone (ISO). */
+  readonly at: string;
 }
 
 /** The completion signal `record.cjs done` writes to <zone>/.amber/done.json. */
@@ -318,13 +341,8 @@ export interface DoneSignal {
   readonly goal?: unknown;
   readonly out_of_scope?: unknown;
   readonly out_of_scope_count?: unknown;
-}
-
-/** The newest session registered to a run (record.cjs reads it back). */
-export interface RunDriver {
-  readonly sessionId: string;
-  readonly model: unknown;
-  readonly mtime: number;
+  /** The session that ran `record.cjs done`. */
+  readonly session_id?: unknown;
 }
 
 /** A `record.cjs unit` command as a transcript shows it. */

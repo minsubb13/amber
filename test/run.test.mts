@@ -225,7 +225,9 @@ function stopEvent(zone: string, message: string, active?: boolean): unknown {
 }
 
 const RECORD_CLI = path.join(PLUGIN, 'scripts', 'record.cjs');
-// The completion signal: `record.cjs done` run in the zone, as the model does.
+// The completion signal: `record.cjs done` run in the zone, as the model does,
+// from the shell of the session the Stop events name (the recorder refuses a
+// shell without a session id).
 function done(
   zone: string,
   home: string,
@@ -236,7 +238,12 @@ function done(
     cwd: zone,
     encoding: 'utf8',
     timeout: 10000,
-    env: { ...process.env, AMBER_HOME: home, ...extraEnv },
+    env: {
+      ...process.env,
+      AMBER_HOME: home,
+      AMBER_SESSION_ID: 's2-test',
+      ...extraEnv,
+    },
   });
 }
 const signalPath = (zone: string): string =>
@@ -270,14 +277,53 @@ const OK_DONE = [
   '--summary',
   'unit complete',
 ];
-// Session binding: E1 registers the session that runs a unit
-// command itself. Tests drive record.cjs directly, so they register through
-// the same observation the live session gets.
-function register(
+// Session binding: the recorder registers the session its environment names
+// when that session runs a unit or done command. Tests that need a driver
+// without running one seed the same registration through the plugin's own
+// ownership module.
+// `<call>(sessionId, <the zone's contract>)` of the plugin's ownership module,
+// run with the given AMBER_HOME; its result as JSON on stdout.
+function ownership(
+  call: 'registerSession' | 'ownsRun',
   zone: string,
   home: string,
   sessionId: string,
-  command?: string,
+): string {
+  const lib = (name: string): string =>
+    JSON.stringify(path.join(PLUGIN, 'lib', name));
+  const script =
+    'process.stdout.write(String(JSON.stringify(require(' +
+    lib('ownership.cjs') +
+    ').' +
+    call +
+    '(' +
+    JSON.stringify(sessionId) +
+    ', require(' +
+    lib('contract.cjs') +
+    ').loadContract(' +
+    JSON.stringify(zone) +
+    ')))));';
+  const r = spawnSync('node', ['-e', script], {
+    encoding: 'utf8',
+    timeout: 10000,
+    env: { ...process.env, AMBER_HOME: home },
+  });
+  assert.equal(r.status, 0, r.stderr);
+  return r.stdout;
+}
+function register(zone: string, home: string, sessionId: string): void {
+  ownership('registerSession', zone, home, sessionId);
+}
+// Whether the session drives the zone's run, as the hooks judge it.
+function owns(home: string, sessionId: string, zone: string): boolean {
+  return ownership('ownsRun', zone, home, sessionId) === 'true';
+}
+// A Bash call through E1 as the session itself makes it (no agent id).
+function e1Bash(
+  zone: string,
+  home: string,
+  sessionId: string,
+  command: string,
 ): unknown {
   return runHook(
     'E1',
@@ -286,9 +332,7 @@ function register(
       cwd: zone,
       hook_event_name: 'PreToolUse',
       tool_name: 'Bash',
-      tool_input: {
-        command: command || 'node ' + RECORD_CLI + ' unit start U1',
-      },
+      tool_input: { command },
     },
     home,
   ).out;
@@ -304,6 +348,15 @@ const sessionState = (home: string, sessionId: string): unknown => {
   } catch {
     return {};
   }
+};
+// The boundary file the session's `runs` registers for a zone, keyed by the
+// zone root as git reports it; undefined without one.
+const runAt = (home: string, sessionId: string, zone: string): unknown =>
+  at(sessionState(home, sessionId), 'runs', fs.realpathSync(zone), 'run');
+// Whether the session's state registers any run at all.
+const registersAny = (home: string, sessionId: string): boolean => {
+  const runs = at(sessionState(home, sessionId), 'runs');
+  return typeof runs === 'object' && runs !== null && keysOf(runs).length > 0;
 };
 
 // ---- E1: contract zone ----
@@ -1605,7 +1658,7 @@ const sessionState = (home: string, sessionId: string): unknown => {
   register(zone, home, 's2-test');
   check(
     'registration lists the session in progress.json',
-    joined(get(progress(), 'session_ids')) === 's2-test',
+    joined(get(progress(), 'session_ids')) === 'loop-shell,s2-test',
   );
   const b1 = runHook('S2', plain(false), home).out;
   check(
@@ -1948,9 +2001,17 @@ const sessionState = (home: string, sessionId: string): unknown => {
       /U1/.test(stringOf(ctx1)),
     String(ctx1).slice(0, 300),
   );
+  // A session registered nowhere: s2-test drives this block's loop zone,
+  // whose open units its stops would follow.
   const quiet = runHook(
     'S2',
-    stopEvent(zoneContract, 'plain turn without progress', false),
+    {
+      session_id: 's2-quiet',
+      cwd: zoneContract,
+      hook_event_name: 'Stop',
+      stop_hook_active: false,
+      last_assistant_message: 'plain turn without progress',
+    },
     home,
   ).out;
   check(
@@ -1979,43 +2040,56 @@ const sessionState = (home: string, sessionId: string): unknown => {
   const progressFile = path.join(zone, '.amber', 'progress.json');
   const progress = (): unknown =>
     parseJson(fs.readFileSync(progressFile, 'utf8'));
-  const record = (args: readonly string[]): SpawnSyncReturns<string> =>
+  const record = (
+    args: readonly string[],
+    extraEnv?: NodeJS.ProcessEnv,
+  ): SpawnSyncReturns<string> =>
     spawnSync('node', [RECORD_CLI, ...args], {
       cwd: zone,
       encoding: 'utf8',
       timeout: 10000,
-      env: { ...process.env, AMBER_HOME: home, AMBER_SESSION_ID: 'bind-shell' },
+      env: {
+        ...process.env,
+        AMBER_HOME: home,
+        AMBER_SESSION_ID: 'bind-shell',
+        ...extraEnv,
+      },
     });
   record(['unit', 'init', 'docs/plan.md']);
   record(['unit', 'start', 'U1']);
   check(
-    'progress.json starts with an empty session list',
-    get(progress(), 'session_ids', 'length') === 0,
+    'the recorder registers the session its environment names',
+    joined(get(progress(), 'session_ids')) === 'bind-shell' &&
+      runAt(home, 'bind-shell', zone) === 'test-boundary.md',
+    JSON.stringify(sessionState(home, 'bind-shell')),
   );
   for (const id of ['drv', 'talk']) {
     runHook('S0', { session_id: id, cwd: zone, model: 'm' }, home);
   }
 
-  const reg = register(zone, home, 'drv');
+  const reg = e1Bash(
+    zone,
+    home,
+    'drv',
+    'node ' + RECORD_CLI + ' unit start U1',
+  );
   check(
-    'E1 registers the session that runs a unit command itself',
+    'E1 lets a unit command through without registering the session',
     reg === null &&
-      get(sessionState(home, 'drv'), 'run') === 'test-boundary.md' &&
-      joined(get(progress(), 'session_ids')) === 'drv',
+      !registersAny(home, 'drv') &&
+      joined(get(progress(), 'session_ids')) === 'bind-shell',
     JSON.stringify(sessionState(home, 'drv')) +
       ' ' +
       JSON.stringify(get(progress(), 'session_ids')),
   );
-  register(
-    zone,
-    home,
-    'drv2',
-    'node ' + RECORD_CLI + ' done --review "r" --goal "g" --summary "s"',
-  );
+  register(zone, home, 'drv');
+  const drv2 = record(['done', ...OK_DONE], { AMBER_SESSION_ID: 'drv2' });
   check(
-    'E1 registers on the done command too',
-    get(sessionState(home, 'drv2'), 'run') === 'test-boundary.md' &&
-      list(get(progress(), 'session_ids')).includes('drv2'),
+    'a done command refused for open units registers nobody',
+    drv2.status !== 0 &&
+      !registersAny(home, 'drv2') &&
+      !list(get(progress(), 'session_ids')).includes('drv2'),
+    drv2.stderr,
   );
   register(zone, home, 'drv');
   check(
@@ -2038,7 +2112,7 @@ const sessionState = (home: string, sessionId: string): unknown => {
   );
   check(
     'a subagent call does not register a session',
-    !get(sessionState(home, 'sub'), 'run') &&
+    !registersAny(home, 'sub') &&
       !list(get(progress(), 'session_ids')).includes('sub'),
   );
   runHook(
@@ -2052,14 +2126,11 @@ const sessionState = (home: string, sessionId: string): unknown => {
     },
     home,
   );
-  check(
-    'an ordinary command does not register',
-    !get(sessionState(home, 'talk'), 'run'),
-  );
-  // The regexes anchor to the command position: the same words inside prose
-  // (a commit message, a grep argument, a document heredoc, a node -e probe)
-  // register nothing, while the command behind a loop keyword, an env
-  // prefix, a quoted path or a shell variable still does.
+  check('an ordinary command does not register', !registersAny(home, 'talk'));
+  // E1 registers nobody, whatever form the command takes: the same words
+  // inside prose (a commit message, a grep argument, a document heredoc, a
+  // node -e probe), and the command itself behind a loop keyword, an env
+  // prefix, a quoted path or a shell variable. The recorder registers.
   const prose: [string, string][] = [
     [
       'a commit message naming record.cjs does not register',
@@ -2089,31 +2160,31 @@ const sessionState = (home: string, sessionId: string): unknown => {
   ];
   prose.forEach(([label, command], i) => {
     const id = 'prose' + String(i);
-    register(zone, home, id, command);
-    check(label, !get(sessionState(home, id), 'run'));
+    e1Bash(zone, home, id, command);
+    check(label, !registersAny(home, id));
   });
   const commands: [string, string][] = [
     [
-      'a for loop running the unit command registers',
+      'a for loop running the unit command does not register through E1',
       'for u in U1 U2; do node ' + RECORD_CLI + ' unit start $u; done',
     ],
     [
-      'an env prefix before node registers',
+      'an env prefix before node does not register through E1',
       'env GIT_OPTIONAL_LOCKS=0 node ' + RECORD_CLI + ' unit start U1',
     ],
     [
-      'a quoted record.cjs path registers',
+      'a quoted record.cjs path does not register through E1',
       'node "' + RECORD_CLI + '" unit start U1',
     ],
     [
-      'a plugin-root variable path registers',
+      'a plugin-root variable path does not register through E1',
       'AMBER_HOME=/tmp/h node "$amber_plugin_root/scripts/record.cjs" unit start U1',
     ],
   ];
   commands.forEach(([label, command], i) => {
     const id = 'cmd' + String(i);
-    register(zone, home, id, command);
-    check(label, get(sessionState(home, id), 'run') === 'test-boundary.md');
+    e1Bash(zone, home, id, command);
+    check(label, !registersAny(home, id));
   });
   const brief = runHook(
     'E1',
@@ -2308,7 +2379,7 @@ const sessionState = (home: string, sessionId: string): unknown => {
   const rctx = contextOf(resumed);
   check(
     'S0 on resume/compact keeps the session driving its run',
-    get(sessionState(home, 'drv4'), 'run') === 'test-boundary.md' &&
+    runAt(home, 'drv4', zone) === 'test-boundary.md' &&
       !!rctx &&
       /this session drives the run/.test(stringOf(rctx)),
     String(rctx).slice(-300),
@@ -2323,7 +2394,7 @@ const sessionState = (home: string, sessionId: string): unknown => {
     'S0 tells a non-driving session so and how to take over',
     !!octx &&
       /not one of them/.test(stringOf(octx)) &&
-      /1 session\(s\) drive/.test(stringOf(octx)) &&
+      /2 session\(s\) drive/.test(stringOf(octx)) &&
       /unit/.test(stringOf(octx)),
     String(octx).slice(-400),
   );
@@ -2339,7 +2410,7 @@ const sessionState = (home: string, sessionId: string): unknown => {
   );
 }
 
-// ---- shell attribution: unit rows carry the session E1 registered, not "shell"/"unknown" ----
+// ---- no session id: the recorder refuses unit and done commands and writes nothing ----
 {
   const PLAN = [
     '## Work units',
@@ -2358,9 +2429,9 @@ const sessionState = (home: string, sessionId: string): unknown => {
   const progressFile = path.join(zone, '.amber', 'progress.json');
   const progress = (): unknown =>
     parseJson(fs.readFileSync(progressFile, 'utf8'));
-  // No environment session id: the registration-lookup path. The runner may
-  // itself run inside a Claude Code or pi session, whose CLAUDE_CODE_SESSION_ID
-  // or PI_SESSION_ID would otherwise be inherited and win - blank them explicitly.
+  // No environment session id unless a case sets one. The runner may itself
+  // run inside a Claude Code, Codex or pi session, whose ids would otherwise
+  // be inherited - blank them explicitly.
   const bare = (
     args: readonly string[],
     extraEnv?: NodeJS.ProcessEnv,
@@ -2379,61 +2450,1703 @@ const sessionState = (home: string, sessionId: string): unknown => {
         ...extraEnv,
       },
     });
-  const lastRow = (h?: string): unknown => ledger(h || home).slice(-1)[0] || {};
+  // Everything a refused command must leave as it was: the zone's .amber/
+  // files and every state file, byte for byte, and the ledger.
+  const snapshot = (): string => {
+    const files = (dir: string): [string, string][] => {
+      try {
+        return fs
+          .readdirSync(dir)
+          .sort()
+          .map((n) => [n, fs.readFileSync(path.join(dir, n), 'utf8')]);
+      } catch {
+        return [];
+      }
+    };
+    return JSON.stringify([
+      files(path.join(zone, '.amber')),
+      files(path.join(home, 'state')),
+      ledger(home).length,
+    ]);
+  };
+  const lastRow = (): unknown => ledger(home).slice(-1)[0] || {};
+  const NAMES_VARS =
+    /AMBER_SESSION_ID[\s\S]*CODEX_THREAD_ID[\s\S]*CLAUDE_CODE_SESSION_ID[\s\S]*PI_SESSION_ID/;
   runHook('S0', { session_id: 'sa', cwd: zone, model: 'model-a' }, home);
   runHook('S0', { session_id: 'sb', cwd: zone, model: 'model-b' }, home);
-  register(zone, home, 'sa', 'node ' + RECORD_CLI + ' unit init docs/plan.md');
-  const init = bare(['unit', 'init', 'docs/plan.md']);
+  const fresh = snapshot();
+  const noInit = bare(['unit', 'init', 'docs/plan.md']);
   check(
-    'a shell unit init is attributed to the session E1 registered (no progress.json yet)',
+    'unit init without a session id is refused, naming the variables, and writes nothing',
+    noInit.status === 1 &&
+      NAMES_VARS.test(noInit.stderr) &&
+      /nothing was recorded/.test(noInit.stderr) &&
+      !fs.existsSync(progressFile) &&
+      snapshot() === fresh,
+    noInit.stderr,
+  );
+  const init = bare(['unit', 'init', 'docs/plan.md'], {
+    AMBER_SESSION_ID: 'sa',
+  });
+  check(
+    'a unit init with a session id carries that session and its model and registers it',
     init.status === 0 &&
       get(lastRow(), 'trigger') === 'unit-init' &&
       get(lastRow(), 'session_id') === 'sa' &&
-      get(lastRow(), 'model') === 'model-a',
+      get(lastRow(), 'model') === 'model-a' &&
+      runAt(home, 'sa', zone) === 'test-boundary.md' &&
+      joined(get(progress(), 'session_ids')) === 'sa',
     (init.stderr || '') + JSON.stringify(lastRow()),
   );
-  register(zone, home, 'sb');
-  const start = bare(['unit', 'start', 'U1']);
+  const initialized = snapshot();
+  const noStart = bare(['unit', 'start', 'U1']);
   check(
-    'the most recently registered driver takes the row and the progress history',
-    start.status === 0 &&
-      get(lastRow(), 'session_id') === 'sb' &&
-      get(lastRow(), 'model') === 'model-b' &&
-      get(
-        list(get(progress(), 'units', 'U1', 'history')).slice(-1)[0],
-        'by',
-      ) === 'sb',
-    (start.stderr || '') + JSON.stringify(lastRow()),
+    'unit start without a session id is refused, naming the variables, and changes no progress or state',
+    noStart.status === 1 &&
+      NAMES_VARS.test(noStart.stderr) &&
+      snapshot() === initialized,
+    noStart.stderr,
   );
-  const old = new Date(Date.now() - 3600 * 1000);
-  fs.utimesSync(path.join(home, 'state', 'session-sb.json'), old, old);
-  register(zone, home, 'sa');
-  const hold = bare(['unit', 'hold', 'U1', '--reason', 'waiting']);
-  check(
-    'an idempotent re-registration touches the state file, so the issuing session wins',
-    hold.status === 0 &&
-      get(lastRow(), 'trigger') === 'unit-hold' &&
-      get(lastRow(), 'session_id') === 'sa' &&
-      get(lastRow(), 'model') === 'model-a',
-    (hold.stderr || '') + JSON.stringify(lastRow()),
-  );
-  const env = bare(['unit', 'start', 'U2'], { AMBER_SESSION_ID: 'env-id' });
-  check(
-    'an explicit environment session id still wins',
-    env.status === 0 && get(lastRow(), 'session_id') === 'env-id',
-    (env.stderr || '') + JSON.stringify(lastRow()),
-  );
-  const none = freshHome('attr-none');
-  const bareNone = bare(['unit', 'failed', 'U2', '--evidence', 'x'], {
-    AMBER_HOME: none,
+  bare(['unit', 'start', 'U1'], { AMBER_SESSION_ID: 'sa' });
+  bare(['unit', 'verified', 'U1', '--evidence', 'ok'], {
+    AMBER_SESSION_ID: 'sa',
+  });
+  bare(['unit', 'start', 'U2'], { AMBER_SESSION_ID: 'sa' });
+  const started = snapshot();
+  const blank = bare(['unit', 'verified', 'U2', '--evidence', ' '], {
+    AMBER_SESSION_ID: 'sb',
   });
   check(
-    'without any registration the row still says shell/unknown (negative control)',
-    bareNone.status === 0 &&
-      get(lastRow(none), 'session_id') === 'shell' &&
-      get(lastRow(none), 'model') === 'unknown',
-    (bareNone.stderr || '') + JSON.stringify(lastRow(none)),
+    'a refused unit call does not register the session',
+    blank.status === 1 &&
+      /--evidence is missing or blank/.test(blank.stderr) &&
+      !registersAny(home, 'sb') &&
+      snapshot() === started,
+    blank.stderr,
   );
+  const retry = bare(['unit', 'verified', 'U2', '--evidence', 'ok'], {
+    AMBER_SESSION_ID: 'sb',
+  });
+  check(
+    'the valid call that follows registers it and carries its model',
+    retry.status === 0 &&
+      runAt(home, 'sb', zone) === 'test-boundary.md' &&
+      joined(get(progress(), 'session_ids')) === 'sa,sb' &&
+      get(lastRow(), 'session_id') === 'sb' &&
+      get(lastRow(), 'model') === 'model-b',
+    (retry.stderr || '') + JSON.stringify(lastRow()),
+  );
+  const verified = snapshot();
+  const noDone = bare(['done', ...OK_DONE]);
+  check(
+    'done without a session id is refused, naming the variables, and writes no signal',
+    noDone.status === 1 &&
+      NAMES_VARS.test(noDone.stderr) &&
+      !signalExists(zone) &&
+      snapshot() === verified,
+    noDone.stderr,
+  );
+  const okDone = bare(['done', ...OK_DONE], { AMBER_SESSION_ID: 'sc' });
+  check(
+    'done with a session id writes the signal and registers that session',
+    okDone.status === 0 &&
+      signalExists(zone) &&
+      runAt(home, 'sc', zone) === 'test-boundary.md' &&
+      list(get(progress(), 'session_ids')).includes('sc'),
+    okDone.stderr,
+  );
+}
+
+// ---- zone link: a session in zone A drives the run of a linked worktree B outside it ----
+const LINK_PLAN = [
+  '## Work units',
+  '- [ ] U1 one [unit: U1 scope=plugin/** oracle=true]',
+  '- [ ] U2 two [unit: U2 scope=docs/*.md oracle=true]',
+].join('\n');
+const LINK_POINTER = {
+  v: 1,
+  boundary: 'test-boundary.md',
+  ratified_by: 'operator',
+  ratified_at: '2026-11-02',
+};
+interface LinkPair {
+  readonly zoneA: string;
+  readonly zoneB: string;
+  readonly home: string;
+  /** record.cjs run in `cwd` from the shell of a session. */
+  readonly rec: (
+    cwd: string,
+    sessionId: string,
+    args: readonly string[],
+  ) => SpawnSyncReturns<string>;
+}
+// Zone A (`<tag>-a`, a repository with a contract) and zone B (`<tag>-b`, a
+// linked worktree of A outside it with its own pointer), both governed by a
+// contract file named test-boundary.md, and a fresh AMBER_HOME (`<tag>`).
+function linkPair(tag: string): LinkPair {
+  const zoneA = makeZone(tag + '-a', BOUNDARY, LINK_POINTER);
+  fs.mkdirSync(path.join(zoneA, 'docs'), { recursive: true });
+  fs.writeFileSync(path.join(zoneA, 'docs', 'plan.md'), LINK_PLAN);
+  fs.writeFileSync(path.join(zoneA, '.gitignore'), '.amber/\n');
+  execFileSync('git', ['-C', zoneA, 'config', 'user.email', 't@t']);
+  execFileSync('git', ['-C', zoneA, 'config', 'user.name', 't']);
+  execFileSync('git', ['-C', zoneA, 'add', '-A']);
+  execFileSync('git', ['-C', zoneA, 'commit', '-q', '-m', 'init']);
+  const zoneB = path.join(BASE, tag + '-b');
+  execFileSync('git', [
+    '-C',
+    zoneA,
+    'worktree',
+    'add',
+    '-q',
+    '-b',
+    tag + '-b',
+    zoneB,
+  ]);
+  fs.mkdirSync(path.join(zoneB, '.amber'), { recursive: true });
+  fs.writeFileSync(
+    path.join(zoneB, '.amber', 'active.json'),
+    JSON.stringify(LINK_POINTER),
+  );
+  const home = freshHome(tag);
+  // Claude Code's own variable only; the others are blanked.
+  const rec = (
+    cwd: string,
+    sessionId: string,
+    args: readonly string[],
+  ): SpawnSyncReturns<string> =>
+    spawnSync('node', [RECORD_CLI, ...args], {
+      cwd,
+      encoding: 'utf8',
+      timeout: 10000,
+      env: {
+        ...process.env,
+        AMBER_HOME: home,
+        AMBER_SESSION_ID: '',
+        CODEX_THREAD_ID: '',
+        CLAUDE_CODE_SESSION_ID: sessionId,
+        PI_SESSION_ID: '',
+      },
+    });
+  return { zoneA, zoneB, home, rec };
+}
+const progressOf = (zone: string): unknown =>
+  parseJson(
+    fs.readFileSync(path.join(zone, '.amber', 'progress.json'), 'utf8'),
+  );
+const amberFiles = (zone: string): string =>
+  JSON.stringify(
+    fs
+      .readdirSync(path.join(zone, '.amber'))
+      .sort()
+      .map((n) => [n, fs.readFileSync(path.join(zone, '.amber', n), 'utf8')]),
+  );
+{
+  const { zoneA, zoneB, home, rec } = linkPair('link');
+  const atOf = (sessionId: string, zone: string): string =>
+    stringOf(
+      at(sessionState(home, sessionId), 'runs', fs.realpathSync(zone), 'at'),
+    );
+  rec(zoneA, 'a-owner', ['unit', 'init', 'docs/plan.md']);
+  rec(zoneA, 'a-owner', ['unit', 'start', 'U1']);
+  rec(zoneB, 'b-init', ['unit', 'init', 'docs/plan.md']);
+  // The driving session stands in A: its hooks see cwd A.
+  runHook('S0', { session_id: 'zl', cwd: zoneA, model: 'model-zl' }, home);
+  const aBefore = amberFiles(zoneA);
+  const startB = rec(zoneB, 'zl', ['unit', 'start', 'U1']);
+  check(
+    'a unit command run in B registers the session in B only and leaves A untouched',
+    startB.status === 0 &&
+      list(get(progressOf(zoneB), 'session_ids')).includes('zl') &&
+      runAt(home, 'zl', zoneB) === 'test-boundary.md' &&
+      runAt(home, 'zl', zoneA) === undefined &&
+      !list(get(progressOf(zoneA), 'session_ids')).includes('zl') &&
+      amberFiles(zoneA) === aBefore,
+    (startB.stderr || '') + JSON.stringify(sessionState(home, 'zl')),
+  );
+  check(
+    'ownsRun holds for B and not for A, though both contract files are test-boundary.md',
+    owns(home, 'zl', zoneB) && !owns(home, 'zl', zoneA),
+  );
+  check(
+    'the unit row of B carries the session and its model',
+    ledger(home).some(
+      (r) =>
+        get(r, 'trigger') === 'unit-start' &&
+        get(r, 'session_id') === 'zl' &&
+        get(r, 'model') === 'model-zl' &&
+        get(r, 'cwd') === zoneB,
+    ),
+  );
+  check(
+    'a registration in A alone does not own B',
+    owns(home, 'a-owner', zoneA) && !owns(home, 'a-owner', zoneB),
+  );
+  const firstAtB = atOf('zl', zoneB);
+  const holdA = rec(zoneA, 'zl', ['unit', 'hold', 'U1', '--reason', 'r']);
+  check(
+    'driving A after B keeps both registrations',
+    holdA.status === 0 &&
+      runAt(home, 'zl', zoneA) === 'test-boundary.md' &&
+      runAt(home, 'zl', zoneB) === 'test-boundary.md' &&
+      owns(home, 'zl', zoneA) &&
+      owns(home, 'zl', zoneB) &&
+      atOf('zl', zoneB) === firstAtB &&
+      atOf('zl', zoneA) > firstAtB,
+    (holdA.stderr || '') + JSON.stringify(sessionState(home, 'zl')),
+  );
+  rec(zoneB, 'zl', ['unit', 'verified', 'U1', '--evidence', 'ok']);
+  check(
+    "driving B again refreshes B's time and keeps A's registration",
+    atOf('zl', zoneB) > firstAtB &&
+      atOf('zl', zoneB) > atOf('zl', zoneA) &&
+      runAt(home, 'zl', zoneA) === 'test-boundary.md',
+    JSON.stringify(sessionState(home, 'zl')),
+  );
+  const e1Out = e1Bash(
+    zoneA,
+    home,
+    'e1zl',
+    'cd ' + zoneB + ' && node ' + RECORD_CLI + ' unit start U2',
+  );
+  check(
+    'E1 registers nobody for a unit command, in A or in B',
+    e1Out === null &&
+      !registersAny(home, 'e1zl') &&
+      !list(get(progressOf(zoneA), 'session_ids')).includes('e1zl') &&
+      !list(get(progressOf(zoneB), 'session_ids')).includes('e1zl'),
+    JSON.stringify(e1Out),
+  );
+  const registered = JSON.stringify(at(sessionState(home, 'zl'), 'runs'));
+  for (const source of ['resume', 'compact', 'clear']) {
+    runHook(
+      'S0',
+      { session_id: 'zl', cwd: zoneA, model: 'model-zl', source },
+      home,
+    );
+    check(
+      'S0 on ' + source + ' carries both registrations over',
+      JSON.stringify(at(sessionState(home, 'zl'), 'runs')) === registered &&
+        owns(home, 'zl', zoneA) &&
+        owns(home, 'zl', zoneB),
+      JSON.stringify(sessionState(home, 'zl')),
+    );
+  }
+  // A state file written before `runs` existed: its single `run` owns any run
+  // with that boundary file, and S0 does not carry it.
+  fs.writeFileSync(
+    path.join(home, 'state', 'session-legacy.json'),
+    JSON.stringify({ model: 'm', run: 'test-boundary.md' }),
+  );
+  fs.writeFileSync(
+    path.join(home, 'state', 'session-legacy-other.json'),
+    JSON.stringify({ model: 'm', run: 'other-boundary.md' }),
+  );
+  check(
+    'a pre-upgrade state file with only run owns a run with that boundary file',
+    owns(home, 'legacy', zoneA) &&
+      owns(home, 'legacy', zoneB) &&
+      !owns(home, 'legacy-other', zoneA),
+  );
+  rec(zoneB, 'legacy', ['unit', 'start', 'U2']);
+  check(
+    'once the recorder registers it, runs decides and run is left as found',
+    owns(home, 'legacy', zoneB) &&
+      !owns(home, 'legacy', zoneA) &&
+      get(sessionState(home, 'legacy'), 'run') === 'test-boundary.md',
+    JSON.stringify(sessionState(home, 'legacy')),
+  );
+  for (const id of ['legacy-other', 'legacy']) {
+    runHook(
+      'S0',
+      { session_id: id, cwd: zoneA, model: 'm', source: 'resume' },
+      home,
+    );
+  }
+  check(
+    'S0 on resume carries a pre-upgrade run as found, alone or beside runs',
+    get(sessionState(home, 'legacy-other'), 'run') === 'other-boundary.md' &&
+      !has(sessionState(home, 'legacy-other'), 'runs') &&
+      get(sessionState(home, 'legacy'), 'run') === 'test-boundary.md' &&
+      runAt(home, 'legacy', zoneB) === 'test-boundary.md',
+    JSON.stringify([
+      sessionState(home, 'legacy-other'),
+      sessionState(home, 'legacy'),
+    ]),
+  );
+  // A present `runs` alone decides ownership, even when it is malformed.
+  fs.writeFileSync(
+    path.join(home, 'state', 'session-nullruns.json'),
+    JSON.stringify({ run: 'test-boundary.md', runs: null }),
+  );
+  check(
+    'a state file with run and a null runs owns neither A nor B',
+    !owns(home, 'nullruns', zoneA) && !owns(home, 'nullruns', zoneB),
+  );
+  runHook(
+    'S0',
+    { session_id: 'nullruns', cwd: zoneA, model: 'm', source: 'resume' },
+    home,
+  );
+  check(
+    'S0 on resume carries the null runs, so the run beside it still owns nothing',
+    has(sessionState(home, 'nullruns'), 'runs') &&
+      !owns(home, 'nullruns', zoneA) &&
+      !owns(home, 'nullruns', zoneB),
+    JSON.stringify(sessionState(home, 'nullruns')),
+  );
+  // A session state that is JSON but not an object reads as an empty state.
+  const malformed = ['null', '5', '"text"', '[1, 2]'];
+  malformed.forEach((json, i) => {
+    fs.writeFileSync(
+      path.join(home, 'state', 'session-bad' + String(i) + '.json'),
+      json,
+    );
+  });
+  check(
+    'ownsRun reads a non-object session state as owning nothing, without throwing',
+    malformed.every(
+      (_, i) =>
+        !owns(home, 'bad' + String(i), zoneA) &&
+        !owns(home, 'bad' + String(i), zoneB),
+    ),
+  );
+  const badBefore = JSON.stringify(progressOf(zoneB));
+  const badStart = rec(zoneB, 'bad0', ['unit', 'start', 'U2']);
+  check(
+    'a unit command over a null session state passes and registers the session',
+    badStart.status === 0 &&
+      JSON.stringify(progressOf(zoneB)) !== badBefore &&
+      runAt(home, 'bad0', zoneB) === 'test-boundary.md' &&
+      list(get(progressOf(zoneB), 'session_ids')).includes('bad0'),
+    (badStart.stderr || '') + JSON.stringify(sessionState(home, 'bad0')),
+  );
+  fs.writeFileSync(
+    path.join(home, 'state', 'session-badruns.json'),
+    JSON.stringify({ runs: { [fs.realpathSync(zoneB)]: 7, x: null } }),
+  );
+  const badRuns = rec(zoneB, 'badruns', [
+    'unit',
+    'hold',
+    'U2',
+    '--reason',
+    'r',
+  ]);
+  check(
+    'malformed runs entries are skipped and replaced by the registration',
+    badRuns.status === 0 &&
+      runAt(home, 'badruns', zoneB) === 'test-boundary.md',
+    (badRuns.stderr || '') + JSON.stringify(sessionState(home, 'badruns')),
+  );
+}
+
+// ---- zone link: the completion signal names its session, and a stop follows the zones the session drives ----
+{
+  // A Stop of the session standing in `cwd`, with the pair's AMBER_HOME.
+  const stopIn = (
+    home: string,
+    sessionId: string,
+    cwd: string,
+    active?: boolean,
+  ): HookRun =>
+    runHook(
+      'S2',
+      {
+        session_id: sessionId,
+        cwd,
+        hook_event_name: 'Stop',
+        stop_hook_active: !!active,
+        last_assistant_message: 'report',
+      },
+      home,
+    );
+  const realB = (zone: string): string => fs.realpathSync(zone);
+  const blocksOf = (zone: string): unknown => get(progressOf(zone), 'blocks');
+  const noFailures = (home: string): boolean =>
+    !fs.existsSync(path.join(home, 'state', 'sensor-failures.log'));
+  // The signal file's text, '' once it is gone.
+  const signalText = (zone: string): string =>
+    signalExists(zone) ? fs.readFileSync(signalPath(zone), 'utf8') : '';
+  // The parsed signal, null once it is gone.
+  const readSignal = (zone: string): unknown =>
+    signalExists(zone) ? parseJson(signalText(zone)) : null;
+  const passedRows = (home: string): unknown[] =>
+    ledger(home).filter((r) => get(r, 'gate') === 'passed');
+  const DRIVEN_LINE =
+    /this session also drives the run of test-boundary\.md in /;
+  // Every unit of the pair's plan verified by the session, in `zone`.
+  const finish = (
+    rec: LinkPair['rec'],
+    zone: string,
+    sessionId: string,
+  ): void => {
+    for (const id of ['U1', 'U2']) {
+      rec(zone, sessionId, ['unit', 'start', id]);
+      rec(zone, sessionId, ['unit', 'verified', id, '--evidence', 'ok']);
+    }
+  };
+
+  // B finished, A open: the session in A signals in B; a second session
+  // registered in B leaves that signal alone; the owner's stop takes it.
+  {
+    const { zoneA, zoneB, home, rec } = linkPair('sig');
+    rec(zoneA, 's1', ['unit', 'init', 'docs/plan.md']);
+    rec(zoneA, 's1', ['unit', 'start', 'U1']);
+    rec(zoneB, 's1', ['unit', 'init', 'docs/plan.md']);
+    finish(rec, zoneB, 's1');
+    const s0 = contextOf(
+      runHook('S0', { session_id: 's1', cwd: zoneA, model: 'm1' }, home).out,
+    );
+    check(
+      'S0 in A names the run the session also drives in B, once',
+      DRIVEN_LINE.test(stringOf(s0)) &&
+        stringOf(s0).includes(' in ' + realB(zoneB) + ' ') &&
+        stringOf(s0).split('also drives').length === 2,
+      stringOf(s0).slice(-500),
+    );
+    const s1 = contextOf(
+      runHook('S1', { session_id: 's1', cwd: zoneA, prompt: 'go on' }, home)
+        .out,
+    );
+    check(
+      'S1 after S0 does not repeat the briefing line',
+      !DRIVEN_LINE.test(stringOf(s1)),
+      stringOf(s1),
+    );
+    const doneB = rec(zoneB, 's1', ['done', ...OK_DONE]);
+    check(
+      "done run in B writes the session's id into B's signal",
+      doneB.status === 0 &&
+        get(readSignal(zoneB), 'session_id') === 's1' &&
+        get(readSignal(zoneB), 'target') === 'test-boundary.md' &&
+        !signalExists(zoneA),
+      doneB.stderr,
+    );
+    register(zoneB, home, 's2');
+    register(zoneA, home, 's1b');
+    register(zoneB, home, 's1b');
+    const s1first = contextOf(
+      runHook('S1', { session_id: 's1b', cwd: zoneA, prompt: 'hello' }, home)
+        .out,
+    );
+    check(
+      'the first S1 briefing in A carries the line for B with the contract briefing',
+      /an active contract governs/.test(stringOf(s1first)) &&
+        DRIVEN_LINE.test(stringOf(s1first)),
+      stringOf(s1first).slice(-400),
+    );
+    const signalBefore = signalText(zoneB);
+    const ledgerBefore = ledger(home).length;
+    const otherFromA = stopIn(home, 's2', zoneA);
+    const otherFromB = stopIn(home, 's2', zoneB);
+    check(
+      "another session's stops, from A or from B, leave the signal byte-identical",
+      otherFromA.exit === 0 &&
+        otherFromB.exit === 0 &&
+        otherFromA.out === null &&
+        otherFromB.out === null &&
+        signalText(zoneB) === signalBefore &&
+        ledger(home).length === ledgerBefore &&
+        fs.existsSync(path.join(zoneB, '.amber', 'active.json')),
+      JSON.stringify([otherFromA, otherFromB]),
+    );
+    const s0other = contextOf(
+      runHook('S0', { session_id: 's2', cwd: zoneB, model: 'm' }, home).out,
+    );
+    check(
+      'S0 in B tells the other session that a signal from another session waits',
+      /completion signal is waiting in this zone from another session/.test(
+        stringOf(s0other),
+      ),
+      stringOf(s0other).slice(-400),
+    );
+    const aBefore = amberFiles(zoneA);
+    const own = stopIn(home, 's1', zoneA);
+    const row = passedRows(home).find(
+      (r) => get(r, 'summary') === 'unit complete',
+    );
+    check(
+      "the session's stop in A takes its signal in B and releases B only",
+      own.exit === 0 &&
+        own.out === null &&
+        !signalExists(zoneB) &&
+        !fs.existsSync(path.join(zoneB, '.amber', 'active.json')) &&
+        !fs.existsSync(path.join(zoneB, '.amber', 'progress.json')) &&
+        amberFiles(zoneA) === aBefore,
+      JSON.stringify(own),
+    );
+    check(
+      "the passed row carries B's contract, B's place and the session",
+      !!row &&
+        get(row, 'contract') === 'test-boundary.md' &&
+        get(row, 'review_target') === 'test-boundary.md' &&
+        get(row, 'cwd') === realB(zoneB) &&
+        get(row, 'project') === path.basename(zoneB) &&
+        get(row, 'session_id') === 's1' &&
+        get(row, 'model') === 'm1',
+      JSON.stringify(row),
+    );
+    const next = stopIn(home, 's1', zoneA);
+    check(
+      "with B released, the next stop is sent back for A's open units",
+      get(next.out, 'decision') === 'block' && blocksOf(zoneA) === 1,
+      JSON.stringify(next.out),
+    );
+    check(
+      'a send-back for the zone the session stands in keeps the plain commands',
+      stringAt(next.out, 'reason').startsWith(
+        'amber loop (contract test-boundary.md): ',
+      ) &&
+        stringAt(next.out, 'reason').includes(
+          'run `node ' + RECORD_CLI + ' unit start U1`',
+        ) &&
+        !stringAt(next.out, 'reason').includes('cd '),
+      stringAt(next.out, 'reason'),
+    );
+    check('no sensor failure in the signal pair', noFailures(home));
+  }
+
+  // A finished, B open: A's completion passes and the next stop goes to B.
+  {
+    const { zoneA, zoneB, home, rec } = linkPair('waitb');
+    rec(zoneB, 'w', ['unit', 'init', 'docs/plan.md']);
+    rec(zoneB, 'w', ['unit', 'start', 'U1']);
+    rec(zoneA, 'w', ['unit', 'init', 'docs/plan.md']);
+    finish(rec, zoneA, 'w');
+    rec(zoneA, 'w', ['done', ...OK_DONE]);
+    const pass = stopIn(home, 'w', zoneA);
+    check(
+      "A's own signal passes and releases A while B stays open",
+      pass.out === null &&
+        !fs.existsSync(path.join(zoneA, '.amber', 'active.json')) &&
+        fs.existsSync(path.join(zoneB, '.amber', 'active.json')) &&
+        get(passedRows(home)[0], 'cwd') === realB(zoneA),
+      JSON.stringify(pass),
+    );
+    const back = stopIn(home, 'w', zoneA);
+    const reason = stringAt(back.out, 'reason');
+    const inB = "cd '" + realB(zoneB) + "' && node '";
+    check(
+      'the next stop in A is sent back for B, the zone with open units',
+      get(back.out, 'decision') === 'block' &&
+        reason.startsWith(
+          'amber loop (contract test-boundary.md in ' + realB(zoneB) + '): ',
+        ) &&
+        blocksOf(zoneB) === 1,
+      JSON.stringify(back.out),
+    );
+    check(
+      "the send-back for B gives every command with B's directory, in one line",
+      reason.includes(inB + RECORD_CLI + "' unit start U1`") &&
+        reason.includes(inB + RECORD_CLI + "' unit verified U1 --evidence") &&
+        reason.includes(inB + RECORD_CLI + "' unit hold U1 --reason") &&
+        !reason.includes('amber:mark') &&
+        !reason.includes('`node '),
+      reason,
+    );
+  }
+
+  // F8: a zone root with a space and a single quote reaches the directive
+  // as one shell argument, and that `cd` lands in the root.
+  {
+    const { zoneB, rec } = linkPair('quote');
+    rec(zoneB, 'q', ['unit', 'init', 'docs/plan.md']);
+    const text = loadModule<typeof import('../src/lib/hook-text.cjs')>(
+      'lib/hook-text.cjs',
+      ['continuationDirective'],
+    );
+    const store = loadModule<typeof import('../src/lib/progress-store.cjs')>(
+      'lib/progress-store.cjs',
+      ['loadProgress'],
+    );
+    const p = store.loadProgress(zoneB);
+    const odd = path.join(BASE, "zone B'x");
+    fs.mkdirSync(odd, { recursive: true });
+    const directive =
+      p && !('broken' in p)
+        ? text.continuationDirective('test-boundary.md', p, 'U1', 1, odd)
+        : '';
+    const cdPart = "cd '" + BASE + "/zone B'\\''x'";
+    const landed = spawnSync('sh', ['-c', cdPart + ' && pwd'], {
+      encoding: 'utf8',
+    });
+    check(
+      'a root with a space and a quote is one quoted argument, and its cd lands in the root',
+      directive.includes(
+        '`' + cdPart + " && node '" + RECORD_CLI + "' unit start U1`",
+      ) &&
+        landed.status === 0 &&
+        landed.stdout.trim() === odd,
+      JSON.stringify([directive, landed.stdout, landed.stderr]),
+    );
+  }
+
+  // F4: the completion signal is consumed by renaming it to a claim file.
+  const doneSignal = loadModule<typeof import('../src/lib/done-signal.cjs')>(
+    'lib/done-signal.cjs',
+    ['takeDoneSignal', 'writeDoneSignal'],
+  );
+  const claimsOf = (zone: string): string[] =>
+    fs
+      .readdirSync(path.join(zone, '.amber'))
+      .filter((n) => n.startsWith('done.json.taking-'));
+  const signalOf = (sessionId: string): Record<string, string> => ({
+    session_id: sessionId,
+    target: 'test-boundary.md',
+    review: sessionId + ' review',
+    goal: sessionId + ' goal',
+    summary: sessionId + ' complete',
+  });
+
+  // (a) Replaced between the first read and the claim: the claim holds the
+  // replacement, which goes back in place, and the owner takes nothing.
+  {
+    const { zoneB, home, rec } = linkPair('race');
+    rec(zoneB, 'r1', ['unit', 'init', 'docs/plan.md']);
+    finish(rec, zoneB, 'r1');
+    rec(zoneB, 'r1', ['done', ...OK_DONE]);
+    let replacement = '';
+    const first = doneSignal.takeDoneSignal(zoneB, (sessionId) => {
+      if (replacement === '') {
+        // r2's recorder writes its signal while r1's stop decides.
+        doneSignal.writeDoneSignal(zoneB, signalOf('r2'));
+        replacement = signalText(zoneB);
+      }
+      return sessionId === 'r1';
+    });
+    check(
+      'a signal replaced before the claim is restored byte-identical, and the owner takes nothing',
+      !first.taken &&
+        first.signal === null &&
+        get(parseJson(replacement), 'session_id') === 'r2' &&
+        signalText(zoneB) === replacement &&
+        claimsOf(zoneB).length === 0,
+      JSON.stringify([first, replacement, signalText(zoneB), claimsOf(zoneB)]),
+    );
+    const own = stopIn(home, 'r2', zoneB);
+    check(
+      "the restored replacement is consumed by its own session's stop",
+      own.out === null &&
+        !signalExists(zoneB) &&
+        passedRows(home).some(
+          (r) =>
+            get(r, 'summary') === 'r2 complete' &&
+            get(r, 'session_id') === 'r2',
+        ),
+      JSON.stringify([own, ledger(home)]),
+    );
+    doneSignal.writeDoneSignal(zoneB, signalOf('r1'));
+    const later = doneSignal.takeDoneSignal(zoneB, (id) => id === 'r1');
+    check(
+      "the first session's signal written later is taken",
+      later.taken &&
+        at(later.signal, 'session_id') === 'r1' &&
+        !signalExists(zoneB) &&
+        claimsOf(zoneB).length === 0,
+      JSON.stringify(later),
+    );
+  }
+
+  // (b) Replaced right after the claim (the afterClaim seam): the claimed
+  // signal is consumed and the replacement lands in a fresh done.json.
+  {
+    const { zoneB, rec } = linkPair('claim');
+    rec(zoneB, 'k1', ['unit', 'init', 'docs/plan.md']);
+    finish(rec, zoneB, 'k1');
+    rec(zoneB, 'k1', ['done', ...OK_DONE]);
+    let replacement = '';
+    const first = doneSignal.takeDoneSignal(
+      zoneB,
+      (id) => id === 'k1',
+      () => {
+        doneSignal.writeDoneSignal(zoneB, signalOf('k2'));
+        replacement = signalText(zoneB);
+      },
+    );
+    check(
+      'a signal written after the claim survives byte-identical, and the claimed one is taken',
+      first.taken &&
+        at(first.signal, 'session_id') === 'k1' &&
+        get(parseJson(replacement), 'session_id') === 'k2' &&
+        signalText(zoneB) === replacement &&
+        claimsOf(zoneB).length === 0,
+      JSON.stringify([first, replacement, signalText(zoneB), claimsOf(zoneB)]),
+    );
+  }
+
+  // (d) Replaced before the claim and again before the restore: the first
+  // replacement stays as a claim file, swept once older than the TTL.
+  {
+    const { zoneB } = linkPair('sweep');
+    doneSignal.writeDoneSignal(zoneB, signalOf('d1'));
+    let calls = 0;
+    const first = doneSignal.takeDoneSignal(
+      zoneB,
+      (id) => {
+        calls += 1;
+        if (calls === 1) doneSignal.writeDoneSignal(zoneB, signalOf('d2'));
+        return id === 'd1';
+      },
+      () => {
+        doneSignal.writeDoneSignal(zoneB, signalOf('d3'));
+      },
+    );
+    const left = claimsOf(zoneB);
+    const leftText =
+      left.length === 1
+        ? fs.readFileSync(path.join(zoneB, '.amber', left[0] ?? ''), 'utf8')
+        : '';
+    check(
+      'a restore blocked by a newer signal leaves the claimed one as a claim file',
+      !first.taken &&
+        at(readSignal(zoneB), 'session_id') === 'd3' &&
+        leftText !== '' &&
+        at(parseJson(leftText), 'session_id') === 'd2',
+      JSON.stringify([first, left, leftText, signalText(zoneB)]),
+    );
+    const old = new Date(Date.now() - 2 * 60 * 60 * 1000);
+    fs.utimesSync(path.join(zoneB, '.amber', left[0] ?? ''), old, old);
+    const fresh = 'done.json.taking-1-1-1';
+    fs.writeFileSync(path.join(zoneB, '.amber', fresh), '{}');
+    const swept = doneSignal.takeDoneSignal(zoneB, () => false);
+    check(
+      'a claim file older than the TTL is swept, a fresh one is not',
+      !swept.taken &&
+        JSON.stringify(claimsOf(zoneB)) === JSON.stringify([fresh]) &&
+        at(readSignal(zoneB), 'session_id') === 'd3',
+      JSON.stringify([swept, claimsOf(zoneB)]),
+    );
+  }
+
+  // F10: s2's Stop runs while s1 holds s2's signal as a claim (inside
+  // afterClaim): s2 takes it over from the claim and s1 finds its claim gone.
+  {
+    const { zoneB, home, rec } = linkPair('inflight');
+    rec(zoneB, 's2', ['unit', 'init', 'docs/plan.md']);
+    finish(rec, zoneB, 's2');
+    doneSignal.writeDoneSignal(zoneB, signalOf('s1'));
+    const seen: {
+      done?: SpawnSyncReturns<string>;
+      stop?: HookRun;
+      claims?: number;
+      signal?: boolean;
+    } = {};
+    const first = doneSignal.takeDoneSignal(
+      zoneB,
+      (id) => {
+        // s2's recorder replaces s1's signal while s1's stop decides.
+        seen.done ??= rec(zoneB, 's2', ['done', ...OK_DONE]);
+        return id === 's1';
+      },
+      () => {
+        seen.claims = claimsOf(zoneB).length;
+        seen.signal = signalExists(zoneB);
+        seen.stop = stopIn(home, 's2', zoneB);
+      },
+    );
+    check(
+      "the owner's stop takes its signal from another session's in-flight claim and releases B",
+      seen.done?.status === 0 &&
+        seen.claims === 1 &&
+        seen.signal === false &&
+        seen.stop?.out === null &&
+        passedRows(home).some(
+          (r) =>
+            get(r, 'session_id') === 's2' && get(r, 'cwd') === realB(zoneB),
+        ) &&
+        !fs.existsSync(path.join(zoneB, '.amber', 'active.json')),
+      JSON.stringify([seen, ledger(home)]),
+    );
+    check(
+      'the holder then takes nothing and leaves no signal or claim behind',
+      !first.taken &&
+        first.signal === null &&
+        !signalExists(zoneB) &&
+        claimsOf(zoneB).length === 0,
+      JSON.stringify([first, signalText(zoneB), claimsOf(zoneB)]),
+    );
+    doneSignal.writeDoneSignal(zoneB, signalOf('s1'));
+    const later = doneSignal.takeDoneSignal(zoneB, (id) => id === 's1');
+    check(
+      "the holder's own signal written later is taken",
+      later.taken &&
+        at(later.signal, 'session_id') === 's1' &&
+        !signalExists(zoneB) &&
+        claimsOf(zoneB).length === 0,
+      JSON.stringify(later),
+    );
+  }
+
+  // A claim naming the caller is taken while fresh and swept once stale.
+  {
+    const { zoneB } = linkPair('heldclaim');
+    const plantClaim = (name: string, sessionId: string): string => {
+      const file = path.join(zoneB, '.amber', name);
+      fs.writeFileSync(
+        file,
+        JSON.stringify({
+          v: 1,
+          ts: new Date().toISOString(),
+          ...signalOf(sessionId),
+        }),
+      );
+      return file;
+    };
+    plantClaim('done.json.taking-1-1-3', 'h1');
+    const fresh = doneSignal.takeDoneSignal(zoneB, (id) => id === 'h1');
+    const staleFile = plantClaim('done.json.taking-1-1-4', 'h2');
+    const old = new Date(Date.now() - 2 * 60 * 60 * 1000);
+    fs.utimesSync(staleFile, old, old);
+    const stale = doneSignal.takeDoneSignal(zoneB, (id) => id === 'h2');
+    check(
+      'a fresh claim naming the caller is taken, a stale one is swept and not taken',
+      fresh.taken &&
+        at(fresh.signal, 'session_id') === 'h1' &&
+        !stale.taken &&
+        stale.signal === null &&
+        claimsOf(zoneB).length === 0 &&
+        !signalExists(zoneB),
+      JSON.stringify([fresh, stale, claimsOf(zoneB)]),
+    );
+  }
+
+  // F11: a restore whose hard link fails (not EEXIST) falls back to a rename.
+  {
+    const { zoneB } = linkPair('nolink');
+    doneSignal.writeDoneSignal(zoneB, signalOf('n1'));
+    let replacement = '';
+    // Every hard link fails as on a filesystem without them, for this call.
+    const withoutLinks = <T,>(run: () => T): T => {
+      const realLink: unknown = Reflect.get(fs, 'linkSync');
+      Reflect.set(fs, 'linkSync', () => {
+        throw Object.assign(new Error('EPERM: operation not permitted, link'), {
+          code: 'EPERM',
+        });
+      });
+      try {
+        return run();
+      } finally {
+        Reflect.set(fs, 'linkSync', realLink);
+      }
+    };
+    const first = withoutLinks(() =>
+      doneSignal.takeDoneSignal(zoneB, (id) => {
+        if (replacement === '') {
+          doneSignal.writeDoneSignal(zoneB, signalOf('n2'));
+          replacement = signalText(zoneB);
+        }
+        return id === 'n1';
+      }),
+    );
+    check(
+      'a claimed foreign signal is restored by rename, byte-identical, when the link fails with EPERM',
+      !first.taken &&
+        at(parseJson(replacement), 'session_id') === 'n2' &&
+        signalText(zoneB) === replacement &&
+        claimsOf(zoneB).length === 0,
+      JSON.stringify([first, replacement, signalText(zoneB), claimsOf(zoneB)]),
+    );
+  }
+
+  // Two sessions submit in B before the first one stops.
+  {
+    const { zoneA, zoneB, home, rec } = linkPair('concur');
+    rec(zoneB, 'c1', ['unit', 'init', 'docs/plan.md']);
+    finish(rec, zoneB, 'c1');
+    const doneC1 = rec(zoneB, 'c1', ['done', ...OK_DONE]);
+    const doneC2 = rec(zoneB, 'c2', ['done', ...OK_DONE]);
+    const c2Signal = signalText(zoneB);
+    const c1Stop = stopIn(home, 'c1', zoneA);
+    check(
+      "the first session's stop leaves the second session's replacement in place",
+      doneC1.status === 0 &&
+        doneC2.status === 0 &&
+        get(parseJson(c2Signal), 'session_id') === 'c2' &&
+        c1Stop.out === null &&
+        signalText(zoneB) === c2Signal &&
+        passedRows(home).length === 0 &&
+        fs.existsSync(path.join(zoneB, '.amber', 'active.json')),
+      JSON.stringify([doneC1.stderr, doneC2.stderr, c1Stop]),
+    );
+    const c2Stop = stopIn(home, 'c2', zoneB);
+    check(
+      "the second session's stop consumes its own signal and releases B",
+      c2Stop.out === null &&
+        !signalExists(zoneB) &&
+        passedRows(home).length === 1 &&
+        get(passedRows(home)[0], 'session_id') === 'c2' &&
+        !fs.existsSync(path.join(zoneB, '.amber', 'active.json')),
+      JSON.stringify([c2Stop, ledger(home)]),
+    );
+  }
+
+  // Malformed progress in the newest registered zone does not hide A.
+  {
+    const { zoneA, zoneB, home, rec } = linkPair('badprog');
+    rec(zoneA, 'bp', ['unit', 'init', 'docs/plan.md']);
+    rec(zoneA, 'bp', ['unit', 'start', 'U1']);
+    rec(zoneB, 'bp', ['unit', 'init', 'docs/plan.md']);
+    rec(zoneB, 'bp', ['unit', 'start', 'U1']);
+    fs.writeFileSync(
+      path.join(zoneB, '.amber', 'progress.json'),
+      JSON.stringify({ units: null }),
+    );
+    const back = stopIn(home, 'bp', zoneA);
+    check(
+      'a stop is sent back for A when the newer zone B holds units: null',
+      back.exit === 0 &&
+        back.out !== null &&
+        get(back.out, 'decision') === 'block' &&
+        stringAt(back.out, 'reason').startsWith(
+          'amber loop (contract test-boundary.md): ',
+        ) &&
+        blocksOf(zoneA) === 1 &&
+        noFailures(home),
+      JSON.stringify(back),
+    );
+  }
+
+  // S1 names the other driven zones once per change of their set.
+  {
+    const { zoneA, zoneB, home, rec } = linkPair('brief');
+    const s1 = (sessionId: string, cwd: string): string =>
+      stringOf(
+        contextOf(
+          runHook('S1', { session_id: sessionId, cwd, prompt: 'go' }, home).out,
+        ),
+      );
+    runHook('S0', { session_id: 'f6', cwd: zoneEmpty, model: 'm' }, home);
+    rec(zoneB, 'f6', ['unit', 'init', 'docs/plan.md']);
+    const firstLine = s1('f6', zoneEmpty);
+    const again = s1('f6', zoneEmpty);
+    check(
+      'in a zone without a contract, the prompt after driving B names B once',
+      DRIVEN_LINE.test(firstLine) &&
+        firstLine.includes(' in ' + realB(zoneB) + ' ') &&
+        !DRIVEN_LINE.test(again),
+      JSON.stringify([firstLine, again]),
+    );
+    rec(zoneA, 'f6', ['unit', 'init', 'docs/plan.md']);
+    const grown = s1('f6', zoneEmpty);
+    const after = s1('f6', zoneEmpty);
+    check(
+      'a new registration names the driven zones again, then falls silent',
+      grown.split('also drives').length === 3 &&
+        grown.includes(' in ' + realB(zoneA) + ' ') &&
+        grown.includes(' in ' + realB(zoneB) + ' ') &&
+        !DRIVEN_LINE.test(after),
+      JSON.stringify([grown, after]),
+    );
+    runHook('S0', { session_id: 'f6a', cwd: zoneA, model: 'm' }, home);
+    const briefedOnly = s1('f6a', zoneA);
+    rec(zoneB, 'f6a', ['unit', 'start', 'U1']);
+    const withB = s1('f6a', zoneA);
+    const quiet = s1('f6a', zoneA);
+    check(
+      'a session already briefed in A is told about B once, without the contract briefing',
+      !DRIVEN_LINE.test(briefedOnly) &&
+        DRIVEN_LINE.test(withB) &&
+        !/an active contract governs/.test(withB) &&
+        !DRIVEN_LINE.test(quiet),
+      JSON.stringify([briefedOnly, withB, quiet]),
+    );
+  }
+
+  // F9: a new contract in B is announced again though B's root is unchanged.
+  {
+    const { zoneB, home, rec } = linkPair('swap');
+    const s1 = (cwd: string): string =>
+      stringOf(
+        contextOf(
+          runHook('S1', { session_id: 'f9', cwd, prompt: 'go' }, home).out,
+        ),
+      );
+    runHook('S0', { session_id: 'f9', cwd: zoneEmpty, model: 'm' }, home);
+    rec(zoneB, 'f9', ['unit', 'init', 'docs/plan.md']);
+    const firstLine = s1(zoneEmpty);
+    finish(rec, zoneB, 'f9');
+    rec(zoneB, 'f9', ['done', ...OK_DONE]);
+    const pass = stopIn(home, 'f9', zoneEmpty);
+    fs.writeFileSync(path.join(zoneB, 'next-boundary.md'), BOUNDARY);
+    fs.writeFileSync(
+      path.join(zoneB, '.amber', 'active.json'),
+      JSON.stringify({ ...LINK_POINTER, boundary: 'next-boundary.md' }),
+    );
+    const init = rec(zoneB, 'f9', ['unit', 'init', 'docs/plan.md']);
+    const renamed = s1(zoneEmpty);
+    const quiet = s1(zoneEmpty);
+    check(
+      "B's next contract is announced again, then the unchanged set is silent",
+      DRIVEN_LINE.test(firstLine) &&
+        pass.out === null &&
+        init.status === 0 &&
+        renamed.includes(
+          'also drives the run of next-boundary.md in ' + realB(zoneB) + ' ',
+        ) &&
+        !/also drives/.test(quiet) &&
+        JSON.stringify(get(sessionState(home, 'f9'), 'driven_briefed')) ===
+          JSON.stringify([realB(zoneB) + '=next-boundary.md']),
+      JSON.stringify([firstLine, pass, init.stderr, renamed, quiet]),
+    );
+  }
+
+  // Both open: the stop follows the zone the session drove last.
+  {
+    const { zoneA, zoneB, home, rec } = linkPair('newest');
+    rec(zoneA, 'n', ['unit', 'init', 'docs/plan.md']);
+    rec(zoneA, 'n', ['unit', 'start', 'U1']);
+    rec(zoneB, 'n', ['unit', 'init', 'docs/plan.md']);
+    rec(zoneB, 'n', ['unit', 'start', 'U1']);
+    stopIn(home, 'n', zoneA);
+    check(
+      'driving A then B, a stop in A is sent back for B only',
+      blocksOf(zoneB) === 1 && blocksOf(zoneA) === 0,
+      JSON.stringify([progressOf(zoneA), progressOf(zoneB)]),
+    );
+    rec(zoneA, 'n', ['unit', 'start', 'U2']);
+    stopIn(home, 'n', zoneB);
+    check(
+      'driving A again, a stop in B is sent back for A only',
+      blocksOf(zoneA) === 1 && blocksOf(zoneB) === 1,
+      JSON.stringify([progressOf(zoneA), progressOf(zoneB)]),
+    );
+    rec(zoneA, 'n', ['unit', 'hold', 'U2', '--reason', 'operator']);
+    const held = stopIn(home, 'n', zoneB);
+    check(
+      'a plain hold in the newest zone passes that stop without sending it to the older zone',
+      held.out === null && blocksOf(zoneB) === 1,
+      JSON.stringify(held.out),
+    );
+  }
+
+  // The hook cwd zone has no contract: B's units and B's signal still reach the session.
+  {
+    const { zoneB, home, rec } = linkPair('bare');
+    rec(zoneB, 'b', ['unit', 'init', 'docs/plan.md']);
+    rec(zoneB, 'b', ['unit', 'start', 'U1']);
+    const back = stopIn(home, 'b', zoneEmpty);
+    check(
+      'a session standing in a zone without a contract is sent back for B',
+      get(back.out, 'decision') === 'block' && blocksOf(zoneB) === 1,
+      JSON.stringify(back),
+    );
+    rec(zoneB, 'b', ['unit', 'verified', 'U1', '--evidence', 'ok']);
+    rec(zoneB, 'b', ['unit', 'start', 'U2']);
+    rec(zoneB, 'b', ['unit', 'verified', 'U2', '--evidence', 'ok']);
+    rec(zoneB, 'b', ['done', ...OK_DONE]);
+    const pass = stopIn(home, 'b', zoneEmpty);
+    check(
+      "the stop in that zone takes B's signal and releases B",
+      pass.out === null &&
+        !signalExists(zoneB) &&
+        !fs.existsSync(path.join(zoneB, '.amber', 'active.json')) &&
+        get(passedRows(home)[0], 'contract') === 'test-boundary.md' &&
+        get(passedRows(home)[0], 'cwd') === realB(zoneB),
+      JSON.stringify([pass, ledger(home)]),
+    );
+  }
+
+  // Stale and legacy signals in B.
+  {
+    const { zoneA, zoneB, home, rec } = linkPair('aged');
+    rec(zoneA, 'o', ['unit', 'init', 'docs/plan.md']);
+    rec(zoneB, 'o', ['unit', 'init', 'docs/plan.md']);
+    finish(rec, zoneA, 'o');
+    finish(rec, zoneB, 'o');
+    rec(zoneB, 'o', ['done', ...OK_DONE]);
+    const fresh = readSignal(zoneB);
+    fs.writeFileSync(
+      signalPath(zoneB),
+      JSON.stringify({
+        ...(typeof fresh === 'object' && fresh !== null ? fresh : {}),
+        ts: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
+      }),
+    );
+    const stale = stopIn(home, 'o', zoneA);
+    check(
+      "the session's own signal older than an hour is dropped without a row",
+      stale.out === null &&
+        !signalExists(zoneB) &&
+        ledger(home).every((r) => get(r, 'gate') === undefined) &&
+        fs.existsSync(path.join(zoneB, '.amber', 'active.json')),
+      JSON.stringify([stale, ledger(home)]),
+    );
+    plantSignal(zoneB, { summary: 'legacy signal' });
+    const legacyBefore = signalText(zoneB);
+    const stranger = stopIn(home, 'stranger', zoneB);
+    check(
+      'a signal naming no session is left alone by a session that does not drive B',
+      stranger.out === null && signalText(zoneB) === legacyBefore,
+      JSON.stringify(stranger),
+    );
+    const owner = stopIn(home, 'o', zoneA);
+    check(
+      'a signal naming no session is taken by a session that drives B',
+      owner.out === null &&
+        !signalExists(zoneB) &&
+        passedRows(home).some(
+          (r) =>
+            get(r, 'summary') === 'legacy signal' &&
+            get(r, 'cwd') === realB(zoneB),
+        ),
+      JSON.stringify([owner, ledger(home)]),
+    );
+  }
+
+  // A registered zone whose worktree was removed.
+  {
+    const { zoneA, zoneB, home, rec } = linkPair('gone');
+    rec(zoneA, 'g', ['unit', 'init', 'docs/plan.md']);
+    rec(zoneA, 'g', ['unit', 'start', 'U1']);
+    rec(zoneB, 'g', ['unit', 'init', 'docs/plan.md']);
+    rec(zoneB, 'g', ['unit', 'start', 'U1']);
+    const realGone = realB(zoneB);
+    execFileSync('git', ['-C', zoneA, 'worktree', 'remove', '--force', zoneB]);
+    const s0 = runHook(
+      'S0',
+      { session_id: 'g', cwd: zoneA, model: 'm', source: 'resume' },
+      home,
+    );
+    const stop = stopIn(home, 'g', zoneA);
+    check(
+      'S0 and S2 pass over a removed worktree: no line for it, the stop goes to A',
+      s0.exit === 0 &&
+        !DRIVEN_LINE.test(stringOf(contextOf(s0.out))) &&
+        has(at(sessionState(home, 'g'), 'runs'), realGone) &&
+        stop.exit === 0 &&
+        get(stop.out, 'decision') === 'block' &&
+        blocksOf(zoneA) === 1 &&
+        noFailures(home),
+      JSON.stringify([s0, stop]),
+    );
+  }
+
+  // Only the hook cwd zone registered: no extra line.
+  {
+    const { zoneA, home, rec } = linkPair('solo');
+    rec(zoneA, 'solo', ['unit', 'init', 'docs/plan.md']);
+    const s0 = contextOf(
+      runHook('S0', { session_id: 'solo', cwd: zoneA, model: 'm' }, home).out,
+    );
+    check(
+      'S0 adds no extra-zone line when the only registration is the cwd zone',
+      !!s0 &&
+        /this session drives the run/.test(stringOf(s0)) &&
+        !DRIVEN_LINE.test(stringOf(s0)),
+      stringOf(s0).slice(-400),
+    );
+    const s1new = contextOf(
+      runHook('S1', { session_id: 'solo-new', cwd: zoneA, prompt: 'hi' }, home)
+        .out,
+    );
+    register(zoneA, home, 'solo-new');
+    check(
+      'the first S1 briefing of an unregistered session has no extra-zone line',
+      !!s1new && !DRIVEN_LINE.test(stringOf(s1new)),
+      stringOf(s1new),
+    );
+  }
+}
+
+// ---- zone link: E1 judges each target by its own zone, bash-deny is the union of driven runs, mark hold goes to the run driven last ----
+{
+  // B's contract differs from A's: A writes plugin/** and docs/*.md and
+  // denies git merge|push; B writes plugin/** and lib/** and denies make
+  // deploy. A docs/ path is in A's scope only, a lib/ path in B's only.
+  const B_BOUNDARY = [
+    '# boundary - worktree B',
+    '- B writes plugin [machine: write-scope plugin/**]',
+    '- B writes lib [machine: write-scope lib/**]',
+    '- no deploy from B [machine: bash-deny \\bmake\\s+deploy\\b]',
+  ].join('\n');
+  const linkE1 = (
+    tag: string,
+  ): LinkPair & { readonly realB: string; readonly realA: string } => {
+    const pair = linkPair(tag);
+    fs.writeFileSync(path.join(pair.zoneB, 'test-boundary.md'), B_BOUNDARY);
+    return {
+      ...pair,
+      realA: fs.realpathSync(pair.zoneA),
+      realB: fs.realpathSync(pair.zoneB),
+    };
+  };
+  const e1In = (
+    home: string,
+    cwd: string,
+    sessionId: string,
+    tool: string,
+    toolInput: unknown,
+    agentId?: string,
+  ): HookRun =>
+    runHook(
+      'E1',
+      {
+        session_id: sessionId,
+        cwd,
+        hook_event_name: 'PreToolUse',
+        tool_name: tool,
+        tool_input: toolInput,
+        ...(agentId ? { agent_id: agentId, agent_type: 'default' } : {}),
+      },
+      home,
+    );
+  const write = (
+    home: string,
+    cwd: string,
+    sessionId: string,
+    file: string,
+    agentId?: string,
+  ): HookRun =>
+    e1In(home, cwd, sessionId, 'Write', { file_path: file }, agentId);
+  const reasonOf = (run: HookRun): string =>
+    run.out === null
+      ? ''
+      : stringAt(run.out, 'hookSpecificOutput', 'permissionDecisionReason');
+  const passes = (run: HookRun): boolean => run.exit === 0 && run.out === null;
+  const denied = (run: HookRun, re: RegExp): boolean =>
+    run.exit === 0 && isDeny(run.out) && re.test(reasonOf(run));
+  const esc = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const noCrash = (home: string): boolean =>
+    !fs.existsSync(path.join(home, 'state', 'sensor-failures.log'));
+
+  // Hook cwd A (with a contract), session registered to B.
+  {
+    const { zoneA, zoneB, home, rec, realB } = linkE1('e1z');
+    rec(zoneB, 'z', ['unit', 'init', 'docs/plan.md']);
+    const bName = 'test-boundary\\.md \\(' + esc(realB) + '\\)';
+    const outB = write(home, zoneA, 'z', path.join(zoneB, 'docs', 'n.md'));
+    check(
+      "a Write from hook cwd A to a B path outside B's write-scope is refused by B's contract, named with B's root",
+      denied(
+        outB,
+        new RegExp(
+          '^amber: blocked by contract ' +
+            bName +
+            ': write target docs/n\\.md is outside every write-scope \\(plugin/\\*\\*, lib/\\*\\*\\)$',
+        ),
+      ),
+      reasonOf(outB),
+    );
+    check(
+      "a Write from hook cwd A inside B's write-scope passes (outside A's)",
+      passes(write(home, zoneA, 'z', path.join(zoneB, 'lib', 'x.cjs'))),
+    );
+    const ptrB = write(
+      home,
+      zoneA,
+      'z',
+      path.join(zoneB, '.amber', 'active.json'),
+    );
+    const docB = write(home, zoneA, 'z', path.join(zoneB, 'test-boundary.md'));
+    const stateB = write(
+      home,
+      zoneA,
+      'z',
+      path.join(zoneB, '.amber', 'progress.json'),
+    );
+    check(
+      "B's pointer and contract file are not editable from hook cwd A, and B's .amber/ is refused",
+      denied(ptrB, /not editable.*remove .*active\.json/) &&
+        reasonOf(ptrB).includes(path.join(realB, '.amber', 'active.json')) &&
+        denied(docB, /not editable/) &&
+        denied(
+          stateB,
+          new RegExp(
+            'blocked by contract ' +
+              bName +
+              ': \\.amber/progress\\.json is the run',
+          ),
+        ),
+      [reasonOf(ptrB), reasonOf(docB), reasonOf(stateB)].join(' | '),
+    );
+    const outA = write(home, zoneA, 'z', path.join(zoneA, 'secrets.txt'));
+    check(
+      "a Write in A is still judged by A's contract, named without a root",
+      passes(write(home, zoneA, 'z', path.join(zoneA, 'docs', 'a.md'))) &&
+        denied(
+          outA,
+          /^amber: blocked by contract test-boundary\.md: write target secrets\.txt/,
+        ),
+      reasonOf(outA),
+    );
+    // The same B paths from a session registered nowhere: the target's zone
+    // judges, not the session.
+    check(
+      'the target zone judges whoever writes: an unregistered session meets B as well',
+      denied(
+        write(home, zoneA, 'nobody', path.join(zoneB, 'docs', 'n.md')),
+        new RegExp(bName),
+      ) &&
+        passes(write(home, zoneA, 'nobody', path.join(zoneB, 'lib', 'x.cjs'))),
+    );
+    // apply_patch: each target is judged by its own zone in one call.
+    const patchOf = (...files: string[]): unknown => ({
+      command:
+        '*** Begin Patch\n' +
+        files.map((f) => '*** Add File: ' + f + '\n+x').join('\n') +
+        '\n*** End Patch',
+    });
+    const mixedOk = e1In(
+      home,
+      zoneA,
+      'z',
+      'apply_patch',
+      patchOf(
+        path.join(zoneA, 'docs', 'ok.md'),
+        path.join(zoneB, 'lib', 'ok.cjs'),
+      ),
+    );
+    const mixedBad = e1In(
+      home,
+      zoneA,
+      'z',
+      'apply_patch',
+      patchOf(
+        path.join(zoneA, 'docs', 'ok.md'),
+        path.join(zoneB, 'docs', 'bad.md'),
+      ),
+    );
+    check(
+      'an apply_patch spanning A and B passes when each target fits its own zone and names B when one does not',
+      passes(mixedOk) &&
+        denied(mixedBad, new RegExp(bName + ': write target docs/bad\\.md')),
+      reasonOf(mixedBad),
+    );
+    // A third zone C (a repository with no contract) passes; a nested
+    // repository inside A and a path outside any repository stay A's.
+    const zoneC = makeZone('e1z-c', null, null);
+    const nested = path.join(zoneA, 'nested');
+    fs.mkdirSync(nested);
+    execFileSync('git', ['-C', nested, 'init', '-q']);
+    const loose = path.join(BASE, 'e1z-loose', 'deep', 'x.txt');
+    check(
+      'a target in another repository with no contract passes from hook cwd A under a contract',
+      passes(write(home, zoneA, 'z', path.join(zoneC, 'x.txt'))) &&
+        passes(
+          write(home, zoneA, 'z', path.join(zoneC, 'new', 'dir', 'x.txt')),
+        ),
+    );
+    check(
+      "a nested repository inside A and a path outside any repository are still judged by A's contract",
+      denied(
+        write(home, zoneA, 'z', path.join(nested, 'x.txt')),
+        /write target nested\/x\.txt is outside/,
+      ) &&
+        denied(
+          write(home, zoneA, 'z', loose),
+          /^amber: blocked by contract test-boundary\.md: write target \.\./,
+        ),
+    );
+
+    // Bash and Monitor: the union of A's rows and the rows of B, which the
+    // session drives.
+    const bash = (sessionId: string, command: string, tool = 'Bash'): HookRun =>
+      e1In(home, zoneA, sessionId, tool, { command });
+    const deploy = bash('z', 'make deploy');
+    check(
+      "B's bash-deny row applies to a session in A that drives B, naming B's contract and root",
+      denied(
+        deploy,
+        new RegExp(
+          '^amber: blocked by contract ' + bName + ': bash-deny \\\\bmake',
+        ),
+      ),
+      reasonOf(deploy),
+    );
+    const push = bash('z', 'git push origin x');
+    check(
+      "A's own bash-deny row still applies to that session, named as before",
+      denied(
+        push,
+        /^amber: blocked by contract test-boundary\.md: bash-deny git/,
+      ),
+      reasonOf(push),
+    );
+    check(
+      "a session registered nowhere meets only A's rows",
+      passes(bash('nobody', 'make deploy')) &&
+        denied(bash('nobody', 'git push origin x'), /bash-deny git/),
+    );
+    check(
+      'Monitor follows Bash: B rows for the driving session, none for another',
+      denied(bash('z', 'make deploy', 'Monitor'), new RegExp(bName)) &&
+        passes(bash('nobody', 'make deploy', 'Monitor')),
+    );
+    // A registration whose run was released adds no rows.
+    const ptr = fs.readFileSync(
+      path.join(zoneB, '.amber', 'active.json'),
+      'utf8',
+    );
+    fs.rmSync(path.join(zoneB, '.amber', 'active.json'));
+    check(
+      'a released B adds no bash-deny rows and its paths pass as a zone without a contract',
+      passes(bash('z', 'make deploy')) &&
+        passes(write(home, zoneA, 'z', path.join(zoneB, 'docs', 'n.md'))),
+    );
+    fs.writeFileSync(path.join(zoneB, '.amber', 'active.json'), ptr);
+
+    // Subagents: the unit claimed in B bounds writes in B.
+    const claim = e1In(
+      home,
+      zoneB,
+      'z',
+      'Bash',
+      { command: 'node "' + RECORD_CLI + '" unit claim U1' },
+      'agent-b',
+    );
+    check(
+      "a subagent's claim made with hook cwd B lands in B's progress",
+      passes(claim) &&
+        get(progressOf(zoneB), 'units', 'U1', 'agent_id') === 'agent-b',
+      JSON.stringify([claim, get(progressOf(zoneB), 'units', 'U1')]),
+    );
+    const inUnit = write(
+      home,
+      zoneA,
+      'z',
+      path.join(zoneB, 'plugin', 'x.cjs'),
+      'agent-b',
+    );
+    const outUnit = write(
+      home,
+      zoneA,
+      'z',
+      path.join(zoneB, 'lib', 'x.cjs'),
+      'agent-b',
+    );
+    const unclaimed = write(
+      home,
+      zoneA,
+      'z',
+      path.join(zoneB, 'plugin', 'x.cjs'),
+      'agent-n',
+    );
+    check(
+      "a subagent that claimed U1 in B writes inside U1's scope in B from hook cwd A, not outside it",
+      passes(inUnit) &&
+        denied(
+          outUnit,
+          /blocked by unit U1 \(claimed by subagent agent-b\): write target lib\/x\.cjs is outside its scope \(plugin\/\*\*\)/,
+        ),
+      reasonOf(inUnit) + ' | ' + reasonOf(outUnit),
+    );
+    check(
+      'an unclaimed subagent writing in B is refused for not claiming a unit',
+      denied(unclaimed, /subagent agent-n has not claimed a unit/),
+      reasonOf(unclaimed),
+    );
+    check('no sensor failure across the A/B E1 calls', noCrash(home));
+  }
+
+  // Hook cwd A without a contract, session registered to B.
+  {
+    const { zoneA, zoneB, home, rec, realB } = linkE1('e1bare');
+    fs.rmSync(path.join(zoneA, '.amber', 'active.json'));
+    rec(zoneB, 'zb', ['unit', 'init', 'docs/plan.md']);
+    const bName = 'test-boundary\\.md \\(' + esc(realB) + '\\)';
+    const outB = write(home, zoneA, 'zb', path.join(zoneB, 'docs', 'n.md'));
+    check(
+      "with no contract in hook cwd A, B's targets are still judged by B's contract",
+      denied(
+        outB,
+        new RegExp(
+          '^amber: blocked by contract ' + bName + ': write target docs/n\\.md',
+        ),
+      ) &&
+        passes(write(home, zoneA, 'zb', path.join(zoneB, 'lib', 'x.cjs'))) &&
+        denied(
+          write(home, zoneA, 'zb', path.join(zoneB, '.amber', 'active.json')),
+          /not editable/,
+        ),
+      reasonOf(outB),
+    );
+    check(
+      'with no contract and no phase in A, a target in A passes',
+      passes(write(home, zoneA, 'zb', path.join(zoneA, 'secrets.txt'))),
+    );
+    const bash = (sessionId: string, command: string): HookRun =>
+      e1In(home, zoneA, sessionId, 'Bash', { command });
+    check(
+      "with no contract in A, B's bash-deny row still applies to the session driving B, and not to another",
+      denied(bash('zb', 'make deploy'), new RegExp(bName)) &&
+        passes(bash('other', 'make deploy')) &&
+        passes(bash('zb', 'git push origin x')),
+    );
+    runHook(
+      'S3',
+      {
+        session_id: 'zb',
+        cwd: zoneA,
+        hook_event_name: 'PreToolUse',
+        tool_name: 'Skill',
+        tool_input: { skill: 'amber:planning' },
+      },
+      home,
+    );
+    const gated = write(home, zoneA, 'zb', path.join(zoneA, 'src', 'x.cjs'));
+    check(
+      'with a phase open in A, the phase gate judges A targets and B keeps its own contract',
+      denied(
+        gated,
+        /planning phase open since .*: write target src\/x\.cjs is not a planning artifact/,
+      ) &&
+        passes(write(home, zoneA, 'zb', path.join(zoneB, 'lib', 'x.cjs'))) &&
+        denied(
+          write(home, zoneA, 'zb', path.join(zoneB, 'docs', 'n.md')),
+          new RegExp(bName),
+        ),
+      reasonOf(gated),
+    );
+    check('no sensor failure with a contract-less hook cwd', noCrash(home));
+  }
+
+  // amber:mark hold goes to the run the session drove last.
+  {
+    const { zoneA, zoneB, home, rec, realB } = linkE1('e1hold');
+    rec(zoneA, 'h', ['unit', 'init', 'docs/plan.md']);
+    rec(zoneA, 'h', ['unit', 'start', 'U1']);
+    rec(zoneB, 'h', ['unit', 'init', 'docs/plan.md']);
+    rec(zoneB, 'h', ['unit', 'start', 'U1']);
+    const mark = (sessionId: string, args: string): HookRun =>
+      runHook(
+        'S3',
+        {
+          session_id: sessionId,
+          cwd: zoneA,
+          hook_event_name: 'PreToolUse',
+          tool_name: 'Skill',
+          tool_input: { skill: 'amber:mark', args },
+        },
+        home,
+      );
+    const holdRows = (): unknown[] =>
+      ledger(home).filter((r) => get(r, 'trigger') === 'unit-hold');
+    const aBefore = amberFiles(zoneA);
+    const plain = mark('h', 'hold - U1 - some reason');
+    check(
+      "a mark hold from hook cwd A goes to B, the run the session drove last, and leaves A's progress untouched",
+      plain.exit === 0 &&
+        plain.out === null &&
+        at(progressOf(zoneB), 'hold', 'unit') === 'U1' &&
+        /some reason/.test(stringOf(at(progressOf(zoneB), 'hold', 'reason'))) &&
+        at(progressOf(zoneA), 'hold') == null &&
+        amberFiles(zoneA) === aBefore,
+      JSON.stringify([
+        at(progressOf(zoneB), 'hold'),
+        at(progressOf(zoneA), 'hold'),
+      ]),
+    );
+    check(
+      "the hold's ledger row names B's contract and B as its cwd",
+      holdRows().length === 1 &&
+        at(holdRows(), 0, 'contract') === 'test-boundary.md' &&
+        at(holdRows(), 0, 'cwd') === realB &&
+        at(holdRows(), 0, 'unit') === 'U1',
+      JSON.stringify(holdRows()),
+    );
+    mark('h', 'hold - U1 - external: job');
+    check(
+      'an external mark hold from hook cwd A lands in B with kind external',
+      at(progressOf(zoneB), 'hold', 'kind') === 'external' &&
+        /job/.test(stringOf(at(progressOf(zoneB), 'hold', 'reason'))) &&
+        at(progressOf(zoneA), 'hold') == null &&
+        at(holdRows(), 1, 'kind') === 'external',
+      JSON.stringify(at(progressOf(zoneB), 'hold')),
+    );
+    mark('stranger', 'hold - U1 - stranger reason');
+    check(
+      "a session with no registration holds in the hook cwd's run, as before",
+      /stranger reason/.test(
+        stringOf(at(progressOf(zoneA), 'hold', 'reason')),
+      ) && at(holdRows(), 2, 'cwd') === zoneA,
+      JSON.stringify([at(progressOf(zoneA), 'hold'), at(holdRows(), 2)]),
+    );
+    // The recorder's mark hold (Codex, pi) stays with its directory's run.
+    const recorderHold = (
+      cwd: string,
+      reason: string,
+    ): SpawnSyncReturns<string> =>
+      spawnSync('node', [RECORD_CLI, 'mark', 'hold', 'U1', reason], {
+        cwd,
+        encoding: 'utf8',
+        timeout: 10000,
+        env: {
+          ...process.env,
+          AMBER_HOME: home,
+          AMBER_SESSION_ID: '',
+          CLAUDE_CODE_SESSION_ID: '',
+          PI_SESSION_ID: '',
+          CODEX_THREAD_ID: 'h',
+        },
+      });
+    const recA = recorderHold(zoneA, 'recorder in A');
+    check(
+      "the recorder's mark hold (Codex, pi) goes to the run of the directory it runs in, not the run driven last",
+      recA.status === 0 &&
+        /recorder in A/.test(
+          stringOf(at(progressOf(zoneA), 'hold', 'reason')),
+        ) &&
+        !/recorder in A/.test(
+          stringOf(at(progressOf(zoneB), 'hold', 'reason')),
+        ),
+      recA.stderr,
+    );
+    // B released: the newest registration that still holds its run is A.
+    const ptrB = path.join(zoneB, '.amber', 'active.json');
+    const ptr = fs.readFileSync(ptrB, 'utf8');
+    fs.rmSync(ptrB);
+    mark('h', 'hold - U1 - after B released');
+    check(
+      'once B is released, a mark hold goes to the next run the session drives (A)',
+      /after B released/.test(
+        stringOf(at(progressOf(zoneA), 'hold', 'reason')),
+      ) &&
+        !/after B released/.test(
+          stringOf(at(progressOf(zoneB), 'hold', 'reason')),
+        ),
+      JSON.stringify([
+        at(progressOf(zoneA), 'hold'),
+        at(progressOf(zoneB), 'hold'),
+      ]),
+    );
+    fs.writeFileSync(ptrB, ptr);
+  }
+
+  // A registered zone whose worktree was removed: E1 and S3 pass over it.
+  {
+    const { zoneA, zoneB, home, rec } = linkE1('e1gone');
+    rec(zoneA, 'gz', ['unit', 'init', 'docs/plan.md']);
+    rec(zoneA, 'gz', ['unit', 'start', 'U1']);
+    rec(zoneB, 'gz', ['unit', 'init', 'docs/plan.md']);
+    execFileSync('git', ['-C', zoneA, 'worktree', 'remove', '--force', zoneB]);
+    const bash = e1In(home, zoneA, 'gz', 'Bash', { command: 'make deploy' });
+    const gone = write(home, zoneA, 'gz', path.join(zoneB, 'lib', 'x.cjs'));
+    const hold = runHook(
+      'S3',
+      {
+        session_id: 'gz',
+        cwd: zoneA,
+        hook_event_name: 'PreToolUse',
+        tool_name: 'Skill',
+        tool_input: { skill: 'amber:mark', args: 'hold - U1 - after removal' },
+      },
+      home,
+    );
+    check(
+      'a removed B worktree: E1 Bash and Write and the S3 hold run without error and fall back to A',
+      passes(bash) &&
+        denied(
+          gone,
+          /^amber: blocked by contract test-boundary\.md: write target \.\./,
+        ) &&
+        hold.exit === 0 &&
+        /after removal/.test(
+          stringOf(at(progressOf(zoneA), 'hold', 'reason')),
+        ) &&
+        noCrash(home),
+      JSON.stringify([bash, gone, hold]),
+    );
+  }
 }
 
 // ---- worktree zone: a linked worktree outside the zone is its own zone, with or without a pointer ----
@@ -2510,12 +4223,12 @@ const sessionState = (home: string, sessionId: string): unknown => {
       ),
     ctxSide,
   );
-  const sideNoContract = done(side, home, [
-    '--review',
-    'r',
-    '--summary',
-    'sibling no-contract done',
-  ]);
+  const sideNoContract = done(
+    side,
+    home,
+    ['--review', 'r', '--summary', 'sibling no-contract done'],
+    { AMBER_SESSION_ID: 'wt0' },
+  );
   check(
     'done in a sibling worktree without a pointer signals in that worktree',
     sideNoContract.status === 0 &&
@@ -2589,14 +4302,12 @@ const sessionState = (home: string, sessionId: string): unknown => {
       /side rule/.test(stringOf(ctx)),
   );
   register(side, home, 'wt');
-  const sideDone = done(side, home, [
-    '--review',
-    'r',
-    '--goal',
-    'g',
-    '--summary',
-    'side done',
-  ]);
+  const sideDone = done(
+    side,
+    home,
+    ['--review', 'r', '--goal', 'g', '--summary', 'side done'],
+    { AMBER_SESSION_ID: 'wt' },
+  );
   check(
     'done in the side zone signals the side contract',
     sideDone.status === 0 &&
@@ -2637,7 +4348,7 @@ const sessionState = (home: string, sessionId: string): unknown => {
     }),
   );
   register(zone, home, 'mn');
-  done(zone, home, OK_DONE);
+  done(zone, home, OK_DONE, { AMBER_SESSION_ID: 'mn' });
   const mainPass = runHook(
     'S2',
     {
@@ -4278,7 +5989,7 @@ const sessionState = (home: string, sessionId: string): unknown => {
       units: {},
     }),
   );
-  const ok = done(released, home, OK_DONE);
+  const ok = done(released, home, OK_DONE, { AMBER_SESSION_ID: 'ph-r' });
   const before = ledger(home).length;
   const pass = runHook(
     'S2',

@@ -24,7 +24,7 @@ const DIRECT_HOME = path.join(BASE, 'direct-home');
 process.env['AMBER_HOME'] = DIRECT_HOME;
 const amberHook = loadModule<typeof import('../src/hooks/amber-hook.cjs')>(
   'hooks/amber-hook.cjs',
-  ['driverOfRun', 'recordUnitEvent'],
+  ['recordUnitEvent'],
 );
 after(() => {
   fs.rmSync(BASE, { recursive: true, force: true });
@@ -486,7 +486,7 @@ test('E1 without a cwd resolves the zone and relative targets from the process d
   );
 });
 
-test('a unit command without a session id registers the session unknown', () => {
+test('E1 lets a unit command through without registering a session', () => {
   const f = fixture();
   writeProgress(
     f,
@@ -505,12 +505,12 @@ test('a unit command without a session id registers the session unknown', () => 
     null,
   );
   assert.equal(
-    get(readJson(path.join(f.home, 'state', 'session-unknown.json')), 'run'),
-    'boundary.md',
+    fs.existsSync(path.join(f.home, 'state', 'session-unknown.json')),
+    false,
   );
-  assert.deepEqual(
+  assert.equal(
     get(readJson(path.join(f.root, '.amber', 'progress.json')), 'session_ids'),
-    ['unknown'],
+    'not-an-array',
   );
 });
 
@@ -933,27 +933,6 @@ test('a crash that cannot be recorded stays silent', () => {
 });
 
 // ---- the functions record.cjs imports ----
-
-test('driverOfRun picks the newest registered session and skips what it cannot read', () => {
-  const state = path.join(DIRECT_HOME, 'state');
-  fs.mkdirSync(state, { recursive: true });
-  assert.equal(amberHook.driverOfRun(null), null);
-  fs.writeFileSync(path.join(state, 'loop-x.json'), '{}');
-  fs.writeFileSync(path.join(state, 'session-bad.json'), '{bad');
-  fs.writeFileSync(
-    path.join(state, 'session-a.json'),
-    JSON.stringify({ run: 'b.md' }),
-  );
-  fs.writeFileSync(
-    path.join(state, 'session-other.json'),
-    JSON.stringify({ run: 'c.md', model: 'm' }),
-  );
-  const best = amberHook.driverOfRun('b.md');
-  assert.deepEqual(
-    [get(best, 'sessionId'), get(best, 'model'), typeof get(best, 'mtime')],
-    ['a', null, 'number'],
-  );
-});
 
 test('recordUnitEvent without fields writes a bare unit row', () => {
   const f = fixture({ contract: false });
