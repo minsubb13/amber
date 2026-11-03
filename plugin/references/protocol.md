@@ -59,7 +59,9 @@ When a run uses a plan file, every unit transition from `unit init` on goes thro
   is satisfied, whose scopes do not overlap another ready unit's, and which share
   nothing outside the tree (ports, databases, GPUs, global ledger) run in parallel
   worktrees ([host integration](hosts.md), "Parallel unit worktrees"); if any of
-  the three is unclear, run serially. Pass each subagent only the contract excerpt,
+  the three is unclear, run serially. A run in a sibling worktree the session
+  changed into runs serially ([host integration](hosts.md), "Parallel work in a
+  sibling worktree"). Pass each subagent only the contract excerpt,
   its unit row, and its oracle; its first action is
   `node "<amber_plugin_root>/scripts/record.cjs" unit claim U<n>`.
 - **Verify and merge in main agent.** Whichever worker did the unit, the main

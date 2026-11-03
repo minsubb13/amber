@@ -89,6 +89,33 @@ function registerDriver(
 }
 
 /** Whether `file` names a regular file (a symbolic link to one included). */
+/**
+ * Refuses a run command from inside a nested repository the zone encloses
+ * (its dist/, or a linked worktree of it), or from a tree the zone's worktree
+ * list could not confirm: the scope check would measure that repository
+ * instead of the zone's, so the command names the zone root to run it from
+ * and writes nothing.
+ */
+function refuseNestedCwd(command: string, cwd: string): void {
+  const root = zone.zoneRoot(cwd);
+  const nested = zone.nestedTree(cwd, root);
+  if (!nested) return;
+  throw new Error(
+    command +
+      ' refused: ' +
+      cwd +
+      ' lies in ' +
+      nested +
+      ', which the zone repository does not list as one of its worktrees' +
+      ' (a nested repository, or the list could not be read) and which' +
+      ' follows the zone ' +
+      root +
+      '; run it from the zone root (cd ' +
+      JSON.stringify(root) +
+      ' && ...)',
+  );
+}
+
 function isRegularFile(file: string): boolean {
   try {
     return fs.statSync(file).isFile();
@@ -117,6 +144,7 @@ function activateCommand(
     throw new Error('--at needs a date like YYYY-MM-DD, got ' + at);
   }
   const cwd = process.cwd();
+  refuseNestedCwd('activate', cwd);
   const root = zone.zoneRoot(cwd);
   const pointerPath = path.join(root, '.amber', 'active.json');
   if (fs.existsSync(pointerPath)) {
@@ -186,6 +214,7 @@ function unitCommand(name: string | undefined, rest: readonly string[]): void {
   const sessionId =
     command === 'claim' ? '' : requireSessionId('unit ' + command);
   const cwd = process.cwd();
+  refuseNestedCwd('unit ' + command, cwd);
   const info = contracts.contractInfo(cwd);
   if (info.broken) {
     throw new Error(
@@ -419,6 +448,7 @@ function unitCommand(name: string | undefined, rest: readonly string[]): void {
 function doneCommand(rest: readonly string[]): void {
   const sessionId = requireSessionId('done');
   const cwd = process.cwd();
+  refuseNestedCwd('done', cwd);
   const info = contracts.contractInfo(cwd);
   if (info.broken) {
     throw new Error(

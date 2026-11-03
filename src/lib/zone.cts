@@ -51,7 +51,10 @@ function insideZone(root: string, dir: string): boolean {
  * progress file - both gitignored, hence absent from the worktree - are
  * found there. A linked worktree outside the zone directory is its own zone
  * even without a pointer: it starts without a contract and gets one of its
- * own through planning, set, and approval run there.
+ * own through planning, set, and approval run there. A tree without a pointer
+ * that lies inside the directory of a zone with one - a nested repository
+ * such as the zone's dist/, or a linked worktree of it - follows that zone
+ * (enclosingZone).
  */
 function zoneRoot(cwd: string | null | undefined): string {
   return gitZoneRoot(cwd) ?? path.resolve(cwd || '.');
@@ -59,6 +62,37 @@ function zoneRoot(cwd: string | null | undefined): string {
 
 /** zoneRoot as git answers it, or null outside any repository. */
 function gitZoneRoot(cwd: string | null | undefined): string | null {
+  const own = repositoryZone(cwd);
+  if (own === null || hasPointer(own)) return own;
+  return enclosingZone(own) ?? own;
+}
+
+function hasPointer(dir: string): boolean {
+  return fs.existsSync(path.join(dir, '.amber', 'active.json'));
+}
+
+/**
+ * The nearest directory above `dir` that holds an active pointer and is the
+ * toplevel of a git tree, or null. Only the file system is asked until a
+ * pointer turns up, so a tree with no run above it costs no git query. A
+ * zone without an active run binds nothing below it: a home directory kept
+ * in git does not swallow every repository under it.
+ */
+function enclosingZone(dir: string): string | null {
+  let cur = path.dirname(path.resolve(dir));
+  for (;;) {
+    if (hasPointer(cur)) {
+      const top = gitQuery(cur, ['rev-parse', '--show-toplevel']);
+      if (top && path.resolve(top) === cur) return cur;
+    }
+    const up = path.dirname(cur);
+    if (up === cur) return null;
+    cur = up;
+  }
+}
+
+/** The zone of cwd's own repository, before any enclosing zone is asked. */
+function repositoryZone(cwd: string | null | undefined): string | null {
   const top = gitQuery(cwd, ['rev-parse', '--show-toplevel']);
   if (top && fs.existsSync(path.join(top, '.amber', 'active.json'))) return top;
   const common = gitQuery(cwd, [
@@ -90,15 +124,36 @@ function worktreeTop(cwd: string | null | undefined): string | null {
  * list (`git worktree list --porcelain -z`, or null). A target inside a
  * linked worktree of the zone maps to the same relative path in the zone,
  * so contract and unit scopes apply unchanged wherever the write physically
- * lands.
+ * lands. A toplevel the zone's repository does not list - a nested
+ * repository the zone encloses - is part of the zone's tree, so its targets
+ * keep their path from the zone root (dist/plugin/x). Without the list (a
+ * git failure) a target inside a toplevel other than the root cannot be
+ * mapped: whether it is a unit worktree (mapped from its toplevel, so its
+ * .amber/ and contract copy stay protected) or a nested repository (mapped
+ * from the root) is unknown, so the answer is null and E1 refuses the write.
  */
 function relativeTo(
   root: string,
   abs: string,
   top: string | null,
   worktrees: string | null,
-): string {
-  let base = top && top !== root && abs.startsWith(top + path.sep) ? top : root;
+): string | null {
+  if (
+    worktrees === null &&
+    top &&
+    path.resolve(top) !== path.resolve(root) &&
+    abs.startsWith(top + path.sep)
+  ) {
+    return null;
+  }
+  let base =
+    top &&
+    top !== root &&
+    abs.startsWith(top + path.sep) &&
+    worktrees !== null &&
+    listsWorktree(worktrees, top)
+      ? top
+      : root;
   // Codex children inherit the session cwd. A shell tool can override its
   // workdir, but apply_patch still reports the inherited cwd and absolute
   // worktree targets. Map only git-registered worktrees of this repository,
@@ -116,16 +171,61 @@ function relativeTo(
   return path.relative(base, abs).split(path.sep).join('/');
 }
 
+/** Whether a porcelain -z worktree list names `dir`. */
+function listsWorktree(worktrees: string, dir: string): boolean {
+  const want = path.resolve(dir);
+  return worktrees
+    .split('\0')
+    .some(
+      (row) =>
+        row.startsWith('worktree ') &&
+        path.resolve(row.slice('worktree '.length)) === want,
+    );
+}
+
+/**
+ * When cwd lies in a tree that zoneRoot binds to the enclosing zone root -
+ * a nested repository or a linked worktree of one, with no pointer of its
+ * own - that tree's toplevel; otherwise null (the zone root itself, a
+ * subdirectory of it, or a unit worktree the zone's repository lists). The
+ * recorder refuses there: the scope check measures the zone repository's
+ * tree, not the nested one.
+ */
+function nestedTree(
+  cwd: string | null | undefined,
+  root: string,
+): string | null {
+  const top = worktreeTop(cwd);
+  if (!top || path.resolve(top) === path.resolve(root)) return null;
+  return nestedTreeOf(top, root, worktreeList(root));
+}
+
+/**
+ * nestedTree from its two git answers. A toplevel other than the root counts
+ * as nested unless the zone's worktree list names it; without the list (a
+ * git failure) it cannot be confirmed as the zone's own worktree, so it
+ * counts as nested and the recorder refuses rather than guess.
+ */
+function nestedTreeOf(
+  top: string | null,
+  root: string,
+  worktrees: string | null,
+): string | null {
+  if (!top || path.resolve(top) === path.resolve(root)) return null;
+  if (worktrees !== null && listsWorktree(worktrees, top)) return null;
+  return top;
+}
+
 function worktreeList(root: string): string | null {
   return gitQuery(root, ['worktree', 'list', '--porcelain', '-z']);
 }
 
-/** Zone-relative path of one write target: two git queries. */
+/** Zone-relative path of one write target (null: unmappable): two git queries. */
 function zoneRelative(
   root: string,
   cwd: string | null | undefined,
   abs: string,
-): string {
+): string | null {
   return relativeTo(root, abs, worktreeTop(cwd), worktreeList(root));
 }
 
@@ -133,13 +233,14 @@ function zoneRelative(
  * Zone-relative paths of every write target of one tool call, each paired
  * with its absolute path, from the two git queries made once instead of
  * once per target: a patch touching n files costs two queries, not 2n (one
- * when cwd is the zone root). No target, no query.
+ * when cwd is the zone root). No target, no query. A null rel is a target
+ * relativeTo could not map.
  */
 function zoneRelativeAll(
   root: string,
   cwd: string | null | undefined,
   absList: readonly string[],
-): { abs: string; rel: string }[] {
+): { abs: string; rel: string | null }[] {
   if (absList.length === 0) return [];
   // A cwd at the zone root is its own toplevel: no query.
   const top =
@@ -182,6 +283,8 @@ function linkedWorktreeMain(cwd: string | null | undefined): string | null {
   if (path.resolve(top) === path.resolve(main) || insideZone(main, top)) {
     return null;
   }
+  // A worktree an enclosing zone binds is part of that zone, not one of its own.
+  if (!hasPointer(top) && enclosingZone(top) !== null) return null;
   return main;
 }
 
@@ -193,6 +296,9 @@ export = {
   insideZone,
   zoneRoot,
   gitZoneRoot,
+  nestedTree,
+  nestedTreeOf,
+  relativeTo,
   worktreeTop,
   zoneRelative,
   zoneRelativeAll,

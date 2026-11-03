@@ -19,8 +19,9 @@ plan, and approval report, creating `.amber/active.json` on approval).
   premises and design judgment before freezing a boundary. Mechanical blocks
   bind the model; senior pushback to the operator is **advisory** (non-coercive).
 - One run per zone. If an active run here is not driven by this session, state
-  that first and offer: open an independent zone via
-  `git worktree add ../<slug> -b <slug>` or wait for the run to close. Never
+  that first and offer: open an independent zone in a sibling worktree that the
+  operator creates from a terminal and opens as a working directory
+  (`hosts.md`, "Parallel work in a sibling worktree") or wait for the run to close. Never
   prepare a second contract in an active tree or run `unit` commands unless
   taking it over (`hosts.md`).
 - Every question must cite evidence (`file:line`, command output, git history).
