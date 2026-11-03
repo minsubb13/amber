@@ -6441,3 +6441,280 @@ const amberFiles = (zone: string): string =>
     isDeny(write(path.join(zone, 'src', 'a.ts'))),
   );
 }
+
+// ---- nested repositories follow the enclosing zone ----
+// Zone Z (a contract) holds an independent repository dist/ and a linked
+// worktree of it, dist-wt/; zone W, a linked worktree of Z outside it with
+// its own pointer, holds dist/ as another linked worktree of Z's dist; zone
+// F has no pointer and holds its own dist/.
+const NESTED_BOUNDARY = [
+  '# boundary - nested repositories',
+  '- dist sources [machine: write-scope dist/src/**]',
+  '- dist worktree sources [machine: write-scope dist-wt/src/**]',
+  '- docs [machine: write-scope docs/*.md]',
+  '- no push [machine: bash-deny git\\s+push\\b]',
+].join('\n');
+const NESTED_POINTER = {
+  v: 1,
+  boundary: 'test-boundary.md',
+  ratified_by: 'operator',
+  ratified_at: '2026-11-03',
+};
+interface NestedSet {
+  readonly z: string;
+  readonly zDist: string;
+  readonly zDistWt: string;
+  readonly w: string;
+  readonly wDist: string;
+  readonly f: string;
+  readonly fDist: string;
+  readonly home: string;
+  readonly rec: (
+    cwd: string,
+    args: readonly string[],
+  ) => SpawnSyncReturns<string>;
+}
+function gitIn(dir: string, args: readonly string[]): void {
+  execFileSync('git', ['-C', dir, ...args]);
+}
+function commitAll(dir: string): void {
+  gitIn(dir, ['config', 'user.email', 't@t']);
+  gitIn(dir, ['config', 'user.name', 't']);
+  gitIn(dir, ['add', '-A']);
+  gitIn(dir, ['commit', '-q', '--allow-empty', '-m', 'init']);
+}
+function nestedSet(tag: string): NestedSet {
+  const z = fs.realpathSync(makeZone(tag + '-z', NESTED_BOUNDARY, null));
+  fs.mkdirSync(path.join(z, 'docs'), { recursive: true });
+  fs.writeFileSync(path.join(z, 'docs', 'plan.md'), LINK_PLAN);
+  fs.writeFileSync(path.join(z, '.gitignore'), '.amber/\ndist/\ndist-wt/\n');
+  commitAll(z);
+  const zDist = path.join(z, 'dist');
+  fs.mkdirSync(zDist);
+  gitIn(zDist, ['init', '-q']);
+  commitAll(zDist);
+  const zDistWt = path.join(z, 'dist-wt');
+  gitIn(zDist, ['worktree', 'add', '-q', '-b', tag + '-dwt', zDistWt]);
+  const w = path.join(fs.realpathSync(BASE), tag + '-w');
+  gitIn(z, ['worktree', 'add', '-q', '-b', tag + '-w', w]);
+  const wDist = path.join(w, 'dist');
+  gitIn(zDist, ['worktree', 'add', '-q', '-b', tag + '-wd', wDist]);
+  for (const zone of [z, w]) {
+    fs.mkdirSync(path.join(zone, '.amber'), { recursive: true });
+    fs.writeFileSync(
+      path.join(zone, '.amber', 'active.json'),
+      JSON.stringify(NESTED_POINTER),
+    );
+  }
+  const f = fs.realpathSync(makeZone(tag + '-f', NESTED_BOUNDARY, null));
+  const fDist = path.join(f, 'dist');
+  fs.mkdirSync(fDist);
+  gitIn(fDist, ['init', '-q']);
+  const home = freshHome(tag);
+  const rec = (
+    cwd: string,
+    args: readonly string[],
+  ): SpawnSyncReturns<string> =>
+    spawnSync('node', [RECORD_CLI, ...args], {
+      cwd,
+      encoding: 'utf8',
+      timeout: 10000,
+      env: {
+        ...process.env,
+        AMBER_HOME: home,
+        AMBER_SESSION_ID: 'nested-s',
+      },
+    });
+  return { z, zDist, zDistWt, w, wDist, f, fDist, home, rec };
+}
+const reasonOf = (out: unknown): string =>
+  stringAt(out, 'hookSpecificOutput', 'permissionDecisionReason');
+{
+  const zoneLib = loadModule<typeof import('../src/lib/zone.cjs')>(
+    'lib/zone.cjs',
+    ['zoneRoot', 'nestedTree', 'linkedWorktreeMain'],
+  );
+  const n = nestedSet('nest');
+  fs.mkdirSync(path.join(n.zDist, 'sub'));
+  check(
+    'a nested repository and its linked worktrees resolve to the enclosing zone with a pointer',
+    zoneLib.zoneRoot(n.zDist) === n.z &&
+      zoneLib.zoneRoot(path.join(n.zDist, 'sub')) === n.z &&
+      zoneLib.zoneRoot(n.zDistWt) === n.z &&
+      zoneLib.zoneRoot(n.wDist) === n.w,
+    [n.zDist, n.zDistWt, n.wDist].map((d) => zoneLib.zoneRoot(d)),
+  );
+  check(
+    'a nested repository under a zone without a pointer stays a zone of its own',
+    zoneLib.zoneRoot(n.fDist) === n.fDist && zoneLib.zoneRoot(n.f) === n.f,
+    [zoneLib.zoneRoot(n.fDist), zoneLib.zoneRoot(n.f)],
+  );
+  check(
+    'nestedTree names the nested toplevel and nothing else',
+    zoneLib.nestedTree(n.zDistWt, n.z) === n.zDistWt &&
+      zoneLib.nestedTree(n.wDist, n.w) === n.wDist &&
+      zoneLib.nestedTree(n.z, n.z) === null &&
+      zoneLib.nestedTree(path.join(n.z, 'docs'), n.z) === null &&
+      zoneLib.nestedTree(n.w, n.w) === null,
+  );
+  check(
+    'a linked worktree an enclosing zone binds is not briefed as a zone of its own',
+    zoneLib.linkedWorktreeMain(n.wDist) === null &&
+      zoneLib.linkedWorktreeMain(n.zDistWt) === null &&
+      zoneLib.linkedWorktreeMain(n.w) === n.z,
+  );
+
+  const outside = e1(
+    n.zDist,
+    'Write',
+    { file_path: path.join(n.zDist, 'other.txt') },
+    n.home,
+  );
+  check(
+    'from inside dist/ a write outside the scope is refused by its zone-root path',
+    isDeny(outside) &&
+      /write target dist\/other\.txt is outside every write-scope/.test(
+        reasonOf(outside),
+      ),
+    JSON.stringify(outside),
+  );
+  check(
+    'from inside dist/ a write inside the scope passes',
+    e1(
+      n.zDist,
+      'Write',
+      { file_path: path.join(n.zDist, 'src', 'a.ts') },
+      n.home,
+    ) === null,
+  );
+  const wtOut = e1(
+    n.zDistWt,
+    'Write',
+    { file_path: path.join(n.zDistWt, 'other.txt') },
+    n.home,
+  );
+  check(
+    'from inside a linked worktree of dist/ the zone judges dist-wt/ paths',
+    isDeny(wtOut) &&
+      /write target dist-wt\/other\.txt is outside/.test(reasonOf(wtOut)) &&
+      e1(
+        n.zDistWt,
+        'Write',
+        { file_path: path.join(n.zDistWt, 'src', 'a.ts') },
+        n.home,
+      ) === null,
+    JSON.stringify(wtOut),
+  );
+  const wOut = e1(
+    n.wDist,
+    'Write',
+    { file_path: path.join(n.wDist, 'other.txt') },
+    n.home,
+  );
+  check(
+    'from inside the sibling zone dist/ the sibling zone contract judges',
+    isDeny(wOut) &&
+      /write target dist\/other\.txt is outside/.test(reasonOf(wOut)) &&
+      e1(
+        n.wDist,
+        'Write',
+        { file_path: path.join(n.wDist, 'src', 'a.ts') },
+        n.home,
+      ) === null,
+    JSON.stringify(wOut),
+  );
+  check(
+    'the enclosing zone bash-deny applies from inside dist/ and its worktrees',
+    isDeny(e1(n.zDist, 'Bash', { command: 'git push origin x' }, n.home)) &&
+      isDeny(e1(n.zDistWt, 'Bash', { command: 'git push' }, n.home)) &&
+      isDeny(e1(n.wDist, 'Bash', { command: 'git push' }, n.home)) &&
+      e1(n.zDist, 'Bash', { command: 'git status' }, n.home) === null,
+  );
+  check(
+    'a nested repository under a zone without a pointer is not governed',
+    e1(
+      n.fDist,
+      'Write',
+      { file_path: path.join(n.fDist, 'other.txt') },
+      n.home,
+    ) === null && e1(n.fDist, 'Bash', { command: 'git push' }, n.home) === null,
+  );
+
+  const before = amberFiles(n.z);
+  const initNested = n.rec(n.zDist, ['unit', 'init', 'docs/plan.md']);
+  const doneNested = n.rec(n.zDistWt, [
+    'done',
+    '--review',
+    'r',
+    '--goal',
+    'g',
+    '--summary',
+    's',
+  ]);
+  const activateNested = n.rec(n.wDist, [
+    'activate',
+    'test-boundary.md',
+    '--by',
+    'operator',
+  ]);
+  check(
+    'the recorder refuses unit, done and activate from inside a nested repository and names the zone root',
+    initNested.status === 1 &&
+      doneNested.status === 1 &&
+      activateNested.status === 1 &&
+      initNested.stderr.includes('refused') &&
+      initNested.stderr.includes(JSON.stringify(n.z)) &&
+      activateNested.stderr.includes(JSON.stringify(n.w)) &&
+      amberFiles(n.z) === before &&
+      !signalExists(n.z),
+    [initNested.stderr, doneNested.stderr, activateNested.stderr],
+  );
+  check(
+    'the same unit command from the zone root still runs',
+    n.rec(n.z, ['unit', 'init', 'docs/plan.md']).status === 0,
+  );
+}
+{
+  const n = nestedSet('nest-stop');
+  const signal = done(n.z, n.home, [
+    '--review',
+    'r',
+    '--goal',
+    'g',
+    '--summary',
+    's',
+  ]);
+  const stop = runHook('S2', stopEvent(n.zDist, 'Done: nested stop.'), n.home);
+  check(
+    'a stop from inside dist/ consumes the enclosing zone signal and releases its contract',
+    signal.status === 0 &&
+      stop.exit === 0 &&
+      !signalExists(n.z) &&
+      !fs.existsSync(path.join(n.z, '.amber', 'active.json')) &&
+      fs.existsSync(path.join(n.w, '.amber', 'active.json')),
+    [signal.stderr, JSON.stringify(stop.out)],
+  );
+}
+{
+  const n = nestedSet('nest-unit');
+  const unit = path.join(n.z, '.claude', 'worktrees', 'u1');
+  gitIn(n.z, ['worktree', 'add', '-q', '-b', 'nest-unit-u1', unit]);
+  const out = e1(
+    unit,
+    'Write',
+    { file_path: path.join(unit, 'other.txt') },
+    n.home,
+  );
+  check(
+    'a unit worktree inside the zone keeps mapping to the zone-relative path',
+    isDeny(out) &&
+      /write target other\.txt is outside/.test(reasonOf(out)) &&
+      e1(
+        unit,
+        'Write',
+        { file_path: path.join(unit, 'docs', 'x.md') },
+        n.home,
+      ) === null,
+    JSON.stringify(out),
+  );
+}
