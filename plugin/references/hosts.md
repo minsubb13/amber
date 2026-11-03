@@ -126,7 +126,8 @@ session had started there. A directory added mid-session with `/add-dir`, or
 created after the session started, does not keep a `cd` (measured on Claude
 Code 2.1.317); reopen the session with `claude --continue --add-dir <worktree>`.
 A reopened session starts in its launch directory again, so it changes
-directory before its first command there.
+directory before its first command there. The whole procedure is in
+`## Parallel work in a sibling worktree` below.
 
 **Post-hoc scope check (both hosts):** `unit verified` and `done` compare the
 files changed since the run began against the contract's `write-scope` rows.
@@ -189,6 +190,51 @@ calls are read from `CommandExecution` events and direct shell calls. Missing or
 ambiguous outcomes and rollouts lacking `stop_hook_summary` are reported as
 `unknown`, never zero. pi sessions (`~/.pi/agent/sessions`) are not read yet:
 pi rows report `transcript=no`, which is unavailable evidence, not zero events.
+
+## Parallel work in a sibling worktree
+
+To work on something else while a run holds a zone, give the new work a linked
+worktree beside the zone and a run of its own there. Measured on Claude Code
+2.1.317 (Codex and pi not measured):
+
+1. **Create it from a terminal**, not from a session in the zone:
+   `git -C <zone> worktree add ../<zone>-<slug> -b <slug>`. The zone's contract
+   may forbid worktree commands, and the session has to start after the
+   directory exists anyway.
+2. **Open the session with the worktree as a working directory:** from the
+   zone, `claude --add-dir ../<zone>-<slug>` (or list it in
+   `permissions.additionalDirectories`); an open session adds it by reopening
+   with `claude --continue --add-dir ../<zone>-<slug>`. A directory added with
+   `/add-dir` mid-session, or created after the session started, does not keep
+   a `cd`.
+3. **Change directory into the worktree** as the session's first command, and
+   again after any reopen (a reopened session starts in its launch directory).
+   From then on the hooks see the worktree as their `cwd`: planning, approval,
+   unit and done commands and every check belong to the worktree's zone, and
+   the zone's own run is neither touched nor kept waiting.
+4. **Run units serially.** Claude Code places an isolated subagent worktree
+   under the launch directory's `.claude/worktrees/` even after the `cd`, which
+   binds the subagent to the starting zone's run and holds that run's
+   completion until the subagent worktree is removed.
+5. **Finish in the worktree, then return.** The completion signal runs there as
+   usual; afterwards change directory back to the zone. Remove the worktree from
+   a terminal: first any linked worktree nested in it (for example a `dist/`
+   worktree: `git -C <zone>/dist worktree remove <worktree>/dist`), because
+   removing the outer worktree first deletes the nested one, uncommitted files
+   included, without a warning; then `git -C <zone> worktree remove
+   ../<zone>-<slug>`. Keep the worktree while a pull request from it is open.
+   Merge its branch into the zone after the zone's own run has ended: merged
+   files would otherwise count as out-of-scope changes of that run.
+
+Rules follow the directory a command runs in. Known limit: a shell command run
+from the worktree meets only the `bash-deny` rows of the worktree's run and the
+runs the session drives, not the starting zone's, even when it acts on the
+starting zone's repository; file-tool writes into the starting zone are still
+judged by its contract. A nested repository inside a zone (its `dist/`, or a
+linked worktree of it placed inside the zone or the sibling) follows the
+enclosing zone while that zone has an active pointer: run record commands from
+the zone root, since the recorder refuses inside the nested tree and names the
+root.
 
 ## Completion signal (both hosts)
 
