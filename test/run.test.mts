@@ -6651,13 +6651,17 @@ const reasonOf = (out: unknown): string =>
   const unitTop = path.join(n.z, '.claude', 'worktrees', 'u0');
   const listing = ['worktree ' + n.z, 'worktree ' + unitTop, ''].join('\0');
   check(
-    'without the worktree list a nested target keeps its zone-root path',
+    'without the worktree list a target inside another toplevel is not mapped',
     zoneLib.relativeTo(
       n.z,
       path.join(n.zDist, 'src', 'a.ts'),
       n.zDist,
       null,
-    ) === 'dist/src/a.ts' &&
+    ) === null &&
+      zoneLib.relativeTo(n.z, path.join(n.z, 'docs', 'a.md'), n.z, null) ===
+        'docs/a.md' &&
+      zoneLib.relativeTo(n.z, path.join(n.z, 'docs', 'a.md'), n.zDist, null) ===
+        'docs/a.md' &&
       zoneLib.relativeTo(
         n.z,
         path.join(n.zDist, 'src', 'a.ts'),
@@ -6667,7 +6671,7 @@ const reasonOf = (out: unknown): string =>
       zoneLib.relativeTo(n.z, path.join(unitTop, 'x.md'), unitTop, listing) ===
         'x.md' &&
       zoneLib.relativeTo(n.z, path.join(unitTop, 'x.md'), unitTop, null) ===
-        '.claude/worktrees/u0/x.md',
+        null,
   );
   check(
     'without the worktree list the recorder cannot confirm a tree and counts it nested',
@@ -6803,5 +6807,80 @@ for (const [tag, pick] of [
         n.home,
       ) === null,
     JSON.stringify(out),
+  );
+}
+// A git that answers everything but `worktree list`, for the hook only: the
+// list query fails while the toplevel and zone lookups still work.
+{
+  const n = nestedSet('nest-nolist');
+  fs.writeFileSync(
+    path.join(n.z, 'test-boundary.md'),
+    '- everything [machine: write-scope **]\n',
+  );
+  const unit = path.join(n.z, '.claude', 'worktrees', 'u1');
+  gitIn(n.z, ['worktree', 'add', '-q', '-b', 'nest-nolist-u1', unit]);
+  const realGit = execFileSync('sh', ['-c', 'command -v git'], {
+    encoding: 'utf8',
+  }).trim();
+  const shimDir = path.join(BASE, 'nest-nolist-gitshim');
+  fs.mkdirSync(shimDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(shimDir, 'git'),
+    [
+      '#!/bin/sh',
+      'case " $* " in *" worktree list "*) exit 128 ;; esac',
+      'exec ' + JSON.stringify(realGit) + ' "$@"',
+      '',
+    ].join('\n'),
+    { mode: 0o755 },
+  );
+  const write = (cwd: string, target: string, broken: boolean): unknown =>
+    spawnSyncHook(cwd, target, broken);
+  function spawnSyncHook(
+    cwd: string,
+    target: string,
+    broken: boolean,
+  ): unknown {
+    const res = spawnSync('node', [HOOK, 'E1'], {
+      input: JSON.stringify({
+        session_id: 'nolist',
+        cwd,
+        hook_event_name: 'PreToolUse',
+        tool_name: 'Write',
+        tool_input: { file_path: target, content: 'x' },
+      }),
+      env: {
+        ...process.env,
+        AMBER_HOME: n.home,
+        PATH: broken
+          ? shimDir + path.delimiter + (process.env['PATH'] ?? '')
+          : process.env['PATH'],
+      },
+      encoding: 'utf8',
+      timeout: 10000,
+    });
+    const out = (res.stdout || '').trim();
+    return out ? parseJson(out) : null;
+  }
+  const statePath = path.join(unit, '.amber', 'active.json');
+  const contractCopy = path.join(unit, 'test-boundary.md');
+  const ordinary = path.join(unit, 'src', 'a.ts');
+  check(
+    'with a working worktree list a broad scope still protects the unit worktree state and contract copy',
+    isDeny(write(unit, statePath, false)) &&
+      isDeny(write(unit, contractCopy, false)) &&
+      write(unit, ordinary, false) === null,
+  );
+  const unmapped = write(unit, statePath, true);
+  check(
+    'without the worktree list a write inside a unit worktree is refused, never mapped from the zone root',
+    isDeny(unmapped) &&
+      /cannot place write target .*worktree list could not be read/.test(
+        reasonOf(unmapped),
+      ) &&
+      isDeny(write(unit, contractCopy, true)) &&
+      isDeny(write(unit, ordinary, true)) &&
+      write(n.z, path.join(n.z, 'src', 'a.ts'), true) === null,
+    JSON.stringify(unmapped),
   );
 }

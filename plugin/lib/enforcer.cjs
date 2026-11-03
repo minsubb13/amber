@@ -215,7 +215,9 @@ function runPhaseGate(input, root) {
     const inside = targets
         .map((target) => path.resolve(input.cwd || root, target))
         .filter((abs) => zone.insideZone(root, abs));
-    for (const { rel } of zone.zoneRelativeAll(root, input.cwd, inside)) {
+    for (const { abs, rel } of zone.zoneRelativeAll(root, input.cwd, inside)) {
+        if (rel === null)
+            return deny(text.unmappableTarget(abs));
         const verdict = phase.verdict(rel);
         if (verdict === 'state') {
             return deny(phase.stateDenyText(current, rel, text.RECORD_CLI));
@@ -298,6 +300,8 @@ function checkTargets(input, contract, cwdRoot, absList, agentId) {
     // another zone maps its own from its root.
     const resolved = zone.zoneRelativeAll(contract.root, contract.root === cwdRoot ? input.cwd : contract.root, absList);
     for (const { abs, rel } of resolved) {
+        if (rel === null)
+            return deny(text.unmappableTarget(abs));
         if (abs === contract.pointerPath ||
             abs === contract.boundaryPath ||
             rel === boundaryRel ||

@@ -265,7 +265,8 @@ function runPhaseGate(input: HookInput, root: string): HookOutput {
   const inside = targets
     .map((target) => path.resolve(input.cwd || root, target))
     .filter((abs) => zone.insideZone(root, abs));
-  for (const { rel } of zone.zoneRelativeAll(root, input.cwd, inside)) {
+  for (const { abs, rel } of zone.zoneRelativeAll(root, input.cwd, inside)) {
+    if (rel === null) return deny(text.unmappableTarget(abs));
     const verdict = phase.verdict(rel);
     if (verdict === 'state') {
       return deny(phase.stateDenyText(current, rel, text.RECORD_CLI));
@@ -368,6 +369,7 @@ function checkTargets(
     absList,
   );
   for (const { abs, rel } of resolved) {
+    if (rel === null) return deny(text.unmappableTarget(abs));
     if (
       abs === contract.pointerPath ||
       abs === contract.boundaryPath ||

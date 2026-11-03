@@ -127,15 +127,25 @@ function worktreeTop(cwd: string | null | undefined): string | null {
  * lands. A toplevel the zone's repository does not list - a nested
  * repository the zone encloses - is part of the zone's tree, so its targets
  * keep their path from the zone root (dist/plugin/x). Without the list (a
- * git failure) no toplevel is taken as a worktree of the zone: the targets
- * keep their zone-root path, which a scope can only refuse more often.
+ * git failure) a target inside a toplevel other than the root cannot be
+ * mapped: whether it is a unit worktree (mapped from its toplevel, so its
+ * .amber/ and contract copy stay protected) or a nested repository (mapped
+ * from the root) is unknown, so the answer is null and E1 refuses the write.
  */
 function relativeTo(
   root: string,
   abs: string,
   top: string | null,
   worktrees: string | null,
-): string {
+): string | null {
+  if (
+    worktrees === null &&
+    top &&
+    path.resolve(top) !== path.resolve(root) &&
+    abs.startsWith(top + path.sep)
+  ) {
+    return null;
+  }
   let base =
     top &&
     top !== root &&
@@ -210,12 +220,12 @@ function worktreeList(root: string): string | null {
   return gitQuery(root, ['worktree', 'list', '--porcelain', '-z']);
 }
 
-/** Zone-relative path of one write target: two git queries. */
+/** Zone-relative path of one write target (null: unmappable): two git queries. */
 function zoneRelative(
   root: string,
   cwd: string | null | undefined,
   abs: string,
-): string {
+): string | null {
   return relativeTo(root, abs, worktreeTop(cwd), worktreeList(root));
 }
 
@@ -223,13 +233,14 @@ function zoneRelative(
  * Zone-relative paths of every write target of one tool call, each paired
  * with its absolute path, from the two git queries made once instead of
  * once per target: a patch touching n files costs two queries, not 2n (one
- * when cwd is the zone root). No target, no query.
+ * when cwd is the zone root). No target, no query. A null rel is a target
+ * relativeTo could not map.
  */
 function zoneRelativeAll(
   root: string,
   cwd: string | null | undefined,
   absList: readonly string[],
-): { abs: string; rel: string }[] {
+): { abs: string; rel: string | null }[] {
   if (absList.length === 0) return [];
   // A cwd at the zone root is its own toplevel: no query.
   const top =

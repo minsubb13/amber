@@ -331,8 +331,21 @@ function completionDirective(contract, target, attempts) {
         '. Review against the current contract, run the done command again, ' +
         'and restate the completion report.');
 }
+/**
+ * Refusal for a write target E1 cannot place in the zone: the zone's worktree
+ * list could not be read, so a target inside another toplevel might be a unit
+ * worktree's protected state or a nested repository's file.
+ */
+function unmappableTarget(abs) {
+    return ('cannot place write target ' +
+        abs +
+        " in the zone: the zone's git worktree list could not be read, so its" +
+        ' scope and state protection cannot be checked. Retry; if git keeps' +
+        ' failing, check the repository.');
+}
 module.exports = {
     RECORD_CLI,
+    unmappableTarget,
     MAX_GATE_ATTEMPTS,
     denyOutput,
     contextOutput,
