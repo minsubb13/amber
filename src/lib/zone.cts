@@ -126,7 +126,9 @@ function worktreeTop(cwd: string | null | undefined): string | null {
  * so contract and unit scopes apply unchanged wherever the write physically
  * lands. A toplevel the zone's repository does not list - a nested
  * repository the zone encloses - is part of the zone's tree, so its targets
- * keep their path from the zone root (dist/plugin/x).
+ * keep their path from the zone root (dist/plugin/x). Without the list (a
+ * git failure) no toplevel is taken as a worktree of the zone: the targets
+ * keep their zone-root path, which a scope can only refuse more often.
  */
 function relativeTo(
   root: string,
@@ -138,7 +140,8 @@ function relativeTo(
     top &&
     top !== root &&
     abs.startsWith(top + path.sep) &&
-    (worktrees === null || listsWorktree(worktrees, top))
+    worktrees !== null &&
+    listsWorktree(worktrees, top)
       ? top
       : root;
   // Codex children inherit the session cwd. A shell tool can override its
@@ -174,9 +177,9 @@ function listsWorktree(worktrees: string, dir: string): boolean {
  * When cwd lies in a tree that zoneRoot binds to the enclosing zone root -
  * a nested repository or a linked worktree of one, with no pointer of its
  * own - that tree's toplevel; otherwise null (the zone root itself, a
- * subdirectory of it, a unit worktree the zone's repository lists, or a git
- * failure). The recorder refuses there: the scope check measures the zone
- * repository's tree, not the nested one.
+ * subdirectory of it, or a unit worktree the zone's repository lists). The
+ * recorder refuses there: the scope check measures the zone repository's
+ * tree, not the nested one.
  */
 function nestedTree(
   cwd: string | null | undefined,
@@ -184,8 +187,22 @@ function nestedTree(
 ): string | null {
   const top = worktreeTop(cwd);
   if (!top || path.resolve(top) === path.resolve(root)) return null;
-  const worktrees = worktreeList(root);
-  if (worktrees === null || listsWorktree(worktrees, top)) return null;
+  return nestedTreeOf(top, root, worktreeList(root));
+}
+
+/**
+ * nestedTree from its two git answers. A toplevel other than the root counts
+ * as nested unless the zone's worktree list names it; without the list (a
+ * git failure) it cannot be confirmed as the zone's own worktree, so it
+ * counts as nested and the recorder refuses rather than guess.
+ */
+function nestedTreeOf(
+  top: string | null,
+  root: string,
+  worktrees: string | null,
+): string | null {
+  if (!top || path.resolve(top) === path.resolve(root)) return null;
+  if (worktrees !== null && listsWorktree(worktrees, top)) return null;
   return top;
 }
 
@@ -269,6 +286,8 @@ export = {
   zoneRoot,
   gitZoneRoot,
   nestedTree,
+  nestedTreeOf,
+  relativeTo,
   worktreeTop,
   zoneRelative,
   zoneRelativeAll,

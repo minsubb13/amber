@@ -68,9 +68,10 @@ function registerDriver(sessionId, info) {
 /** Whether `file` names a regular file (a symbolic link to one included). */
 /**
  * Refuses a run command from inside a nested repository the zone encloses
- * (its dist/, or a linked worktree of it): the scope check would measure that
- * repository instead of the zone's, so the command names the zone root to run
- * it from and writes nothing.
+ * (its dist/, or a linked worktree of it), or from a tree the zone's worktree
+ * list could not confirm: the scope check would measure that repository
+ * instead of the zone's, so the command names the zone root to run it from
+ * and writes nothing.
  */
 function refuseNestedCwd(command, cwd) {
     const root = zone.zoneRoot(cwd);
@@ -80,9 +81,11 @@ function refuseNestedCwd(command, cwd) {
     throw new Error(command +
         ' refused: ' +
         cwd +
-        ' lies in the nested repository ' +
+        ' lies in ' +
         nested +
-        ', which follows the zone ' +
+        ', which the zone repository does not list as one of its worktrees' +
+        ' (a nested repository, or the list could not be read) and which' +
+        ' follows the zone ' +
         root +
         '; run it from the zone root (cd ' +
         JSON.stringify(root) +

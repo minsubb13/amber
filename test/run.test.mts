@@ -6532,7 +6532,13 @@ const reasonOf = (out: unknown): string =>
 {
   const zoneLib = loadModule<typeof import('../src/lib/zone.cjs')>(
     'lib/zone.cjs',
-    ['zoneRoot', 'nestedTree', 'linkedWorktreeMain'],
+    [
+      'zoneRoot',
+      'nestedTree',
+      'nestedTreeOf',
+      'relativeTo',
+      'linkedWorktreeMain',
+    ],
   );
   const n = nestedSet('nest');
   fs.mkdirSync(path.join(n.zDist, 'sub'));
@@ -6640,7 +6646,63 @@ const reasonOf = (out: unknown): string =>
     ) === null && e1(n.fDist, 'Bash', { command: 'git push' }, n.home) === null,
   );
 
-  const before = amberFiles(n.z);
+  // Without the worktree list (a git failure) nothing is taken as a worktree
+  // of the zone: targets keep their zone-root path and the recorder refuses.
+  const unitTop = path.join(n.z, '.claude', 'worktrees', 'u0');
+  const listing = ['worktree ' + n.z, 'worktree ' + unitTop, ''].join('\0');
+  check(
+    'without the worktree list a nested target keeps its zone-root path',
+    zoneLib.relativeTo(
+      n.z,
+      path.join(n.zDist, 'src', 'a.ts'),
+      n.zDist,
+      null,
+    ) === 'dist/src/a.ts' &&
+      zoneLib.relativeTo(
+        n.z,
+        path.join(n.zDist, 'src', 'a.ts'),
+        n.zDist,
+        listing,
+      ) === 'dist/src/a.ts' &&
+      zoneLib.relativeTo(n.z, path.join(unitTop, 'x.md'), unitTop, listing) ===
+        'x.md' &&
+      zoneLib.relativeTo(n.z, path.join(unitTop, 'x.md'), unitTop, null) ===
+        '.claude/worktrees/u0/x.md',
+  );
+  check(
+    'without the worktree list the recorder cannot confirm a tree and counts it nested',
+    zoneLib.nestedTreeOf(n.zDist, n.z, null) === n.zDist &&
+      zoneLib.nestedTreeOf(unitTop, n.z, null) === unitTop &&
+      zoneLib.nestedTreeOf(unitTop, n.z, listing) === null &&
+      zoneLib.nestedTreeOf(n.z, n.z, null) === null &&
+      zoneLib.nestedTreeOf(null, n.z, null) === null,
+  );
+
+  // Everything the refused commands could have written: both zones' .amber/,
+  // the nested trees, and the whole AMBER_HOME (ledger and session state).
+  const snapshot = (): string => {
+    const files: string[] = [];
+    const walk = (dir: string): void => {
+      if (!fs.existsSync(dir)) return;
+      for (const name of fs.readdirSync(dir).sort()) {
+        const p = path.join(dir, name);
+        if (fs.statSync(p).isDirectory()) walk(p);
+        else files.push(p + '=' + fs.readFileSync(p, 'utf8'));
+      }
+    };
+    for (const dir of [
+      path.join(n.z, '.amber'),
+      path.join(n.w, '.amber'),
+      path.join(n.zDist, '.amber'),
+      path.join(n.zDistWt, '.amber'),
+      path.join(n.wDist, '.amber'),
+      n.home,
+    ]) {
+      walk(dir);
+    }
+    return files.join('\n');
+  };
+  const before = snapshot();
   const initNested = n.rec(n.zDist, ['unit', 'init', 'docs/plan.md']);
   const doneNested = n.rec(n.zDistWt, [
     'done',
@@ -6651,48 +6713,73 @@ const reasonOf = (out: unknown): string =>
     '--summary',
     's',
   ]);
+  const startNested = n.rec(n.wDist, ['unit', 'start', 'U1']);
   const activateNested = n.rec(n.wDist, [
     'activate',
     'test-boundary.md',
     '--by',
     'operator',
   ]);
+  const refusedFor = (
+    run: SpawnSyncReturns<string>,
+    command: string,
+    root: string,
+  ): boolean =>
+    run.status === 1 &&
+    run.stderr.includes(command + ' refused') &&
+    run.stderr.includes(JSON.stringify(root));
   check(
-    'the recorder refuses unit, done and activate from inside a nested repository and names the zone root',
-    initNested.status === 1 &&
-      doneNested.status === 1 &&
-      activateNested.status === 1 &&
-      initNested.stderr.includes('refused') &&
-      initNested.stderr.includes(JSON.stringify(n.z)) &&
-      activateNested.stderr.includes(JSON.stringify(n.w)) &&
-      amberFiles(n.z) === before &&
-      !signalExists(n.z),
-    [initNested.stderr, doneNested.stderr, activateNested.stderr],
+    'the recorder refuses unit, done and activate from inside a nested repository, names the zone root and writes nothing',
+    refusedFor(initNested, 'unit init', n.z) &&
+      refusedFor(doneNested, 'done', n.z) &&
+      refusedFor(startNested, 'unit start', n.w) &&
+      refusedFor(activateNested, 'activate', n.w) &&
+      snapshot() === before,
+    [
+      initNested.stderr,
+      doneNested.stderr,
+      startNested.stderr,
+      activateNested.stderr,
+    ],
   );
   check(
     'the same unit command from the zone root still runs',
     n.rec(n.z, ['unit', 'init', 'docs/plan.md']).status === 0,
   );
 }
-{
-  const n = nestedSet('nest-stop');
-  const signal = done(n.z, n.home, [
-    '--review',
-    'r',
-    '--goal',
-    'g',
-    '--summary',
-    's',
-  ]);
-  const stop = runHook('S2', stopEvent(n.zDist, 'Done: nested stop.'), n.home);
+// The signal is written by the real command from the zone root under one
+// AMBER_HOME, and the stop runs under another: no registration can lead the
+// Stop hook to the zone, only the cwd it resolves from inside the nested tree.
+for (const [tag, pick] of [
+  [
+    'nest-stop-dist',
+    (s: NestedSet): [string, string, string] => [s.zDist, s.z, s.w],
+  ],
+  [
+    'nest-stop-dwt',
+    (s: NestedSet): [string, string, string] => [s.zDistWt, s.z, s.w],
+  ],
+  [
+    'nest-stop-wdist',
+    (s: NestedSet): [string, string, string] => [s.wDist, s.w, s.z],
+  ],
+] as const) {
+  const n = nestedSet(tag);
+  const [cwd, zone, other] = pick(n);
+  const signal = done(zone, n.home, OK_DONE);
+  const stopHome = freshHome(tag + '-stophome');
+  const stop = runHook('S2', stopEvent(cwd, 'Done: nested stop.'), stopHome);
   check(
-    'a stop from inside dist/ consumes the enclosing zone signal and releases its contract',
+    'a stop from inside ' +
+      path.relative(BASE, cwd) +
+      ' consumes the enclosing zone signal and releases only that contract',
     signal.status === 0 &&
       stop.exit === 0 &&
-      !signalExists(n.z) &&
-      !fs.existsSync(path.join(n.z, '.amber', 'active.json')) &&
-      fs.existsSync(path.join(n.w, '.amber', 'active.json')),
-    [signal.stderr, JSON.stringify(stop.out)],
+      !signalExists(zone) &&
+      !fs.existsSync(path.join(zone, '.amber', 'active.json')) &&
+      fs.existsSync(path.join(other, '.amber', 'active.json')) &&
+      ledger(stopHome).some((row) => at(row, 'gate') === 'passed'),
+    [signal.stderr, JSON.stringify(stop.out), JSON.stringify(ledger(stopHome))],
   );
 }
 {
