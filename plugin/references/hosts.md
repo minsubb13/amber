@@ -115,6 +115,19 @@ while the Codex and pi `record.cjs mark hold` follows its working directory.
 File-tool writes in that worktree are checked against its contract, and shell
 commands meet the `bash-deny` rows of every run the session drives.
 
+The one-line form is needed only when the worktree is not one of the session's
+working directories. Claude Code keeps a standalone `cd` only inside them and
+resets one that leaves them at the next call. When the worktree is a working
+directory from the session's start (`claude --add-dir <worktree>`, or
+`permissions.additionalDirectories` in settings), `cd <worktree>` persists and
+the hooks receive it as their `cwd`: the worktree is then the session's zone
+for every tool call until the session changes directory again, as if the
+session had started there. A directory added mid-session with `/add-dir`, or
+created after the session started, does not keep a `cd` (measured on Claude
+Code 2.1.317); reopen the session with `claude --continue --add-dir <worktree>`.
+A reopened session starts in its launch directory again, so it changes
+directory before its first command there.
+
 **Post-hoc scope check (both hosts):** `unit verified` and `done` compare the
 files changed since the run began against the contract's `write-scope` rows.
 The run's baseline is the one `record.cjs activate` records in
