@@ -6884,3 +6884,126 @@ for (const [tag, pick] of [
     JSON.stringify(unmapped),
   );
 }
+
+// ---- agent workspaces: the session scratchpad and memory folders pass ----
+// A contract governs the zone's files, not the agent's own workspaces
+// outside it; every other target outside the zone stays refused.
+{
+  const home = freshHome('agent-workspace');
+  const fakeHome = path.join(BASE, 'ws-home');
+  const tmp = path.join(BASE, 'ws-tmp');
+  const scratch = (sessionId: string): string =>
+    path.join(tmp, 'claude-1000', '-home-u-proj', sessionId, 'scratchpad');
+  fs.mkdirSync(scratch('ws-1'), { recursive: true });
+  const write = (target: string, agentId?: string): HookRun => {
+    const res = spawnSync('node', [HOOK, 'E1'], {
+      input: JSON.stringify({
+        session_id: 'ws-1',
+        cwd: zoneContract,
+        hook_event_name: 'PreToolUse',
+        tool_name: 'Write',
+        tool_input: { file_path: target },
+        ...(agentId ? { agent_id: agentId, agent_type: 'default' } : {}),
+      }),
+      env: { ...process.env, AMBER_HOME: home, HOME: fakeHome },
+      encoding: 'utf8',
+      timeout: 10000,
+    });
+    if (res.status !== 0) return { exit: res.status, out: null };
+    const trimmed = (res.stdout || '').trim();
+    return { exit: 0, out: trimmed ? parseJson(trimmed) : null };
+  };
+  const passes = (run: HookRun): boolean => run.exit === 0 && run.out === null;
+  const refused = (run: HookRun): boolean => run.exit === 0 && isDeny(run.out);
+  check(
+    "a write into the session's scratchpad passes under a contract",
+    passes(write(path.join(scratch('ws-1'), 'notes.md'))) &&
+      passes(write(path.join(scratch('ws-1'), 'new', 'dir', 'x.py'))),
+  );
+  check(
+    "a write into another session's scratchpad is judged by the contract",
+    refused(write(path.join(scratch('ws-2'), 'notes.md'))),
+  );
+  check(
+    'a write into a memory folder of any project passes under a contract',
+    passes(
+      write(
+        path.join(
+          fakeHome,
+          '.claude',
+          'projects',
+          '-home-u-proj',
+          'memory',
+          'a.md',
+        ),
+      ),
+    ) &&
+      passes(
+        write(
+          path.join(
+            fakeHome,
+            '.claude',
+            'projects',
+            '-home-u-other',
+            'memory',
+            'MEMORY.md',
+          ),
+        ),
+      ),
+  );
+  check(
+    'other paths under ~/.claude stay judged by the contract',
+    refused(write(path.join(fakeHome, '.claude', 'settings.json'))) &&
+      refused(
+        write(
+          path.join(fakeHome, '.claude', 'projects', '-home-u-proj', 'x.jsonl'),
+        ),
+      ),
+  );
+  check(
+    'a subagent writes its session scratchpad without claiming a unit',
+    passes(write(path.join(scratch('ws-1'), 'sub.md'), 'agent-ws')),
+  );
+  // A symbolic link inside the scratchpad, or the scratchpad itself, that
+  // leads into the zone does not carry a write past the contract.
+  fs.symlinkSync(zoneContract, path.join(scratch('ws-1'), 'zone-link'));
+  const linkedSession = path.join(tmp, 'claude-1000', '-home-u-proj', 'ws-3');
+  fs.mkdirSync(linkedSession, { recursive: true });
+  fs.symlinkSync(zoneContract, path.join(linkedSession, 'scratchpad'));
+  check(
+    'a symbolic link from the scratchpad into the zone is judged by the contract',
+    refused(write(path.join(scratch('ws-1'), 'zone-link', 'secrets.txt'))),
+  );
+  const res = spawnSync('node', [HOOK, 'E1'], {
+    input: JSON.stringify({
+      session_id: 'ws-3',
+      cwd: zoneContract,
+      hook_event_name: 'PreToolUse',
+      tool_name: 'Write',
+      tool_input: { file_path: path.join(scratch('ws-3'), 'secrets.txt') },
+    }),
+    env: { ...process.env, AMBER_HOME: home, HOME: fakeHome },
+    encoding: 'utf8',
+    timeout: 10000,
+  });
+  check(
+    'a scratchpad that is itself a link into the zone is judged by the contract',
+    res.status === 0 && isDeny(parseJson((res.stdout || '').trim() || 'null')),
+    res.stdout,
+  );
+  check(
+    'a path inside the zone that only looks like a scratchpad is judged by the contract',
+    refused(
+      write(
+        path.join(
+          zoneContract,
+          'claude-1000',
+          'p',
+          'ws-1',
+          'scratchpad',
+          'x.md',
+        ),
+      ),
+    ),
+  );
+}

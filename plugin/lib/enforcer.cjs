@@ -16,6 +16,7 @@
 // approved contract) writes only planning artifacts with file tools (lib/phase);
 // the first tool call that finds the pointer closes the phase as an approval.
 const fs = require("node:fs");
+const os = require("node:os");
 const path = require("node:path");
 // The apply_patch parser keeps its stage 2 module at hooks/patch-paths.
 const patchPathsModule = require("../hooks/patch-paths.cjs");
@@ -229,17 +230,79 @@ function runPhaseGate(input, root) {
     return null;
 }
 /**
+ * The agent workspace an absolute path names, or null: the session's Claude
+ * Code scratchpad (<tmp>/claude-<uid>/<slug>/<session_id>/scratchpad) or a
+ * project's memory folder (<home>/.claude/projects/<slug>/memory). The
+ * slug is not checked: a session that moved to a sibling worktree keeps its
+ * scratchpad and writes its main project's memory.
+ */
+function workspaceOf(abs, sessionId) {
+    const parts = abs.split(path.sep);
+    if (sessionId) {
+        for (let i = 3; i < parts.length - 1; i++) {
+            if (parts[i] === 'scratchpad' &&
+                parts[i - 1] === sessionId &&
+                parts[i - 2] !== '' &&
+                /^claude-\d+$/.test(parts[i - 3] ?? '')) {
+                return parts.slice(0, i + 1).join(path.sep);
+            }
+        }
+    }
+    const projects = path.join(os.homedir(), '.claude', 'projects');
+    if (abs.startsWith(projects + path.sep)) {
+        const rest = abs.slice(projects.length + 1).split(path.sep);
+        if (rest.length >= 3 && rest[0] !== '' && rest[1] === 'memory') {
+            return path.join(projects, rest[0] ?? '', 'memory');
+        }
+    }
+    return null;
+}
+/**
+ * A path with its nearest existing ancestor (the path itself when it exists)
+ * replaced by that ancestor's realpath, so a symbolic link on the way shows
+ * where a write would really land.
+ */
+function realOf(abs) {
+    let dir = abs;
+    while (!fs.existsSync(dir) && path.dirname(dir) !== dir) {
+        dir = path.dirname(dir);
+    }
+    try {
+        return path.join(fs.realpathSync(dir), path.relative(dir, abs));
+    }
+    catch {
+        return abs;
+    }
+}
+/**
+ * Whether a write target outside the zone directory lies in one of the
+ * agent's own workspaces, which no contract governs. The real path must stay
+ * in the same workspace and outside the zone directory, so a symbolic link
+ * inside the workspace, or the workspace itself, cannot carry the write out.
+ */
+function inAgentWorkspace(abs, sessionId, cwdRoot) {
+    const workspace = workspaceOf(abs, sessionId);
+    if (workspace === null)
+        return false;
+    const real = realOf(abs);
+    const realRoot = realOf(cwdRoot);
+    return (zone.insideZone(realOf(workspace), real) &&
+        real !== realRoot &&
+        !zone.insideZone(realRoot, real));
+}
+/**
  * Which zone's contract judges each write target, for one hook call. A
  * target belongs to the zone of its nearest existing directory, found by git
  * once per directory. A zone with a contract of its own judges its targets
  * by that contract, wherever it lies. Otherwise the hook cwd's zone judges a
  * target inside its directory (a nested repository there is part of it) or
  * outside any repository, as before; a target in another repository's zone
- * without a contract passes (null). Inside the cwd zone's directory, git is
- * asked only when an ancestor of the target below the zone root holds a
- * pointer.
+ * without a contract, or in the agent's own workspace outside the zone
+ * directory (its session scratchpad or a memory folder), passes (null).
+ * Inside the cwd zone's directory, git is asked only when an ancestor of the
+ * target below the zone root holds a pointer.
  */
-function targetJudge(cwdRoot, loadAt) {
+function targetJudge(cwdRoot, loadAt, sessionId) {
     const zones = new Map();
     const gitZone = (dir) => {
         if (!zones.has(dir)) {
@@ -260,6 +323,8 @@ function targetJudge(cwdRoot, loadAt) {
             }
         }
         else {
+            if (inAgentWorkspace(abs, sessionId, cwdRoot))
+                return null;
             let dir = path.dirname(abs);
             while (!fs.existsSync(dir) && path.dirname(dir) !== dir) {
                 dir = path.dirname(dir);
@@ -395,7 +460,7 @@ function runE1(input) {
             loaded.set(root, contracts.loadContractAt(root));
         return loaded.get(root) ?? null;
     };
-    const judge = targetJudge(cwdRoot, loadAt);
+    const judge = targetJudge(cwdRoot, loadAt, input.session_id);
     const groups = new Map();
     for (const target of targets) {
         const abs = path.resolve(input.cwd || cwdRoot, target);
